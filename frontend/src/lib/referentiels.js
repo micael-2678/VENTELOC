@@ -333,3 +333,176 @@ export const parseSearchQuery = (q) => {
   }
   return { rgeTypes, region, trades, department };
 };
+
+// ================================================================================================
+// VENTELOC — référentiels des biens loués (docs/venteloc/SPEC.md §2), identiques à backend/taxonomy.py
+// (même ordre, mêmes libellés ; tests/test_taxonomy.py les compare). Les tables « bâtiment » ci-dessus
+// (TRADES, RGE, recherche libre) sont héritées de CessionRGE et seront supprimées.
+// ------------------------------------------------------------------------------------------------
+// Types de biens. `category` : habitation | professionnel | annexe.
+export const PROPERTY_TYPES = [
+  { id: 'appartement', label: 'Appartement', short: 'Appartement', category: 'habitation' },
+  { id: 'maison', label: 'Maison', short: 'Maison', category: 'habitation' },
+  { id: 'immeuble', label: 'Immeuble de rapport', short: 'Immeuble', category: 'habitation' },
+  { id: 'residence-geree', label: 'Lot en résidence gérée (étudiants, seniors, tourisme, EHPAD)', short: 'Résidence gérée', category: 'professionnel' },
+  { id: 'local-commercial', label: 'Local commercial', short: 'Local commercial', category: 'professionnel' },
+  { id: 'bureaux', label: 'Bureaux', short: 'Bureaux', category: 'professionnel' },
+  { id: 'parking', label: 'Parking, box, garage', short: 'Parking', category: 'annexe' },
+  { id: 'autre', label: 'Autre bien loué', short: 'Bien', category: 'annexe' },
+];
+
+// Types de baux. `regime` : habitation (loi du 6 juillet 1989, calendrier DPE) | commercial | professionnel | autre.
+export const LEASE_TYPES = [
+  { id: 'habitation-vide', label: 'Bail d\'habitation vide (loi du 6 juillet 1989)', short: 'Location vide', regime: 'habitation' },
+  { id: 'habitation-meublee', label: 'Bail d\'habitation meublé (résidence principale)', short: 'Location meublée', regime: 'habitation' },
+  { id: 'colocation', label: 'Colocation (bail unique ou baux individuels)', short: 'Colocation', regime: 'habitation' },
+  { id: 'bail-mobilite', label: 'Bail mobilité (1 à 10 mois)', short: 'Bail mobilité', regime: 'habitation' },
+  { id: 'mixte', label: 'Bail mixte (habitation et professionnel)', short: 'Bail mixte', regime: 'habitation' },
+  { id: 'commercial', label: 'Bail commercial (3-6-9)', short: 'Bail commercial', regime: 'commercial' },
+  { id: 'residence-geree', label: 'Bail commercial avec un exploitant de résidence', short: 'Bail exploitant', regime: 'commercial' },
+  { id: 'professionnel', label: 'Bail professionnel', short: 'Bail professionnel', regime: 'professionnel' },
+  { id: 'parking', label: 'Location de parking ou de box', short: 'Location parking', regime: 'autre' },
+  { id: 'plusieurs-baux', label: 'Plusieurs baux (immeuble ou plusieurs lots)', short: 'Plusieurs baux', regime: 'habitation' },
+];
+
+// DPE : classes A à G, plus « DPE vierge » et « non soumis »
+export const DPE_CLASSES = [
+  { id: 'A', label: 'A' },
+  { id: 'B', label: 'B' },
+  { id: 'C', label: 'C' },
+  { id: 'D', label: 'D' },
+  { id: 'E', label: 'E' },
+  { id: 'F', label: 'F' },
+  { id: 'G', label: 'G' },
+  { id: 'vierge', label: 'DPE vierge' },
+  { id: 'non-soumis', label: 'Non soumis au DPE' },
+];
+// Interdiction de louer un logement (nouveau bail, renouvellement, reconduction) : loi Climat et résilience, art. 160
+export const DPE_RENTAL_BAN = {
+  G: '2025-01-01',
+  F: '2028-01-01',
+  E: '2034-01-01',
+};
+
+export const TENANT_PAYMENT_STATUSES = [
+  { id: 'a-jour', label: 'Loyers payés à l\'échéance' },
+  { id: 'retards', label: 'Retards ponctuels, régularisés' },
+  { id: 'impayes', label: 'Impayés en cours' },
+];
+
+export const OWNER_TYPES = [
+  { id: 'personne-physique', label: 'Propriétaire en nom propre' },
+  { id: 'indivision', label: 'Indivision (plusieurs propriétaires)' },
+  { id: 'sci', label: 'Société civile immobilière (SCI)' },
+  { id: 'societe', label: 'Autre société (SARL, SAS…)' },
+];
+
+export const SALE_OBJECTS = [
+  { id: 'bien', label: 'Vente du bien (immeuble ou lot de copropriété)' },
+  { id: 'parts', label: 'Cession des parts de la société propriétaire' },
+  { id: 'indifferent', label: 'Bien ou parts, à décider avec l\'acquéreur' },
+];
+
+export const SALE_REASONS = [
+  { id: 'arbitrage', label: 'Arbitrage de patrimoine' },
+  { id: 'succession', label: 'Succession, donation, partage' },
+  { id: 'liquidites', label: 'Besoin de liquidités' },
+  { id: 'fiscalite', label: 'Fiscalité' },
+  { id: 'gestion', label: 'Ne plus gérer de location' },
+  { id: 'autre', label: 'Autre raison' },
+];
+
+export const BUYER_PROJECT_TYPES = [
+  { id: 'particulier', label: 'Investisseur particulier (en nom propre)' },
+  { id: 'sci', label: 'Achat via une SCI' },
+  { id: 'societe', label: 'Société (IS, holding)' },
+  { id: 'professionnel', label: 'Investisseur professionnel, marchand de biens' },
+];
+
+export const FINANCING_TYPES = [
+  { id: 'comptant', label: 'Comptant' },
+  { id: 'emprunt', label: 'Emprunt bancaire' },
+  { id: 'mixte', label: 'Apport et emprunt' },
+  { id: 'a-definir', label: 'À définir' },
+];
+
+export const propertyTypeById = (id) => PROPERTY_TYPES.find((t) => t.id === String(id || '').trim()) || null;
+export const propertyTypeLabel = (id, short = false) => {
+  const t = propertyTypeById(id);
+  return t ? (short ? t.short : t.label) : '';
+};
+export const leaseTypeById = (id) => LEASE_TYPES.find((t) => t.id === String(id || '').trim()) || null;
+export const leaseTypeLabel = (id, short = false) => {
+  const t = leaseTypeById(id);
+  return t ? (short ? t.short : t.label) : '';
+};
+export const isHousingLease = (id) => leaseTypeById(id)?.regime === 'habitation';
+const labelIn = (table) => (id) => (table.find((x) => x.id === id) || {}).label || '';
+export const dpeLabel = labelIn(DPE_CLASSES);
+export const tenantPaymentLabel = labelIn(TENANT_PAYMENT_STATUSES);
+export const ownerTypeLabel = labelIn(OWNER_TYPES);
+export const saleObjectLabel = labelIn(SALE_OBJECTS);
+export const saleReasonLabel = labelIn(SALE_REASONS);
+export const buyerProjectTypeLabel = labelIn(BUYER_PROJECT_TYPES);
+export const financingTypeLabel = labelIn(FINANCING_TYPES);
+
+// Décence énergétique : { status: 'interdit' | 'echeance' | 'ok' | 'non-applicable', date } (même règle que taxonomy.dpe_rental_status)
+export const dpeRentalStatus = (dpeClass, leaseId, today = new Date().toISOString().slice(0, 10)) => {
+  if (!isHousingLease(leaseId)) return { status: 'non-applicable', date: null };
+  const ban = DPE_RENTAL_BAN[String(dpeClass || '').trim().toUpperCase()];
+  if (!ban) return { status: 'ok', date: null };
+  return { status: today >= ban ? 'interdit' : 'echeance', date: ban };
+};
+
+const num = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+const round2 = (x) => Math.round(x * 100) / 100;
+// Rendement brut en % (loyer hors charges × 12 / prix) ; null si incalculable
+export const grossYield = (rentMonthly, price) => {
+  const rent = num(rentMonthly);
+  const p = num(price);
+  return rent > 0 && p > 0 ? round2((rent * 12) / p * 100) : null;
+};
+// Rendement net de charges en % : (loyers annuels − taxe foncière − charges non récupérables − autres frais) / prix
+export const netYield = (rentMonthly, price, propertyTax = 0, nonRecoverable = 0, otherCosts = 0) => {
+  const rent = num(rentMonthly);
+  const p = num(price);
+  if (rent <= 0 || p <= 0) return null;
+  return round2((rent * 12 - num(propertyTax) - num(nonRecoverable) - num(otherCosts)) / p * 100);
+};
+
+// Titre généré (même règle que taxonomy.property_title) : « Appartement T2 loué · 42 m² · Lyon (69) »
+const PROPERTY_TITLE_HEADS = {
+  appartement: ['Appartement', 'loué'],
+  maison: ['Maison', 'louée'],
+  immeuble: ['Immeuble de rapport', 'loué'],
+  'residence-geree': ['Lot en résidence gérée', 'loué'],
+  'local-commercial': ['Local commercial', 'loué'],
+  bureaux: ['Bureaux', 'loués'],
+  parking: ['Parking', 'loué'],
+  autre: ['Bien', 'loué'],
+};
+const fmtSurface = (surface) => {
+  const s = num(surface);
+  if (s <= 0) return '';
+  return `${Number.isInteger(s) ? String(s) : s.toFixed(1).replace('.', ',')} m²`;
+};
+export const propertyTitle = ({ propertyType, city, department, surface, rooms, unitsCount } = {}) => {
+  const t = propertyTypeById(propertyType);
+  let [head, rented] = PROPERTY_TITLE_HEADS[t ? t.id : 'autre'];
+  const nRooms = parseInt(rooms, 10);
+  if (t && ['appartement', 'maison'].includes(t.id) && nRooms > 0) head = `${head} T${nRooms}`;
+  const parts = [`${head} ${rented}`];
+  const nUnits = parseInt(unitsCount, 10);
+  if (t && t.id === 'immeuble' && nUnits > 0) parts.push(`${nUnits} lot${nUnits > 1 ? 's' : ''}`);
+  const surf = fmtSurface(surface);
+  if (surf && !(t && t.id === 'parking')) parts.push(surf);
+  const dep = normalizeDepartement(department);
+  const place = String(city || '').trim();
+  if (place && dep) parts.push(`${place} (${dep})`);
+  else if (place) parts.push(place);
+  else if (dep) parts.push(departementLabel(dep));
+  return parts.join(' · ');
+};

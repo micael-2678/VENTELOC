@@ -492,3 +492,216 @@ def listing_title(trades, region=None, staff_count=None) -> str:
     if n is not None and n >= 0:
         parts.append(f"{n} salarié{'s' if n > 1 else ''}")
     return " · ".join(parts)
+
+
+# ==============================================================================================
+# VENTELOC — référentiels des biens loués (docs/venteloc/SPEC.md §2). Identiques à
+# frontend/src/lib/referentiels.js (même ordre, mêmes libellés). Les tables « bâtiment » ci-dessus
+# (TRADES, RGE, NAF) sont héritées de CessionRGE et seront supprimées.
+# ----------------------------------------------------------------------------------------------
+# Types de biens. `category` : habitation | professionnel | annexe.
+PROPERTY_TYPES: List[Dict[str, str]] = [
+    {"id": "appartement", "label": "Appartement", "short": "Appartement", "category": "habitation"},
+    {"id": "maison", "label": "Maison", "short": "Maison", "category": "habitation"},
+    {"id": "immeuble", "label": "Immeuble de rapport", "short": "Immeuble", "category": "habitation"},
+    {"id": "residence-geree", "label": "Lot en résidence gérée (étudiants, seniors, tourisme, EHPAD)", "short": "Résidence gérée", "category": "professionnel"},
+    {"id": "local-commercial", "label": "Local commercial", "short": "Local commercial", "category": "professionnel"},
+    {"id": "bureaux", "label": "Bureaux", "short": "Bureaux", "category": "professionnel"},
+    {"id": "parking", "label": "Parking, box, garage", "short": "Parking", "category": "annexe"},
+    {"id": "autre", "label": "Autre bien loué", "short": "Bien", "category": "annexe"},
+]
+PROPERTY_TYPE_IDS: List[str] = [t["id"] for t in PROPERTY_TYPES]
+PROPERTY_TYPES_BY_ID: Dict[str, Dict[str, str]] = {t["id"]: t for t in PROPERTY_TYPES}
+
+# Types de baux. `regime` : habitation (loi du 6 juillet 1989, calendrier DPE applicable) | commercial | professionnel | autre.
+LEASE_TYPES: List[Dict[str, str]] = [
+    {"id": "habitation-vide", "label": "Bail d'habitation vide (loi du 6 juillet 1989)", "short": "Location vide", "regime": "habitation"},
+    {"id": "habitation-meublee", "label": "Bail d'habitation meublé (résidence principale)", "short": "Location meublée", "regime": "habitation"},
+    {"id": "colocation", "label": "Colocation (bail unique ou baux individuels)", "short": "Colocation", "regime": "habitation"},
+    {"id": "bail-mobilite", "label": "Bail mobilité (1 à 10 mois)", "short": "Bail mobilité", "regime": "habitation"},
+    {"id": "mixte", "label": "Bail mixte (habitation et professionnel)", "short": "Bail mixte", "regime": "habitation"},
+    {"id": "commercial", "label": "Bail commercial (3-6-9)", "short": "Bail commercial", "regime": "commercial"},
+    {"id": "residence-geree", "label": "Bail commercial avec un exploitant de résidence", "short": "Bail exploitant", "regime": "commercial"},
+    {"id": "professionnel", "label": "Bail professionnel", "short": "Bail professionnel", "regime": "professionnel"},
+    {"id": "parking", "label": "Location de parking ou de box", "short": "Location parking", "regime": "autre"},
+    {"id": "plusieurs-baux", "label": "Plusieurs baux (immeuble ou plusieurs lots)", "short": "Plusieurs baux", "regime": "habitation"},
+]
+LEASE_TYPE_IDS: List[str] = [t["id"] for t in LEASE_TYPES]
+LEASE_TYPES_BY_ID: Dict[str, Dict[str, str]] = {t["id"]: t for t in LEASE_TYPES}
+
+# Diagnostic de performance énergétique : classes de A à G, plus « non soumis » et « DPE vierge ».
+DPE_CLASSES: List[Dict[str, str]] = [
+    {"id": "A", "label": "A"}, {"id": "B", "label": "B"}, {"id": "C", "label": "C"}, {"id": "D", "label": "D"},
+    {"id": "E", "label": "E"}, {"id": "F", "label": "F"}, {"id": "G", "label": "G"},
+    {"id": "vierge", "label": "DPE vierge"}, {"id": "non-soumis", "label": "Non soumis au DPE"},
+]
+DPE_CLASS_IDS: List[str] = [c["id"] for c in DPE_CLASSES]
+# Interdiction de louer un logement (nouveau bail, renouvellement, reconduction tacite) selon la classe DPE :
+# loi Climat et résilience du 22 août 2021, art. 160 (décence énergétique). Dates d'effet en France métropolitaine.
+DPE_RENTAL_BAN: Dict[str, str] = {"G": "2025-01-01", "F": "2028-01-01", "E": "2034-01-01"}
+
+# Situation locative déclarée par le vendeur (12 derniers mois)
+TENANT_PAYMENT_STATUSES: List[Dict[str, str]] = [
+    {"id": "a-jour", "label": "Loyers payés à l'échéance"},
+    {"id": "retards", "label": "Retards ponctuels, régularisés"},
+    {"id": "impayes", "label": "Impayés en cours"},
+]
+TENANT_PAYMENT_STATUS_IDS: List[str] = [s["id"] for s in TENANT_PAYMENT_STATUSES]
+
+# Qui est propriétaire, et à quel titre le mandant signe
+OWNER_TYPES: List[Dict[str, str]] = [
+    {"id": "personne-physique", "label": "Propriétaire en nom propre"},
+    {"id": "indivision", "label": "Indivision (plusieurs propriétaires)"},
+    {"id": "sci", "label": "Société civile immobilière (SCI)"},
+    {"id": "societe", "label": "Autre société (SARL, SAS…)"},
+]
+OWNER_TYPE_IDS: List[str] = [o["id"] for o in OWNER_TYPES]
+
+# Objet de la vente
+SALE_OBJECTS: List[Dict[str, str]] = [
+    {"id": "bien", "label": "Vente du bien (immeuble ou lot de copropriété)"},
+    {"id": "parts", "label": "Cession des parts de la société propriétaire"},
+    {"id": "indifferent", "label": "Bien ou parts, à décider avec l'acquéreur"},
+]
+SALE_OBJECT_IDS: List[str] = [s["id"] for s in SALE_OBJECTS]
+
+SALE_REASONS: List[Dict[str, str]] = [
+    {"id": "arbitrage", "label": "Arbitrage de patrimoine"},
+    {"id": "succession", "label": "Succession, donation, partage"},
+    {"id": "liquidites", "label": "Besoin de liquidités"},
+    {"id": "fiscalite", "label": "Fiscalité"},
+    {"id": "gestion", "label": "Ne plus gérer de location"},
+    {"id": "autre", "label": "Autre raison"},
+]
+SALE_REASON_IDS: List[str] = [s["id"] for s in SALE_REASONS]
+
+# Profil de l'acquéreur
+BUYER_PROJECT_TYPES: List[Dict[str, str]] = [
+    {"id": "particulier", "label": "Investisseur particulier (en nom propre)"},
+    {"id": "sci", "label": "Achat via une SCI"},
+    {"id": "societe", "label": "Société (IS, holding)"},
+    {"id": "professionnel", "label": "Investisseur professionnel, marchand de biens"},
+]
+BUYER_PROJECT_TYPE_IDS: List[str] = [p["id"] for p in BUYER_PROJECT_TYPES]
+FINANCING_TYPES: List[Dict[str, str]] = [
+    {"id": "comptant", "label": "Comptant"},
+    {"id": "emprunt", "label": "Emprunt bancaire"},
+    {"id": "mixte", "label": "Apport et emprunt"},
+    {"id": "a-definir", "label": "À définir"},
+]
+FINANCING_TYPE_IDS: List[str] = [f["id"] for f in FINANCING_TYPES]
+
+
+def property_type_by_id(type_id) -> Optional[Dict[str, str]]:
+    return PROPERTY_TYPES_BY_ID.get(str(type_id or "").strip())
+
+
+def property_type_label(type_id, short: bool = False) -> str:
+    t = property_type_by_id(type_id)
+    return (t["short"] if short else t["label"]) if t else ""
+
+
+def lease_type_by_id(lease_id) -> Optional[Dict[str, str]]:
+    return LEASE_TYPES_BY_ID.get(str(lease_id or "").strip())
+
+
+def lease_type_label(lease_id, short: bool = False) -> str:
+    t = lease_type_by_id(lease_id)
+    return (t["short"] if short else t["label"]) if t else ""
+
+
+def is_housing_lease(lease_id) -> bool:
+    """Bail soumis à la loi du 6 juillet 1989 (calendrier de décence énergétique, gel des loyers F/G)."""
+    t = lease_type_by_id(lease_id)
+    return bool(t and t["regime"] == "habitation")
+
+
+def dpe_rental_status(dpe_class, lease_id, today: Optional[str] = None) -> Dict[str, Optional[str]]:
+    """
+    Décence énergétique d'un logement loué : {'status': 'interdit' | 'echeance' | 'ok' | 'non-applicable', 'date': 'AAAA-MM-JJ'|None}.
+    'interdit' : la classe ne permet plus de conclure, renouveler ou reconduire un bail d'habitation depuis `date` ;
+    'echeance' : l'interdiction prendra effet à `date`. Le bail en cours continue jusqu'à son terme.
+    `today` (AAAA-MM-JJ) sert aux tests ; par défaut la date du jour (UTC).
+    """
+    if not is_housing_lease(lease_id):
+        return {"status": "non-applicable", "date": None}
+    ban = DPE_RENTAL_BAN.get(str(dpe_class or "").strip().upper())
+    if not ban:
+        return {"status": "ok", "date": None}
+    if today is None:
+        from datetime import datetime, timezone
+        today = datetime.now(timezone.utc).date().isoformat()
+    return {"status": "interdit" if today >= ban else "echeance", "date": ban}
+
+
+def _num(value) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def gross_yield(rent_monthly, price) -> Optional[float]:
+    """Rendement brut en % (loyer hors charges × 12 / prix), arrondi à 0,01 ; None si incalculable."""
+    rent, p = _num(rent_monthly), _num(price)
+    if rent <= 0 or p <= 0:
+        return None
+    return round(rent * 12 / p * 100, 2)
+
+
+def net_yield(rent_monthly, price, property_tax=0, non_recoverable_charges=0, other_costs=0) -> Optional[float]:
+    """Rendement net de charges en % : (loyers annuels − taxe foncière − charges non récupérables − autres frais annuels) / prix."""
+    rent, p = _num(rent_monthly), _num(price)
+    if rent <= 0 or p <= 0:
+        return None
+    net = rent * 12 - _num(property_tax) - _num(non_recoverable_charges) - _num(other_costs)
+    return round(net / p * 100, 2)
+
+
+def _fmt_surface(surface) -> str:
+    s = _num(surface)
+    if s <= 0:
+        return ""
+    return (f"{s:.0f}" if s == int(s) else f"{s:.1f}".replace(".", ",")) + " m²"
+
+
+# Début du titre généré et accord de « loué » (« Maison louée », « Bureaux loués »)
+PROPERTY_TITLE_HEADS: Dict[str, tuple] = {
+    "appartement": ("Appartement", "loué"), "maison": ("Maison", "louée"), "immeuble": ("Immeuble de rapport", "loué"),
+    "residence-geree": ("Lot en résidence gérée", "loué"), "local-commercial": ("Local commercial", "loué"),
+    "bureaux": ("Bureaux", "loués"), "parking": ("Parking", "loué"), "autre": ("Bien", "loué"),
+}
+
+
+def property_title(property_type, city=None, department=None, surface=None, rooms=None, units_count=None) -> str:
+    """
+    Titre d'annonce généré côté serveur, jamais l'adresse : « Appartement T2 loué · 42 m² · Lyon (69) »,
+    « Immeuble de rapport loué · 6 lots · Saint-Étienne (42) », « Parking loué · Nice (06) ». Segments vides omis.
+    """
+    t = property_type_by_id(property_type)
+    head, rented = PROPERTY_TITLE_HEADS.get(t["id"] if t else "autre", PROPERTY_TITLE_HEADS["autre"])
+    try:
+        n_rooms = int(rooms) if rooms not in (None, "") else None
+    except (TypeError, ValueError):
+        n_rooms = None
+    if t and t["id"] in ("appartement", "maison") and n_rooms and n_rooms > 0:
+        head = f"{head} T{n_rooms}"
+    parts = [f"{head} {rented}"]
+    try:
+        n_units = int(units_count) if units_count not in (None, "") else None
+    except (TypeError, ValueError):
+        n_units = None
+    if t and t["id"] == "immeuble" and n_units and n_units > 0:
+        parts.append(f"{n_units} lot{'s' if n_units > 1 else ''}")
+    surf = _fmt_surface(surface)
+    if surf and not (t and t["id"] == "parking"):
+        parts.append(surf)
+    dep = normalize_departement(department)
+    place = str(city or "").strip()
+    if place and dep:
+        parts.append(f"{place} ({dep})")
+    elif place:
+        parts.append(place)
+    elif dep:
+        parts.append(departement_label(dep))
+    return " · ".join(parts)
