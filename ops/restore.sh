@@ -8,11 +8,11 @@
 #   ops/restore.sh <archive> [--drop]          restaure dans la base de production (--drop remplace les collections)
 #   ops/restore.sh --from-s3 <clé>             copie d'abord l'archive S3 (ex. backups/<fichier>) dans le volume `backups`
 #
-# <archive> est un nom de fichier dans le volume (ex. cessionrge_prod-2026-10-10T23-00.archive.gz) ou un chemin local.
+# <archive> est un nom de fichier dans le volume (ex. venteloc_prod-2026-10-10T23-00.archive.gz) ou un chemin local.
 # Le script s'exécute sur l'hôte Docker, dans le dossier du docker-compose.yml déployé (avec Dokploy :
 # /etc/dokploy/compose/<nom-de-l-application>/code, et COMPOSE="docker compose -p <nom-de-l-application>").
 # Variables lues dans l'environnement, sinon dans .env (clé par clé, le fichier n'est jamais exécuté) :
-# MONGO_PASSWORD, DB_NAME (défaut cessionrge_prod), MONGO_URI (défaut mongodb://admin:<MONGO_PASSWORD>@mongodb:27017),
+# MONGO_PASSWORD, DB_NAME (défaut venteloc_prod), MONGO_URI (défaut mongodb://admin:<MONGO_PASSWORD>@mongodb:27017),
 # COMPOSE (défaut « docker compose »). RESTORE_DRY_RUN=1 affiche les commandes sans les exécuter.
 set -euo pipefail
 
@@ -28,7 +28,7 @@ getenv_file() {
 
 MONGO_PASSWORD="${MONGO_PASSWORD:-$(getenv_file MONGO_PASSWORD)}"
 DB_NAME="${DB_NAME:-$(getenv_file DB_NAME)}"
-DB_NAME="${DB_NAME:-cessionrge_prod}"
+DB_NAME="${DB_NAME:-venteloc_prod}"
 COMPOSE="${COMPOSE:-docker compose}"
 MONGO_URI="${MONGO_URI:-mongodb://admin:${MONGO_PASSWORD}@mongodb:27017}"
 

@@ -1,5 +1,5 @@
 # ===========================================
-# CessionBâtiment / CessionRGE - Docker Compose
+# VenteLoc - Docker Compose
 # Mode de déploiement unique : service « Compose » de Dokploy basé sur ce fichier (voir DOKPLOY_DEPLOYMENT.md).
 #
 # Aucun port n'est publié sur l'hôte : en production, le Traefik de Dokploy (ports 80/443 de l'hôte) route le domaine
@@ -30,7 +30,7 @@ services:
     volumes:
       - mongo_data:/data/db
     networks:
-      - cessionrge-network
+      - venteloc-network
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
       interval: 10s
@@ -47,24 +47,25 @@ services:
       - ENV=${ENV:-production}
       - APP_VERSION=${APP_VERSION:-}
       - MONGO_URL=mongodb://admin:${MONGO_PASSWORD}@mongodb:27017
-      - DB_NAME=${DB_NAME:-cessionrge_prod}
+      - DB_NAME=${DB_NAME:-venteloc_prod}
       - JWT_SECRET=${JWT_SECRET}
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
       - STRIPE_IDENTITY_WEBHOOK_SECRET=${STRIPE_IDENTITY_WEBHOOK_SECRET:-}
       - BREVO_API_KEY=${BREVO_API_KEY:-}
       - SENTRY_DSN=${SENTRY_DSN:-}
       # Marque et URL publique : jamais écrites en dur dans le code
-      - SITE_NAME=${SITE_NAME:-CessionBâtiment}
-      - SITE_URL=${SITE_URL:-https://cessionbatiment.fr}
-      - FRONTEND_URL=${SITE_URL:-https://cessionbatiment.fr}
-      - CORS_ORIGINS=${CORS_ORIGINS:-${SITE_URL:-https://cessionbatiment.fr}}
+      - SITE_NAME=${SITE_NAME:-VenteLoc}
+      - SITE_URL=${SITE_URL:-https://venteloc.fr}
+      - FRONTEND_URL=${SITE_URL:-https://venteloc.fr}
+      - CORS_ORIGINS=${CORS_ORIGINS:-${SITE_URL:-https://venteloc.fr}}
       - SENDER_EMAIL=${SENDER_EMAIL:-}
       - SENDER_NAME=${SENDER_NAME:-}
       - ADMIN_EMAIL=${ADMIN_EMAIL}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
       - ADMIN_NOTIFICATION_EMAIL=${ADMIN_NOTIFICATION_EMAIL:-}
-      # Barème : minimum HT de la commission (6 % HT, 3 % HT au-delà d'un million)
-      - COMMISSION_MIN_HT=${COMMISSION_MIN_HT:-4000}
+      # Honoraires de négociation à la charge du vendeur : taux HT et minimum HT (défauts : 3 % HT, 3 000 € HT)
+      - COMMISSION_RATE_PERCENT=${COMMISSION_RATE_PERCENT:-3}
+      - COMMISSION_MIN_HT=${COMMISSION_MIN_HT:-3000}
       - FF_SELLER_COMMISSION=${FF_SELLER_COMMISSION:-true}
       - FF_MANDATE_REQUIRED=${FF_MANDATE_REQUIRED:-true}
       - FF_OTP_SIGNATURE=${FF_OTP_SIGNATURE:-true}
@@ -123,11 +124,11 @@ services:
       mongodb:
         condition: service_healthy
     networks:
-      cessionrge-network:
+      venteloc-network:
         # Nom unique utilisé par nginx (frontend/nginx.conf) : le frontend est aussi sur dokploy-network, où un autre
         # projet peut avoir un service nommé « backend »
         aliases:
-          - cessionbatiment-api
+          - venteloc-api
     expose:
       - "8001"
     healthcheck:
@@ -143,7 +144,7 @@ services:
     logging: *logging
     environment:
       - MONGO_URL=mongodb://admin:${MONGO_PASSWORD}@mongodb:27017
-      - DB_NAME=${DB_NAME:-cessionrge_prod}
+      - DB_NAME=${DB_NAME:-venteloc_prod}
       - BACKUP_DIR=/backups
       # Nombre d'archives conservées (une par jour)
       - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-14}
@@ -157,7 +158,7 @@ services:
       mongodb:
         condition: service_healthy
     networks:
-      - cessionrge-network
+      - venteloc-network
 
   frontend:
     build:
@@ -167,11 +168,12 @@ services:
         # Vide = appels /api relatifs, même origine que la page (CSP connect-src 'self', domaines alias / www) ;
         # le pré-rendu n'interroge alors pas la production pendant le build
         - REACT_APP_BACKEND_URL=
-        - REACT_APP_SITE_URL=${SITE_URL:-https://cessionbatiment.fr}
-        - REACT_APP_BRAND_NAME=${SITE_NAME:-CessionBâtiment}
+        - REACT_APP_SITE_URL=${SITE_URL:-https://venteloc.fr}
+        - REACT_APP_BRAND_NAME=${SITE_NAME:-VenteLoc}
         - REACT_APP_CONTACT_EMAIL=${SENDER_EMAIL:-}
-        # Minimum de commission affiché (calculateur, pages pré-rendues, JSON-LD) = celui du mandat
-        - REACT_APP_COMMISSION_MIN_HT=${COMMISSION_MIN_HT:-4000}
+        # Honoraires affichés (calculateur, pages pré-rendues) = ceux du mandat ; le front relit /api/config à l'exécution
+        - REACT_APP_COMMISSION_RATE_PERCENT=${COMMISSION_RATE_PERCENT:-3}
+        - REACT_APP_COMMISSION_MIN_HT=${COMMISSION_MIN_HT:-3000}
         # Site vitrine WordPress (lien « Site » du pied de page de l'application), facultatif
         - REACT_APP_MARKETING_URL=${MARKETING_URL:-}
     restart: always
@@ -184,7 +186,7 @@ services:
     depends_on:
       - backend
     networks:
-      - cessionrge-network
+      - venteloc-network
     # HTTPS est terminé par le Traefik de Dokploy (Let's Encrypt) : nginx n'écoute qu'en HTTP, port non publié sur l'hôte
     # (les ports 80/443 de l'hôte appartiennent à Traefik). Domaine : Dokploy → Domains → service frontend, port 80.
     expose:
@@ -197,5 +199,5 @@ volumes:
     driver: local
 
 networks:
-  cessionrge-network:
+  venteloc-network:
     driver: bridge

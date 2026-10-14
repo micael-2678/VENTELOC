@@ -55,7 +55,7 @@ start_nginx() { # start_nginx <trust_loopback:0|1>
   sed -e "s/listen 80;/listen 127.0.0.1:$NGINX_PORT;/" \
       -e "s#root /usr/share/nginx/html;#root $WORK/html;#" \
       -e "s#resolver 127.0.0.11 valid=30s ipv6=off;#resolver 127.0.0.1;#" \
-      -e "s#http://cessionbatiment-api:8001#http://127.0.0.1:$BACKEND_PORT#" \
+      -e "s#http://venteloc-api:8001#http://127.0.0.1:$BACKEND_PORT#" \
       -e "s#\${EMBED_ALLOWED_ORIGINS}#$EMBED_ORIGIN#" \
       -e "s#\${SELLER_LANDING_URL}#$SELLER_LANDING#" \
       "$ROOT/frontend/nginx.conf" > "$site"

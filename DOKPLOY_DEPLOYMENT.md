@@ -1,12 +1,12 @@
-# CessionBâtiment / CessionRGE — Déploiement avec Dokploy
+# VenteLoc — Déploiement avec Dokploy
 
 Ce guide décrit un déploiement complet sur un VPS avec Dokploy (open source, auto-hébergé). Aucune valeur réelle
 n'y figure : chaque secret est généré au moment du déploiement et saisi dans Dokploy, jamais dans le dépôt.
 
 | Élément | Valeur |
 |---|---|
-| Marque | `SITE_NAME` (défaut `CessionBâtiment`) ; CessionRGE reste la verticale RGE |
-| Domaine public | `SITE_URL` (nom de domaine acheté par le fondateur) |
+| Marque | `SITE_NAME` (défaut `VenteLoc`) |
+| Domaine public | `SITE_URL` (défaut `https://venteloc.fr`) |
 | Stack | React 19 (nginx) + FastAPI (uvicorn) + MongoDB 7 + service de sauvegarde |
 
 ## 1. Architecture
@@ -31,7 +31,7 @@ Règles :
 - **Aucun port publié sur l'hôte.** Les ports 80/443 appartiennent au Traefik de Dokploy, qui route le domaine vers le
   service `frontend` (port 80). Quand le domaine est déclaré (étape 3), Dokploy ajoute lui-même au service `frontend`
   le réseau `dokploy-network` et les labels Traefik. Le backend n'a qu'un `expose: 8001` ; nginx proxifie `/api/` vers
-  l'alias réseau `cessionbatiment-api` (unique, pour ne jamais atteindre le service « backend » d'un autre projet).
+  l'alias réseau `venteloc-api` (unique, pour ne jamais atteindre le service « backend » d'un autre projet).
 - **API sur la même origine** : le frontend est construit avec `REACT_APP_BACKEND_URL` vide (appels `/api` relatifs),
   ce qui fonctionne sur le domaine principal comme sur un alias. `www.<domaine>` est redirigé en 301 vers `<domaine>`
   par nginx.
@@ -60,7 +60,7 @@ Clés tierces : Stripe (clé secrète **live** + secret du webhook Identity), Br
 
 Sans domaine authentifié, Brevo refuse ou classe en spam les e-mails, **y compris le code de connexion admin et les
 codes de signature**. `SENDER_EMAIL` doit être une adresse de ce domaine (ex. `contact@<votre-domaine>`) : vide, les
-envois partent de `contact@cessionbatiment.fr`.
+envois partent de `contact@venteloc.fr`.
 
 1. Brevo → *Senders, Domains & Dedicated IPs* → *Domains* → *Add a domain* : `<votre-domaine>`.
 2. Chez le registraire (zone DNS), créez les enregistrements affichés par Brevo :
@@ -81,10 +81,10 @@ premières semaines ; un échec d'envoi n'apparaît aujourd'hui que dans les jou
 
 ### Étape 1 — Projet et service
 
-Dokploy → **Projects → New Project** → `cessionbatiment`, puis **Create Service → Compose** :
+Dokploy → **Projects → New Project** → `venteloc`, puis **Create Service → Compose** :
 
-- Provider GitHub, dépôt `cession-rge`, branche `main`, **Compose Path** `./docker-compose.yml`, type Docker Compose.
-- Notez le nom technique du service (*App Name*, ex. `cessionbatiment-xyz123`) : c'est le nom du projet Compose,
+- Provider GitHub, dépôt `VENTELOC`, branche `main`, **Compose Path** `./docker-compose.yml`, type Docker Compose.
+- Notez le nom technique du service (*App Name*, ex. `venteloc-xyz123`) : c'est le nom du projet Compose,
   utilisé par les commandes des §5, §6 et §8 (`COMPOSE="docker compose -p <App Name>"`). Le code est cloné sur l'hôte
   dans `/etc/dokploy/compose/<App Name>/code`.
 
@@ -96,21 +96,22 @@ Collez le contenu de `.env.example` et remplissez les valeurs (Dokploy l'écrit 
 ```bash
 ENV=production
 MONGO_PASSWORD=<openssl rand -hex 24>
-DB_NAME=cessionrge_prod
+DB_NAME=venteloc_prod
 JWT_SECRET=<openssl rand -hex 32>
 STRIPE_SECRET_KEY=<clé live Stripe>
 STRIPE_IDENTITY_WEBHOOK_SECRET=<secret du webhook Identity>
 BREVO_API_KEY=<clé Brevo>
 SENTRY_DSN=                       # optionnel
-SITE_NAME=CessionBâtiment
+SITE_NAME=VenteLoc
 SITE_URL=https://<votre-domaine>
 CORS_ORIGINS=https://<votre-domaine>
 SENDER_EMAIL=contact@<votre-domaine>   # obligatoire : domaine authentifié dans Brevo (§2)
-SENDER_NAME=CessionBâtiment
+SENDER_NAME=VenteLoc
 ADMIN_EMAIL=<votre adresse>
 ADMIN_PASSWORD=<mot de passe fort>
 ADMIN_NOTIFICATION_EMAIL=<votre adresse>
-COMMISSION_MIN_HT=4000            # repris par le mandat ET par le calculateur du site (argument de build)
+COMMISSION_RATE_PERCENT=3         # honoraires HT du prix de vente, à la charge du vendeur (mandat ET calculateur du site)
+COMMISSION_MIN_HT=3000            # minimum HT (repris par le mandat et par le calculateur, argument de build)
 LEGAL_CARTE_T="CPI 7801 2025 000 000 049"
 LEGAL_REPRESENTANT=              # vide = valeur par défaut du backend (directrice de la publication)
 LEGAL_HEBERGEUR="<nom, adresse et téléphone de l'hébergeur>"
@@ -143,18 +144,16 @@ défaut dans le backend, à surcharger seulement en cas de changement avec `LEGA
 
 Le build du frontend reçoit ses arguments du `docker-compose.yml` (rien à saisir) : `REACT_APP_SITE_URL` = `SITE_URL`,
 `REACT_APP_BRAND_NAME` = `SITE_NAME`, `REACT_APP_CONTACT_EMAIL` = `SENDER_EMAIL`,
-`REACT_APP_COMMISSION_MIN_HT` = `COMMISSION_MIN_HT`, `REACT_APP_MARKETING_URL` = `MARKETING_URL` (facultatif : lien
+`REACT_APP_COMMISSION_RATE_PERCENT` = `COMMISSION_RATE_PERCENT`, `REACT_APP_COMMISSION_MIN_HT` = `COMMISSION_MIN_HT`, `REACT_APP_MARKETING_URL` = `MARKETING_URL` (facultatif : lien
 « Site » du pied de page vers le site WordPress), et `REACT_APP_BACKEND_URL` **vide** (API sur la même origine). Après
 un changement de l'une de ces variables, redéployez pour reconstruire le frontend.
 
-**Site WordPress** (page d'accueil marketing, hors de l'application, voir `docs/WORDPRESS.md`) : `EMBED_ALLOWED_ORIGINS`
+**Site WordPress** (facultatif : site vitrine hors de l'application, voir `docs/WORDPRESS.md`) : `EMBED_ALLOWED_ORIGINS`
 liste les origines autorisées à afficher le module `/embed/annonces` dans une iframe (ex.
-`https://www.cessionbatiment.fr https://cessionbatiment.fr`). C'est une variable d'exécution du conteneur frontend
+`https://www.venteloc.fr https://venteloc.fr`). C'est une variable d'exécution du conteneur frontend
 (substituée dans la configuration nginx au démarrage) : un simple redémarrage suffit, sans reconstruire l'image. Si le
 site WordPress prend le domaine principal, l'application passe sur un sous-domaine (`SITE_URL`, domaine Dokploy) ; la
 règle `www.<domaine> → <domaine>` de nginx ne concerne que les hôtes routés vers le conteneur frontend.
-`SELLER_LANDING_URL` (même type de variable, facultative) : page « vendre mon entreprise » du site WordPress, cible des
-anciennes adresses `/vendre-mon-entreprise-…` ; vide, elles mènent à l'estimateur `/estimer`.
 
 ### Étape 3 — Domaine (onglet Domains)
 
@@ -170,7 +169,7 @@ vers `<votre-domaine>`. DNS : enregistrements A (et AAAA) de `<votre-domaine>` e
 une heure plus tard en cas d'échec) et `frontend`. Si `S3_BUCKET` est défini, la dernière archive est copiée chaque jour
 dans `s3://<bucket>/backups/` (chiffrement AES256 côté serveur) dans l'heure qui suit minuit UTC.
 
-Pour une mise à jour de l'application existante (refonte d'octobre 2026), suivez d'abord le §8.
+Premier déploiement : suivez ensuite le §8 (mise en service).
 
 ### Étape 5 — Webhook Stripe Identity
 
@@ -183,15 +182,14 @@ identité n'est validée.
 
 ```bash
 curl -s https://<votre-domaine>/api/health      # {"status":"ok","db":"ok",...}
-curl -s https://<votre-domaine>/api/config      # barème 6 % / minimum 4 000 € / cédant débiteur
+curl -s https://<votre-domaine>/api/config      # commission : 3 % HT (3,6 % TTC), minimum 3 000 € HT, à la charge du vendeur
 curl -sI https://<votre-domaine>/ | grep -i -E "strict-transport|content-security|x-frame"
 curl -s -o /dev/null -w "%{http_code}\n" https://<votre-domaine>/docs     # 404 en production
-curl -s -o /dev/null -w "%{http_code} %{redirect_url}\n" https://<votre-domaine>/search   # 301 → /entreprises-a-vendre
 curl -s https://<votre-domaine>/robots.txt | grep -i sitemap   # doit pointer vers https://<votre-domaine>/api/sitemap.xml
 ```
 
-Puis : inscription (e-mail de confirmation reçu), connexion admin (code reçu par e-mail), création d'annonce, signature
-du mandat par code, contact repreneur ; même parcours sur `https://www.<votre-domaine>` (redirigé). Ajoutez un moniteur
+Puis : inscription (e-mail de confirmation reçu), connexion admin (code reçu par e-mail), création d'annonce, dépôt du
+justificatif de propriété, signature du mandat par code, contact acquéreur ; même parcours sur `https://www.<votre-domaine>` (redirigé). Ajoutez un moniteur
 UptimeRobot sur `/api/health` (mot-clé `"db":"ok"`). La réponse contient aussi `backup_age_hours` (âge de la dernière
 sauvegarde réussie) ; au-delà de 30 h, une ligne « Sauvegarde : aucune réussite depuis N h » apparaît dans l'écran
 « À faire » de l'administration, comme les e-mails non envoyés.
@@ -208,12 +206,12 @@ Les archives sont dans le volume `backups` (et sur S3 si configuré). Sur l'hôt
 cd /etc/dokploy/compose/<App Name>/code
 export COMPOSE="docker compose -p <App Name>"                 # inutile en local (docker compose à la racine du dépôt)
 ops/restore.sh --list                                        # archives, dernière réussite, dernier échec
-ops/restore.sh --test cessionrge_prod-2026-10-10T23-00.archive.gz
-#   → restaure dans la base cessionrge_prod_restore_test, affiche le nombre de documents par collection,
+ops/restore.sh --test venteloc_prod-2026-10-10T23-00.archive.gz
+#   → restaure dans la base venteloc_prod_restore_test, affiche le nombre de documents par collection,
 #     imprime « RESTAURATION DE TEST OK » puis supprime la base de test. La production n'est pas touchée.
-ops/restore.sh cessionrge_prod-2026-10-10T23-00.archive.gz --drop   # restauration réelle (confirmation demandée)
+ops/restore.sh venteloc_prod-2026-10-10T23-00.archive.gz --drop   # restauration réelle (confirmation demandée)
 $COMPOSE restart backend
-ops/restore.sh --from-s3 backups/cessionrge_prod-2026-10-10T23-00.archive.gz   # si l'archive n'est plus que sur S3
+ops/restore.sh --from-s3 backups/venteloc_prod-2026-10-10T23-00.archive.gz   # si l'archive n'est plus que sur S3
 ```
 
 `restore.sh` lit `MONGO_PASSWORD` et `DB_NAME` dans l'environnement ou dans le `.env` du dossier (sans l'exécuter).
@@ -224,7 +222,7 @@ version de MongoDB et au moins une fois par trimestre. `RESTORE_DRY_RUN=1` affic
 ## 6. Rotation des secrets
 
 À faire immédiatement si un secret a pu fuir (historique Git, poste compromis, collaborateur parti) et par précaution
-une fois par an. Le CI exécute `gitleaks` sur tout l'historique ; les fuites déjà révoquées sont listées dans
+une fois par an. Le CI exécute `gitleaks` sur tout l'historique ; d'éventuels faux positifs sont listés dans
 `.gitleaksignore`. Toutes les variables sont dans l'onglet Environment du service Compose ; chaque modification se
 termine par **Deploy**.
 
@@ -247,8 +245,8 @@ Activez aussi sur GitHub : *Settings → Code security → Secret scanning + Pus
 
 - **Le backend ne démarre pas** : `MONGO_PASSWORD` incorrect ou `JWT_SECRET` absent (un secret aléatoire est alors
   généré et les sessions tombent à chaque redémarrage — toujours définir `JWT_SECRET`).
-- **`/api` renvoie une erreur 502** : le backend n'est pas joignable sous l'alias `cessionbatiment-api` depuis nginx.
-  Testez depuis le conteneur frontend : `$COMPOSE exec frontend wget -qO- http://cessionbatiment-api:8001/api/health`.
+- **`/api` renvoie une erreur 502** : le backend n'est pas joignable sous l'alias `venteloc-api` depuis nginx.
+  Testez depuis le conteneur frontend : `$COMPOSE exec frontend wget -qO- http://venteloc-api:8001/api/health`.
 - **« port is already allocated » au déploiement** : un `ports:` a été ajouté au fichier Compose ; seul Traefik publie
   les ports 80/443 (utilisez `ops/docker-compose.local.yml` hors Dokploy uniquement).
 - **Le site répond 404 Traefik** : domaine non déclaré sur le service `frontend` port 80 (onglet Domains), ou DNS pas
@@ -264,35 +262,21 @@ Activez aussi sur GitHub : *Settings → Code security → Secret scanning + Pus
   `/etc/docker/daemon.json` : `{"log-driver": "json-file", "log-opts": {"max-size": "10m", "max-file": "5"}}` puis
   `systemctl restart docker` (s'applique aux conteneurs recréés).
 
-## 8. Mise en production de la refonte (ordre obligatoire)
+## 8. Mise en service (premier déploiement)
 
-La migration `refonte_2026_10` est **obligatoire** : sans elle, les comptes existants n'ont pas `email_verified` et ne
-peuvent plus contacter, signer ni publier. Elle est **irréversible en partie** : elle supprime les collections
-`credits`, `credit_contacts` et `transactions`. Suivez cet ordre, sur l'hôte, dans
-`/etc/dokploy/compose/<App Name>/code` avec `COMPOSE="docker compose -p <App Name>"` :
+1. Vérifications du §4, puis connexion avec `ADMIN_EMAIL` / `ADMIN_PASSWORD` (code reçu par e-mail) et changement du
+   mot de passe administrateur depuis l'espace admin.
+2. Facultatif : essai complet en mode test (§9), puis purge des données de test et `TEST_MODE=false`.
+3. Première sauvegarde manuelle et test de restauration : `$COMPOSE exec backup env BACKUP_ONCE=1 bash /backup.sh`
+   (doit afficher « terminé »), puis `ops/restore.sh --test <archive>` (doit afficher « RESTAURATION DE TEST OK »).
+4. Webhook Stripe Identity (§3, étape 5) et moniteur UptimeRobot sur `/api/health`.
 
-1. **Sauvegarde vérifiée** (avant de déployer la nouvelle version) :
-   `$COMPOSE exec backup env BACKUP_ONCE=1 bash /backup.sh` (doit afficher « terminé »), puis
-   `ops/restore.sh --test <archive créée>` (doit afficher « RESTAURATION DE TEST OK »). Conservez aussi une copie hors
-   serveur (`$COMPOSE cp backup:/backups/<archive> .` puis téléchargement, ou S3).
-2. **Couper les tâches planifiées** : `JOBS_ENABLED=false` dans Environment, puis **Deploy** de la nouvelle version
-   (backend, frontend, backup).
-3. **Simulation** : `$COMPOSE exec backend python -m migrations.refonte_2026_10` (dry-run, n'écrit rien) ; lisez le
-   rapport (comptes, annonces, mandats, factures concernés).
-4. **Application** : `$COMPOSE exec backend python -m migrations.refonte_2026_10 --apply` (ajoutez `--network` pour
-   compléter le département des annonces depuis l'open data).
-5. **Annonces publiées sans mandat** : `$COMPOSE exec backend python -m migrations.mandate_backfill` (dry-run), puis
-   `... --apply --notify` (les cédants reçoivent l'invitation à signer leur mandat).
-6. **Relancer les tâches** : `JOBS_ENABLED=true` dans Environment, puis **Deploy**.
-7. **Vérifications** du §4.
-
-Retour arrière : `python -m migrations.mandate_backfill --rollback` et `python -m migrations.refonte_2026_10 --rollback`
-restaurent les champs modifiés (pas les collections supprimées) ; pour revenir entièrement à l'état d'avant, redéployez
-l'ancienne version puis restaurez l'archive de l'étape 1 (`ops/restore.sh <archive> --drop`, §5).
+Aucune migration de données n'est nécessaire : VenteLoc démarre sur une base vide (`DB_NAME=venteloc_prod`), distincte
+de celle de CessionRGE.
 
 ## 9. Mode test (essai de l'application avant l'ouverture)
 
-Le mode test permet d'essayer tous les parcours (cédant, repreneur, admin) **sans vérifier réellement son identité**,
+Le mode test permet d'essayer tous les parcours (vendeur, acquéreur, admin) **sans vérifier réellement son identité**,
 **sans dépendre de l'envoi d'e-mails** et **sans engager de vrais contrats**. Il est permis en production pour un essai
 avant l'ouverture, mais il **affaiblit l'authentification administrateur** : à désactiver avant d'accueillir de vrais
 utilisateurs.
@@ -316,11 +300,12 @@ Ce qui change :
   `TEST_MODE_SEND_EMAILS=true` (jamais vers les adresses de démonstration `@test.local`) ;
 - les codes de signature et le code de connexion admin sont aussi renvoyés à l'écran ; « Simuler ma vérification
   d'identité » et « Confirmer mon e-mail » remplacent Stripe Identity et le lien reçu par e-mail ;
-- contrôles de publication assouplis : un SIRET fictif de 14 chiffres est accepté, entreprise cessée et doublon de SIREN
-  deviennent des drapeaux (e-mail confirmé, identité, mandat, métier et prix restent obligatoires) ;
+- contrôles de publication assouplis : un SIRET fictif de 14 chiffres est accepté pour une SCI, société cessée et doublon
+  deviennent des drapeaux (e-mail confirmé, identité, mandat, justificatif de propriété, bail, loyer et prix restent
+  obligatoires) ;
 - **aucun vrai engagement** : tout ce qui est créé est marqué `is_test` ; les mandats prennent un numéro du registre de
   test (`TEST-0001`…, le registre réel n'avance pas), les factures `TEST-FAC-AAAA-NNNNN`, et chaque document (mandat,
-  NDA, offre, facture, ordre de paiement, mise en demeure, PDF) porte « DOCUMENT DE TEST — SANS VALEUR JURIDIQUE » ;
+  engagement de confidentialité, offre d'achat, facture, ordre de paiement, mise en demeure, PDF) porte « DOCUMENT DE TEST — SANS VALEUR JURIDIQUE » ;
   le registre admin et son export CSV excluent les mandats de test (`?include_test=true` pour les voir) ;
 - l'écran admin « À faire » affiche une ligne « Mode test actif ».
 
@@ -333,12 +318,13 @@ mandat ; une annonce réelle garde tous ses contrôles de publication pendant l'
 ### Tester
 
 1. Panneau `/test` → « Créer les comptes et annonces de démonstration » : trois comptes (`vendeur.demo@test.local`,
-   `repreneur.demo@test.local`, `admin.demo@test.local`, mot de passe affiché) et 8 annonces publiées avec mandats de
-   test signés. L'opération est idempotente.
-2. « Vendeur démo », « Repreneur démo », « Admin démo » : connexion rapide (réservée à ces trois comptes ; l'admin démo a
+   `acquereur.demo@test.local`, `admin.demo@test.local`, mot de passe affiché) et 8 annonces de biens loués publiées
+   avec mandats de test signés. L'opération est idempotente.
+2. « Vendeur démo », « Acquéreur démo », « Admin démo » : connexion rapide (réservée à ces trois comptes ; l'admin démo a
    les droits d'un administrateur, c'est assumé en mode test).
 3. Parcours complet avec un vrai compte de test : inscription, « Confirmer mon e-mail », annonce, « Simuler ma
-   vérification d'identité », mandat (code affiché), demande de dossier, NDA, offre, étape de vente, facture de test.
+   vérification d'identité », justificatif de propriété, mandat (code affiché), demande de dossier, engagement de
+   confidentialité, offre d'achat, étape de vente, facture de test.
 4. Relances : « Lancer les tâches planifiées » dans le panneau (le passage du temps n'est pas simulé).
 
 ### Purger

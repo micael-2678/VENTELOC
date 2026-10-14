@@ -16,14 +16,16 @@ ARG REACT_APP_BACKEND_URL=
 ENV REACT_APP_BACKEND_URL=$REACT_APP_BACKEND_URL
 
 # Marque et domaine (lib/brand.js, pré-rendu, URLs canoniques, Open Graph, JSON-LD) : jamais en dur dans le code
-ARG REACT_APP_BRAND_NAME=CessionBâtiment
+ARG REACT_APP_BRAND_NAME=VenteLoc
 ENV REACT_APP_BRAND_NAME=$REACT_APP_BRAND_NAME
-ARG REACT_APP_SITE_URL=https://cessionbatiment.fr
+ARG REACT_APP_SITE_URL=https://venteloc.fr
 ENV REACT_APP_SITE_URL=$REACT_APP_SITE_URL
 ARG REACT_APP_CONTACT_EMAIL=
 ENV REACT_APP_CONTACT_EMAIL=$REACT_APP_CONTACT_EMAIL
-# Minimum de commission affiché (doit valoir COMMISSION_MIN_HT côté backend)
-ARG REACT_APP_COMMISSION_MIN_HT=4000
+# Honoraires affichés au pré-rendu (doivent valoir COMMISSION_RATE_PERCENT et COMMISSION_MIN_HT côté backend)
+ARG REACT_APP_COMMISSION_RATE_PERCENT=3
+ENV REACT_APP_COMMISSION_RATE_PERCENT=$REACT_APP_COMMISSION_RATE_PERCENT
+ARG REACT_APP_COMMISSION_MIN_HT=3000
 ENV REACT_APP_COMMISSION_MIN_HT=$REACT_APP_COMMISSION_MIN_HT
 # Site vitrine WordPress (facultatif) : lien « Site » du pied de page de l'application. Vide = pas de lien.
 ARG REACT_APP_MARKETING_URL=
@@ -45,7 +47,7 @@ COPY --from=build /app/build /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/templates/default.conf.template
 ENV NGINX_ENVSUBST_FILTER="EMBED_ALLOWED_ORIGINS|SELLER_LANDING_URL"
 # Origines autorisées à afficher /embed/annonces dans une iframe (site WordPress), séparées par des espaces, ex.
-# « https://www.cessionbatiment.fr https://cessionbatiment.fr ». Vide (défaut) = même origine seulement ('self').
+# « https://www.venteloc.fr https://venteloc.fr ». Vide (défaut) = même origine seulement ('self').
 # Variable d'exécution du conteneur : modifiable sans reconstruire l'image.
 ENV EMBED_ALLOWED_ORIGINS=""
 # Page « vendre mon entreprise » du site WordPress, cible des anciennes adresses /vendre-mon-entreprise-… (301).

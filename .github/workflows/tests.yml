@@ -98,6 +98,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Image backend
-        run: docker build -t cessionbatiment-backend ./backend
+        run: docker build -t venteloc-backend ./backend
       - name: Image frontend
-        run: docker build -t cessionbatiment-frontend ./frontend
+        run: docker build -t venteloc-frontend ./frontend
