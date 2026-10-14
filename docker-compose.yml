@@ -1,0 +1,201 @@
+# ===========================================
+# CessionBâtiment / CessionRGE - Docker Compose
+# Mode de déploiement unique : service « Compose » de Dokploy basé sur ce fichier (voir DOKPLOY_DEPLOYMENT.md).
+#
+# Aucun port n'est publié sur l'hôte : en production, le Traefik de Dokploy (ports 80/443 de l'hôte) route le domaine
+# vers le service frontend (port 80) ; Dokploy relie lui-même le frontend au réseau `dokploy-network` quand le domaine
+# est déclaré dans l'onglet Domains. En local : docker compose -f docker-compose.yml -f ops/docker-compose.local.yml up -d
+# (site sur http://localhost:8080).
+# Seul le frontend (nginx) est exposé : il sert le site et proxifie /api vers le backend (port 8001 interne).
+# Le service `backup` fait un mongodump quotidien dans le volume `backups` (14 archives conservées) ;
+# le backend pousse la dernière archive vers S3 si S3_BUCKET est défini.
+# Pas de `container_name` (déconseillé par Dokploy : noms en conflit entre déploiements, journaux et métriques perdus).
+# ===========================================
+
+# Journaux Docker limités (sans rotation, le pilote json-file remplit le disque du VPS) : 5 × 10 Mo par conteneur
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  mongodb:
+    image: mongo:7
+    restart: always
+    logging: *logging
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - cessionrge-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: always
+    logging: *logging
+    environment:
+      - ENV=${ENV:-production}
+      - APP_VERSION=${APP_VERSION:-}
+      - MONGO_URL=mongodb://admin:${MONGO_PASSWORD}@mongodb:27017
+      - DB_NAME=${DB_NAME:-cessionrge_prod}
+      - JWT_SECRET=${JWT_SECRET}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+      - STRIPE_IDENTITY_WEBHOOK_SECRET=${STRIPE_IDENTITY_WEBHOOK_SECRET:-}
+      - BREVO_API_KEY=${BREVO_API_KEY:-}
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      # Marque et URL publique : jamais écrites en dur dans le code
+      - SITE_NAME=${SITE_NAME:-CessionBâtiment}
+      - SITE_URL=${SITE_URL:-https://cessionbatiment.fr}
+      - FRONTEND_URL=${SITE_URL:-https://cessionbatiment.fr}
+      - CORS_ORIGINS=${CORS_ORIGINS:-${SITE_URL:-https://cessionbatiment.fr}}
+      - SENDER_EMAIL=${SENDER_EMAIL:-}
+      - SENDER_NAME=${SENDER_NAME:-}
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - ADMIN_NOTIFICATION_EMAIL=${ADMIN_NOTIFICATION_EMAIL:-}
+      # Barème : minimum HT de la commission (6 % HT, 3 % HT au-delà d'un million)
+      - COMMISSION_MIN_HT=${COMMISSION_MIN_HT:-4000}
+      - FF_SELLER_COMMISSION=${FF_SELLER_COMMISSION:-true}
+      - FF_MANDATE_REQUIRED=${FF_MANDATE_REQUIRED:-true}
+      - FF_OTP_SIGNATURE=${FF_OTP_SIGNATURE:-true}
+      - RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-true}
+      # Mode test (essai sans vérification d'identité réelle ; DOKPLOY_DEPLOYMENT.md « Mode test ») : false en exploitation
+      - TEST_MODE=${TEST_MODE:-false}
+      - TEST_MODE_SEND_EMAILS=${TEST_MODE_SEND_EMAILS:-false}
+      - TEST_DEMO_PASSWORD=${TEST_DEMO_PASSWORD:-}
+      - TEST_PANEL_KEY=${TEST_PANEL_KEY:-}
+      # Adresse réelle du client : nginx (module realip) ne transmet qu'une seule entrée dans X-Forwarded-For
+      - TRUSTED_PROXY_HOPS=${TRUSTED_PROXY_HOPS:-1}
+      - TRUSTED_PROXY_NETWORKS=${TRUSTED_PROXY_NETWORKS:-}
+      # Mentions légales. Les entrées sans « = » ne sont transmises que si la variable est définie (.env ou onglet
+      # Environment) : absentes, le backend garde ses valeurs par défaut (dénomination, siège, SIREN, carte T…)
+      - LEGAL_DENOMINATION
+      - LEGAL_FORME_JURIDIQUE
+      - LEGAL_CAPITAL
+      - LEGAL_ADRESSE
+      - LEGAL_RCS_VILLE
+      - LEGAL_SIREN
+      - LEGAL_CARTE_T=${LEGAL_CARTE_T:-}
+      - LEGAL_CARTE_T_VALIDITE
+      - LEGAL_CARTE_T_CCI
+      - LEGAL_REPRESENTANT=${LEGAL_REPRESENTANT:-}
+      - LEGAL_HEBERGEUR=${LEGAL_HEBERGEUR:-}
+      - LEGAL_RC_PRO=${LEGAL_RC_PRO:-}
+      - LEGAL_MEDIATEUR=${LEGAL_MEDIATEUR:-}
+      - LEGAL_EMAIL=${LEGAL_EMAIL:-}
+      - LEGAL_TVA=${LEGAL_TVA:-}
+      - LEGAL_PHONE=${LEGAL_PHONE:-}
+      - LEGAL_CARTE_T_ACTIVITES
+      - EMAIL_DAILY_SOFT_LIMIT=${EMAIL_DAILY_SOFT_LIMIT:-250}
+      # Factures d'honoraires
+      - INVOICE_IBAN=${INVOICE_IBAN:-}
+      - INVOICE_BIC=${INVOICE_BIC:-}
+      - INVOICE_BANK=${INVOICE_BANK:-}
+      # Statistiques maison (sel des empreintes, facultatif)
+      - EVENTS_SALT_SECRET=${EVENTS_SALT_SECRET:-}
+      # Open data (INPI facultatif)
+      - INPI_USERNAME=${INPI_USERNAME:-}
+      - INPI_PASSWORD=${INPI_PASSWORD:-}
+      # Tâches planifiées et sauvegardes
+      - JOBS_ENABLED=${JOBS_ENABLED:-true}
+      - JOBS_INTERVAL_SECONDS=${JOBS_INTERVAL_SECONDS:-3600}
+      - BACKUP_DIR=/backups
+      - S3_BUCKET=${S3_BUCKET:-}
+      - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-}
+      - S3_REGION=${S3_REGION:-}
+      - S3_BACKUP_PREFIX=${S3_BACKUP_PREFIX:-backups}
+      - S3_SSE=${S3_SSE:-true}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+    volumes:
+      - backups:/backups:ro
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      cessionrge-network:
+        # Nom unique utilisé par nginx (frontend/nginx.conf) : le frontend est aussi sur dokploy-network, où un autre
+        # projet peut avoir un service nommé « backend »
+        aliases:
+          - cessionbatiment-api
+    expose:
+      - "8001"
+    healthcheck:
+      # curl n'existe pas dans python:3.11-slim : sonde en Python. /api/health renvoie 503 si MongoDB est injoignable.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8001/api/health', timeout=3).status == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  backup:
+    image: mongo:7
+    restart: always
+    logging: *logging
+    environment:
+      - MONGO_URL=mongodb://admin:${MONGO_PASSWORD}@mongodb:27017
+      - DB_NAME=${DB_NAME:-cessionrge_prod}
+      - BACKUP_DIR=/backups
+      # Nombre d'archives conservées (une par jour)
+      - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-14}
+      # Heure UTC de la sauvegarde : 23 h UTC, juste avant la copie quotidienne vers S3 (première heure après minuit UTC)
+      - BACKUP_HOUR=${BACKUP_HOUR:-23}
+    volumes:
+      - backups:/backups
+      - ./ops/backup.sh:/backup.sh:ro
+    entrypoint: ["bash", "/backup.sh"]
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - cessionrge-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Vide = appels /api relatifs, même origine que la page (CSP connect-src 'self', domaines alias / www) ;
+        # le pré-rendu n'interroge alors pas la production pendant le build
+        - REACT_APP_BACKEND_URL=
+        - REACT_APP_SITE_URL=${SITE_URL:-https://cessionbatiment.fr}
+        - REACT_APP_BRAND_NAME=${SITE_NAME:-CessionBâtiment}
+        - REACT_APP_CONTACT_EMAIL=${SENDER_EMAIL:-}
+        # Minimum de commission affiché (calculateur, pages pré-rendues, JSON-LD) = celui du mandat
+        - REACT_APP_COMMISSION_MIN_HT=${COMMISSION_MIN_HT:-4000}
+        # Site vitrine WordPress (lien « Site » du pied de page de l'application), facultatif
+        - REACT_APP_MARKETING_URL=${MARKETING_URL:-}
+    restart: always
+    environment:
+      # Origines autorisées à afficher /embed/annonces dans une iframe (site WordPress), séparées par des espaces ;
+      # vide = l'application seule ('self'). Lue au démarrage du conteneur : pas besoin de reconstruire l'image.
+      - EMBED_ALLOWED_ORIGINS=${EMBED_ALLOWED_ORIGINS:-}
+      - SELLER_LANDING_URL=${SELLER_LANDING_URL:-}
+    logging: *logging
+    depends_on:
+      - backend
+    networks:
+      - cessionrge-network
+    # HTTPS est terminé par le Traefik de Dokploy (Let's Encrypt) : nginx n'écoute qu'en HTTP, port non publié sur l'hôte
+    # (les ports 80/443 de l'hôte appartiennent à Traefik). Domaine : Dokploy → Domains → service frontend, port 80.
+    expose:
+      - "80"
+
+volumes:
+  mongo_data:
+    driver: local
+  backups:
+    driver: local
+
+networks:
+  cessionrge-network:
+    driver: bridge

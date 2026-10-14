@@ -1,0 +1,5 @@
+# Dépendances des tests (en plus de requirements.txt)
+pytest==8.4.2
+httpx==0.28.1
+mongomock-motor==0.0.36
+moto[s3]==5.2.3

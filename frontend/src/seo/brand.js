@@ -1,0 +1,11 @@
+// Pictogramme de la marque (maison + feuille), partagé par le composant Logo, le pré-rendu
+// (scripts/prerender.mjs) et les favicons (public/favicon.svg). Pas d'import : chargé sans bundler.
+export const LOGO_MARK_PATHS =
+  '<rect width="32" height="32" rx="8" fill="#090e1c"/>' +
+  '<path d="M6.5 15.2 16 7.5l9.5 7.7" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>' +
+  '<path d="M9.2 13.6v10.2h13.6V13.6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>' +
+  '<path d="M16 22.6c-3.9-1.2-4.6-5.3-.2-9.1 4.6 3.6 4.1 7.8.2 9.1z" fill="#22c55e"/>' +
+  '<path d="M16 22.6v-5.4" stroke="#090e1c" stroke-width="1.2" stroke-linecap="round"/>';
+
+export const logoMarkSvg = (size = 32, className = '') =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="${size}" height="${size}"${className ? ` class="${className}"` : ''} aria-hidden="true" focusable="false">${LOGO_MARK_PATHS}</svg>`;

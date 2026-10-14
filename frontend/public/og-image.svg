@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#090e1c"/>
+      <stop offset="1" stop-color="#1a1e3e"/>
+    </linearGradient>
+    <radialGradient id="glowGreen" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#22c55e" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#22c55e" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowBlue" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#3b82f6" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#3b82f6" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <circle cx="1060" cy="120" r="320" fill="url(#glowGreen)"/>
+  <circle cx="140" cy="600" r="300" fill="url(#glowBlue)"/>
+  <g transform="translate(80 72) scale(2.5)"><rect width="32" height="32" rx="8" fill="#090e1c"/><path d="M6.5 15.2 16 7.5l9.5 7.7" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.2 13.6v10.2h13.6V13.6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 22.6c-3.9-1.2-4.6-5.3-.2-9.1 4.6 3.6 4.1 7.8.2 9.1z" fill="#22c55e"/><path d="M16 22.6v-5.4" stroke="#090e1c" stroke-width="1.2" stroke-linecap="round"/></g>
+  <text x="182" y="130" font-family="Manrope, Inter, Arial, sans-serif" font-weight="800" font-size="52" letter-spacing="-1" fill="#ffffff">Cession<tspan fill="#4ade80">Bâtiment</tspan></text>
+  <text font-family="Manrope, Inter, Arial, sans-serif" font-weight="800" font-size="76" letter-spacing="-2" fill="#ffffff">
+    <tspan x="80" y="300">Cession et reprise</tspan>
+    <tspan x="80" y="390">d'entreprises du <tspan fill="#4ade80">bâtiment</tspan></tspan>
+  </text>
+  <text x="80" y="462" font-family="Inter, Arial, sans-serif" font-weight="500" font-size="30" fill="#cbd5e1">Annonces anonymes · Identité vérifiée · Signature en ligne</text>
+  <rect x="80" y="520" width="1040" height="2" fill="#ffffff" fill-opacity="0.12"/>
+  <text x="80" y="572" font-family="Inter, Arial, sans-serif" font-weight="600" font-size="24" fill="#94a3b8">Plomberie · Électricité · Maçonnerie · RGE</text>
+  <text x="1120" y="572" text-anchor="end" font-family="Inter, Arial, sans-serif" font-weight="600" font-size="24" fill="#4ade80">cessionbatiment.fr</text>
+</svg>

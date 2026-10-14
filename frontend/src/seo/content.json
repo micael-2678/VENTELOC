@@ -1,0 +1,535 @@
+{
+  "header": {
+    "listings": "Annonces",
+    "sell": "Vendre mon entreprise",
+    "login": "Connexion",
+    "register": "Créer un compte",
+    "messages": "Messages",
+    "space": "Mon espace",
+    "account": "Mon compte",
+    "profile": "Profil",
+    "logout": "Déconnexion",
+    "skip": "Aller au contenu",
+    "menuOpen": "Ouvrir le menu",
+    "menuClose": "Fermer le menu"
+  },
+  "footer": {
+    "legal": [
+      {
+        "label": "Mentions légales",
+        "to": "/mentions-legales"
+      },
+      {
+        "label": "Confidentialité",
+        "to": "/confidentialite"
+      },
+      {
+        "label": "CGU",
+        "to": "/cgu"
+      },
+      {
+        "label": "Signaler un contenu",
+        "to": "/signaler"
+      }
+    ],
+    "site": "Site {{brand}}",
+    "contact": "Contact"
+  },
+  "listings": {
+    "title": "Entreprises du bâtiment à vendre | {{brand}}",
+    "description": "Annonces anonymes d'entreprises du bâtiment à reprendre : plomberie, électricité, isolation, RGE. Filtrez par métier, région et prix. Contact gratuit.",
+    "h1": "Entreprises du bâtiment à vendre",
+    "intro": "Annonces anonymes de cédants vérifiés. Contact gratuit pour les repreneurs.",
+    "filtersTitle": "Filtres",
+    "tradesLabel": "Métier",
+    "regionLabel": "Région",
+    "departementLabel": "Département",
+    "rgeLabel": "Qualification RGE",
+    "rgeAny": "Toutes",
+    "rgeYes": "RGE",
+    "rgeHint": "RGE déclaré par le cédant ou vérifié sur la liste ADEME (badge vert).",
+    "rgeNo": "Sans RGE",
+    "priceMaxLabel": "Prix maximum",
+    "caMinLabel": "Chiffre d'affaires minimum",
+    "effectifMinLabel": "Effectif minimum",
+    "sortLabel": "Trier par",
+    "reset": "Effacer les filtres",
+    "showResults": "Afficher les annonces",
+    "emptyTitle": "Aucune annonce ne correspond pour l'instant",
+    "emptyText": "Élargissez vos critères ou créez une alerte : vous recevez un e-mail dès qu'une entreprise correspondante est publiée.",
+    "errorTitle": "Les annonces n'ont pas pu être chargées",
+    "errorText": "Vérifiez votre connexion, puis réessayez.",
+    "retry": "Réessayer",
+    "alertTitle": "Recevoir les nouvelles annonces",
+    "alertIntro": "Une alerte e-mail sans compte, sur vos métiers, vos régions et votre budget.",
+    "sellerTitle": "Vous vendez ?",
+    "sellerCta": "Déposez une annonce anonyme",
+    "sellerText": "Votre nom n'est révélé qu'aux repreneurs qui ont signé un accord de confidentialité.",
+    "embedAll": "Voir toutes les annonces",
+    "embedEmpty": "Aucune annonce ne correspond pour l'instant."
+  },
+  "estimate": {
+    "title": "Estimer la valeur de mon entreprise du bâtiment en 2 minutes | {{brand}}",
+    "description": "Estimation indicative et sans compte de la valeur de votre entreprise du bâtiment : votre SIRET, trois chiffres, trois cases, une fourchette de prix et ce qui fait monter la valeur.",
+    "h1": "Estimer mon entreprise en 2 minutes",
+    "intro": "Votre SIRET charge les données publiques de votre entreprise et, le cas échéant, ses qualifications RGE. Trois chiffres (chiffre d'affaires, excédent brut d'exploitation ou résultat, effectif) et trois cases suffisent pour obtenir une fourchette indicative, sans compte ni engagement."
+  },
+  "legal": {
+    "mentions": {
+      "path": "/mentions-legales",
+      "title": "Mentions légales | {{brand}}",
+      "description": "Mentions légales de {{brand}} : éditeur AlterEgo SAS, carte professionnelle T, assurance de responsabilité civile professionnelle, médiation, hébergement, propriété intellectuelle et contact.",
+      "h1": "Mentions légales",
+      "sections": [
+        {
+          "id": "activite",
+          "title": "Activité",
+          "blocks": [
+            {
+              "p": "{{brand}} est une plateforme de mise en relation confidentielle entre dirigeants d'entreprises du bâtiment qui souhaitent céder leur entreprise et repreneurs. Elle permet la publication d'annonces anonymes, la présentation des repreneurs avec leur projet, la vérification d'identité, la signature en ligne de mandats, d'accords de confidentialité et d'offres indicatives, ainsi que la consultation de documents dans un espace sécurisé. {{vertical}} est sa verticale dédiée aux entreprises qualifiées RGE."
+            },
+            {
+              "p": "L'éditeur exerce l'activité d'intermédiaire en transactions sur fonds de commerce au sens de la loi n° 70-9 du 2 janvier 1970 (loi Hoguet), sous couvert de la carte professionnelle mentionnée ci-dessus. {{hoguetArt6}} L'éditeur ne négocie pas, ne rédige pas les actes et ne fournit pas de conseil juridique, fiscal ou financier. Les informations publiées dans les annonces sont communiquées par les cédants sous leur responsabilité."
+            }
+          ]
+        },
+        {
+          "id": "propriete",
+          "title": "Propriété intellectuelle",
+          "blocks": [
+            {
+              "p": "Les marques {{brand}} et {{vertical}}, les textes, graphismes, logos et la structure du site sont protégés. Toute reproduction ou représentation, totale ou partielle, sans autorisation préalable de l'éditeur est interdite. Les contenus publiés par les utilisateurs (annonces, messages, documents) restent leur propriété ; ils concèdent à l'éditeur le droit de les afficher aux fins du service, dans les conditions prévues par les [conditions générales d'utilisation](/cgu)."
+            }
+          ]
+        },
+        {
+          "id": "responsabilite",
+          "title": "Responsabilité",
+          "blocks": [
+            {
+              "p": "L'éditeur s'efforce d'assurer l'exactitude des informations diffusées, notamment les données d'entreprises issues des bases publiques (recherche-entreprises, INSEE, ADEME, BODACC), sans pouvoir en garantir l'exhaustivité ni l'actualité. Les estimations et les guides publiés sur le site sont informatifs et ne constituent pas un conseil personnalisé. L'éditeur ne garantit pas la conclusion d'une cession."
+            }
+          ]
+        },
+        {
+          "id": "signalement",
+          "title": "Signalement d'un contenu",
+          "blocks": [
+            {
+              "p": "Tout contenu inexact, trompeur, contraire aux conditions générales ou portant atteinte aux droits d'un tiers peut être signalé depuis la page [Signaler un contenu](/signaler) ou par e-mail à l'adresse de contact. Les signalements sont examinés et, le cas échéant, l'annonce est retirée avec un motif notifié à son auteur, conformément aux [conditions générales d'utilisation](/cgu)."
+            }
+          ]
+        },
+        {
+          "id": "point-de-contact",
+          "title": "Point de contact unique",
+          "blocks": [
+            {
+              "p": "Point de contact unique des autorités des États membres, de la Commission européenne et des utilisateurs (articles 11 et 12 du règlement (UE) 2022/2065 sur les services numériques) : {{contactEmail}}, en français ou en anglais."
+            }
+          ]
+        },
+        {
+          "id": "donnees",
+          "title": "Données personnelles",
+          "blocks": [
+            {
+              "p": "Le traitement des données personnelles est décrit dans notre [politique de confidentialité](/confidentialite)."
+            }
+          ]
+        }
+      ]
+    },
+    "privacy": {
+      "path": "/confidentialite",
+      "title": "Politique de confidentialité | {{brand}}",
+      "description": "Comment {{brand}} collecte et protège vos données personnelles : données traitées, finalités, bases légales, durées de conservation réelles, sous-traitants et droits RGPD.",
+      "h1": "Politique de confidentialité",
+      "updated": "2026-10-10",
+      "intro": "La confidentialité est au cœur de {{brand}} : les cédants nous confient des informations sensibles sur leur entreprise, les repreneurs sur leur projet et leur financement. Cette politique explique quelles données personnelles nous traitons, pourquoi, pendant combien de temps et comment exercer vos droits, conformément au Règlement général sur la protection des données (RGPD) et à la loi Informatique et Libertés.",
+      "sections": [
+        {
+          "id": "responsable",
+          "title": "Responsable du traitement",
+          "blocks": [
+            {
+              "legal": "controller"
+            },
+            {
+              "p": "Les coordonnées complètes de l'éditeur figurent dans les [mentions légales](/mentions-legales)."
+            }
+          ]
+        },
+        {
+          "id": "donnees",
+          "title": "Données collectées",
+          "blocks": [
+            {
+              "ul": [
+                "**Compte utilisateur** : nom, prénom, adresse e-mail (confirmée par un lien), téléphone, rôle (cédant ou repreneur), mot de passe (conservé sous forme chiffrée irréversible), préférences de notification.",
+                "**Profil de projet du repreneur** : type de reprise, budget, apport, mode de financement, zones et métiers recherchés, horizon, société et SIREN le cas échéant, expérience. Ces éléments forment la carte repreneur transmise au cédant, sous un pseudonyme avant l'accord de confidentialité.",
+                "**Vérification d'identité** : réalisée par notre prestataire Stripe Identity à partir d'une pièce d'identité. Nous conservons le rapport de vérification (nom, prénom, date de naissance, type et pays du document, résultat, horodatage, identifiant de session) ; les images des pièces d'identité ne sont jamais stockées par nos soins.",
+                "**Informations sur l'entreprise** : SIRET et données publiques associées (dénomination, forme, code NAF, date de création, effectif, dirigeants, publications BODACC), qualifications RGE issues de la base publique de l'ADEME, données de l'annonce (métiers, région, département, indicateurs financiers, prix demandé, description), adresse postale du mandant.",
+                "**Documents de l'espace sécurisé** : documents déposés par les cédants (bilans, contrats, certificats…), journal des consultations (lecteur, date et heure).",
+                "**Échanges et actes** : messages de la messagerie, mandats, accords de confidentialité, offres indicatives et déclarations signés en ligne, avec leur dossier de preuve (empreinte du document, horodatage, adresse IP, navigateur, code utilisé), déclaration d'origine des fonds, étape de vente et factures.",
+                "**Estimations et alertes sans compte** : adresse e-mail et critères choisis, activés après confirmation de l'adresse.",
+                "**Signalements** : motif, référence et description transmis depuis la page de signalement, adresse e-mail si vous la fournissez.",
+                "**Données techniques** : journaux de connexion et adresse IP, à des fins de sécurité ; statistiques de fréquentation sans cookie, à partir d'une empreinte journalière qui ne permet pas de retrouver l'adresse IP."
+              ]
+            }
+          ]
+        },
+        {
+          "id": "finalites",
+          "title": "Finalités et bases légales",
+          "blocks": [
+            {
+              "ul": [
+                "**Création et gestion du compte, publication des annonces, mise en relation, messagerie, accords de confidentialité, offres, espace documents, étape de vente et facturation** : exécution du contrat (conditions générales d'utilisation et mandat).",
+                "**Vérification d'identité des utilisateurs, déclaration d'origine des fonds, conservation des dossiers de preuve** : obligations légales de l'intermédiaire (loi Hoguet, lutte contre le blanchiment) et intérêt légitime à sécuriser les échanges et à prévenir la fraude.",
+                "**Contrôles sur les bases publiques et veille BODACC** : exécution du mandat et intérêt légitime à vérifier les annonces et le respect de la clause de suite.",
+                "**Journal d'accès et filigrane des documents** : intérêt légitime des cédants et de l'éditeur à protéger la confidentialité des informations partagées.",
+                "**E-mails de service** (confirmation d'adresse, contacts, demandes de dossier, codes de signature, offres, relances) : exécution du contrat ; les e-mails non indispensables peuvent être désactivés depuis votre profil.",
+                "**Alertes et estimations sans compte** : consentement, retirable à tout moment par le lien de désinscription.",
+                "**Statistiques de fréquentation et amélioration du service** : intérêt légitime, sans cookie ni suivi individuel.",
+                "**Respect des obligations légales** (comptabilité, registre des mandats, réponse aux autorités) : obligation légale."
+              ]
+            }
+          ]
+        },
+        {
+          "id": "durees",
+          "title": "Durées de conservation",
+          "blocks": [
+            {
+              "ul": [
+                "**Compte et profil** : 3 ans après la dernière connexion, puis suppression ou anonymisation.",
+                "**Mandats, factures et preuves de signature** : 10 ans (obligation comptable), même après suppression du compte, les données personnelles étant alors remplacées dans le compte.",
+                "**Rapport de vérification d'identité** : 5 ans après la fin de la relation (obligations de lutte contre le blanchiment) ; les images des pièces d'identité ne sont jamais stockées.",
+                "**Messages** : 3 ans.",
+                "**Documents de l'espace sécurisé** : jusqu'à 3 ans après le retrait ou la vente de l'annonce (fin du mandat), puis suppression automatique ; le cédant peut les supprimer à tout moment. **Journal d'accès** : 3 ans.",
+                "**Alertes et e-mails non transactionnels** : jusqu'au désabonnement.",
+                "**Estimations** : 7 jours sans confirmation de l'adresse e-mail, 3 ans après confirmation.",
+                "**Journaux techniques de sécurité** : 12 mois.",
+                "**Statistiques de fréquentation** : anonymes, sans cookie ni adresse IP."
+              ]
+            }
+          ]
+        },
+        {
+          "id": "destinataires",
+          "title": "Destinataires et sous-traitants",
+          "blocks": [
+            {
+              "p": "Vos données sont accessibles aux seules personnes habilitées de l'éditeur. Les informations que vous choisissez de partager (carte repreneur, messages, identité et nom de l'entreprise après accord de confidentialité, documents) sont communiquées aux utilisateurs concernés. Les bases publiques consultées (recherche-entreprises, ADEME, BODACC) ne reçoivent que le SIREN ou le SIRET interrogé. Nous faisons appel aux sous-traitants suivants :"
+            },
+            {
+              "ul": [
+                "**Stripe** : vérification d'identité (Stripe Identity).",
+                "**Brevo** : envoi des e-mails de service et des alertes.",
+                "**Hébergeur de la plateforme** : hébergement de l'application et de la base de données (voir les mentions légales).",
+                "**Service de stockage compatible S3**, lorsqu'il est activé : conservation des documents et des sauvegardes chiffrées."
+              ]
+            },
+            {
+              "p": "Certains prestataires peuvent traiter des données en dehors de l'Union européenne. Ces transferts sont encadrés par les garanties prévues par le RGPD (décision d'adéquation ou clauses contractuelles types de la Commission européenne). Nous ne vendons pas vos données et n'utilisons aucun outil publicitaire tiers."
+            }
+          ]
+        },
+        {
+          "id": "cookies",
+          "title": "Cookies et stockage local",
+          "blocks": [
+            {
+              "p": "La plateforme n'utilise aucun cookie de suivi. Le stockage local de votre navigateur conserve votre session et certaines préférences, strictement nécessaires au fonctionnement du service. Les statistiques de fréquentation sont calculées par nos soins, sans cookie, sans identifiant stocké dans votre navigateur et sans transmission à un tiers."
+            }
+          ]
+        },
+        {
+          "id": "securite",
+          "title": "Sécurité",
+          "blocks": [
+            {
+              "p": "Les échanges sont chiffrés (HTTPS), les mots de passe sont stockés sous forme chiffrée irréversible, l'accès aux documents est réservé aux repreneurs autorisés par le cédant après vérification d'identité et accord de confidentialité, avec filigrane nominatif et journal des consultations. Les sauvegardes sont quotidiennes et conservées 14 jours. L'accès administrateur est protégé par un second facteur."
+            }
+          ]
+        },
+        {
+          "id": "droits",
+          "title": "Vos droits",
+          "blocks": [
+            {
+              "p": "Vous disposez d'un droit d'accès, de rectification, d'effacement, de limitation, d'opposition et de portabilité de vos données, ainsi que du droit de définir des directives relatives à leur sort après votre décès. Lorsque le traitement repose sur votre consentement, vous pouvez le retirer à tout moment. Depuis votre profil, vous pouvez exporter vos données et supprimer votre compte : le compte est anonymisé, les mandats, factures et preuves de signature étant conservés pendant la durée légale."
+            },
+            {
+              "legal": "contact"
+            },
+            {
+              "p": "Si vous estimez que vos droits ne sont pas respectés, vous pouvez introduire une réclamation auprès de la CNIL (www.cnil.fr)."
+            }
+          ]
+        },
+        {
+          "id": "modifications",
+          "title": "Modifications",
+          "blocks": [
+            {
+              "p": "Cette politique peut être mise à jour pour tenir compte des évolutions du service ou de la réglementation. La date de dernière mise à jour figure en haut de cette page."
+            }
+          ]
+        }
+      ]
+    },
+    "cgu": {
+      "path": "/cgu",
+      "title": "Conditions générales d'utilisation | {{brand}}",
+      "description": "Conditions générales d'utilisation de {{brand}} : comptes, annonces anonymes, mandat, repreneurs, contenus publiés, modération, signalement, rémunération et responsabilité.",
+      "h1": "Conditions générales d'utilisation",
+      "updated": "2026-10-10",
+      "intro": "Les présentes conditions régissent l'accès et l'utilisation de la plateforme {{brand}} (et de sa verticale {{vertical}}), éditée par {{legalName}}. En créant un compte ou en utilisant les services sans compte (estimation, alerte, signalement), vous les acceptez. Le mandat de vente signé par les cédants et l'accord de confidentialité signé par les repreneurs complètent ces conditions pour les opérations qu'ils encadrent.",
+      "sections": [
+        {
+          "id": "objet",
+          "title": "1. Objet et rôle de la plateforme",
+          "blocks": [
+            {
+              "p": "La plateforme met en relation des dirigeants d'entreprises du bâtiment qui souhaitent céder leur entreprise (les cédants) et des personnes ou sociétés qui souhaitent en reprendre une (les repreneurs). Elle publie des annonces anonymes, contrôle les entreprises et les repreneurs sur des bases publiques et des déclarations, fournit une messagerie, un espace documents sécurisé et des outils de signature en ligne, et tient le registre des mandats."
+            },
+            {
+              "p": "L'éditeur agit comme intermédiaire au sens de la loi Hoguet, sous couvert de sa carte professionnelle. Il ne négocie pas pour le compte des parties, ne rédige pas les actes de cession et ne fournit pas de conseil juridique, fiscal ou financier. {{hoguetArt6}}"
+            }
+          ]
+        },
+        {
+          "id": "comptes",
+          "title": "2. Comptes",
+          "blocks": [
+            {
+              "ul": [
+                "Un compte est personnel : une personne physique, majeure, agissant pour elle-même ou pour la société qu'elle représente. Un seul compte par personne.",
+                "L'adresse e-mail doit être confirmée. Tant qu'elle ne l'est pas, le compte permet de consulter le site mais pas de contacter, de créer une alerte, de demander un code de signature ni de publier.",
+                "Les informations fournies doivent être exactes et tenues à jour. Le cédant déclare avoir qualité pour engager la société ou le propriétaire du fonds ; le repreneur décrit sincèrement son projet et ses moyens de financement.",
+                "La vérification d'identité est exigée du repreneur pour signer un accord de confidentialité et du cédant pour signer un mandat. Elle est réalisée par un prestataire à partir d'une pièce d'identité.",
+                "Vous êtes responsable de la confidentialité de votre mot de passe et des actions réalisées depuis votre compte. Les codes de signature reçus par e-mail sont strictement personnels.",
+                "Vous pouvez exporter vos données et supprimer votre compte à tout moment depuis votre profil, dans les conditions de la politique de confidentialité."
+              ]
+            }
+          ]
+        },
+        {
+          "id": "cedants",
+          "title": "3. Services pour les cédants",
+          "blocks": [
+            {
+              "p": "Le cédant crée une annonce anonyme décrivant son entreprise (métiers, région et département, effectif, indicateurs financiers, prix demandé, conditions de cession). La publication est subordonnée à la confirmation de l'adresse e-mail, à la vérification de l'identité du signataire, à la signature du mandat de vente simple, à la fourniture du SIRET et à la réussite des contrôles automatiques (SIREN actif, absence de doublon, au moins un métier, prix renseigné)."
+            },
+            {
+              "p": "Le mandat est simple et non exclusif, d'une durée de 12 mois, résiliable par chacune des parties avec un préavis de 15 jours. Sa rémunération, due uniquement en cas de cession conclue avec un repreneur nommément présenté par la plateforme, est décrite à l'article 9 et dans le mandat lui-même. Le cédant s'engage à signaler toute vente, promesse ou négociation directe avec un repreneur présenté, et à répondre aux demandes dans un délai raisonnable."
+            },
+            {
+              "p": "Le cédant peut mettre son annonce en pause, la retirer, la déclarer vendue via la plateforme ou autrement, résilier ou prolonger son mandat depuis son espace. Une annonce retirée par la modération rend le mandat caduc."
+            }
+          ]
+        },
+        {
+          "id": "repreneurs",
+          "title": "4. Services pour les repreneurs",
+          "blocks": [
+            {
+              "p": "La recherche, les alertes et la prise de contact sont sans frais. Pour contacter un cédant, le repreneur décrit son projet (type de reprise, budget, apport, financement, zones, métiers, horizon) ; ce profil, pseudonymisé, est transmis au cédant avec le message. Le cédant est libre de répondre ou non."
+            },
+            {
+              "p": "L'accès aux documents d'une entreprise suppose, dans l'ordre, l'accord du cédant, la vérification d'identité du repreneur, la signature par code e-mail de l'accord de confidentialité et une déclaration d'origine des fonds. Le repreneur s'engage à n'utiliser les informations reçues que pour l'étude de la reprise, à ne pas contacter les salariés, clients ou fournisseurs sans l'accord écrit du cédant, et à informer le cédant et l'éditeur de toute négociation directe."
+            },
+            {
+              "p": "Les offres indicatives sont signées en ligne par code. Elles expriment l'intention du repreneur aux conditions qu'elles précisent (montant, objet, financement, conditions, durée de validité) sans constituer une promesse d'achat ; leur acceptation par le cédant ne constitue pas une promesse de vente. Les parties s'engagent seulement à poursuivre de bonne foi la négociation et la rédaction des actes avec leurs conseils ; seul l'acte de cession signé les engage sur la vente. Une offre non acceptée dans son délai de validité est caduque."
+            }
+          ]
+        },
+        {
+          "id": "contenus",
+          "title": "5. Contenus publiés",
+          "blocks": [
+            {
+              "p": "Les utilisateurs sont responsables des contenus qu'ils publient (annonces, descriptions, messages, documents, offres). Ils garantissent qu'ils sont exacts, qu'ils disposent des droits nécessaires et qu'ils ne portent atteinte à aucun tiers. Sont notamment interdits :"
+            },
+            {
+              "ul": [
+                "la publication de coordonnées (téléphone, e-mail, adresse, site, réseaux sociaux) ou d'éléments permettant d'identifier l'entreprise dans une annonce anonyme ou dans un message avant l'accord de confidentialité ; ces éléments sont masqués automatiquement et leur contournement répété entraîne la suspension du compte ;",
+                "les informations fausses, trompeuses ou obsolètes sur l'entreprise, ses chiffres, ses qualifications ou le projet du repreneur ;",
+                "les annonces d'entreprises hors du périmètre du bâtiment, les annonces en double, ou publiées par une personne sans qualité pour le faire ;",
+                "tout usage de la plateforme à des fins de fraude, de blanchiment, de démarchage ou de collecte de données ;",
+                "tout contenu illicite, diffamatoire ou contraire aux bonnes mœurs."
+              ]
+            },
+            {
+              "p": "Les utilisateurs concèdent à l'éditeur, pour la durée du service, le droit d'afficher, d'adapter (anonymisation, titre généré, filigrane) et de transmettre leurs contenus aux utilisateurs autorisés. L'éditeur peut refuser, modifier la présentation ou retirer tout contenu contraire aux présentes conditions."
+            }
+          ]
+        },
+        {
+          "id": "moderation",
+          "title": "6. Modération",
+          "blocks": [
+            {
+              "p": "La publication d'une annonce est automatique dès que les conditions de l'article 3 sont remplies. Chaque annonce publiée peut faire l'objet d'une relecture par l'éditeur et de contrôles sur les bases publiques : cohérence du dirigeant déclaré, code NAF, présence des qualifications RGE déclarées dans la liste de l'ADEME. Un écart est signalé sur l'annonce ou donne lieu à une demande de précision ; il ne bloque pas la publication."
+            },
+            {
+              "p": "L'éditeur peut retirer une annonce, avec un motif notifié à son auteur (coordonnées visibles, hors périmètre, informations inexactes, dirigeant non confirmé, doublon, autre motif précisé). Le cédant peut corriger et soumettre à nouveau son annonce ; le mandat attaché à une annonce retirée est caduc. Il peut aussi contester le retrait en répondant à l'e-mail qui le lui notifie ou en écrivant à {{contactEmail}} : l'éditeur réexamine la décision et lui répond avec un motif ; à défaut d'accord, il conserve ses recours devant le médiateur de la consommation lorsqu'il est consommateur et devant les juridictions compétentes (article 17 du règlement (UE) 2022/2065 sur les services numériques). Les annonces dont le mandat expire ou est dénoncé sont dépubliées à la date d'effet."
+            },
+            {
+              "p": "Une veille des publications légales (BODACC) est exercée sur les sociétés sous mandat, pendant le mandat et la période de la clause de suite ; une publication de cession ou de changement de dirigeant non déclarée donne lieu à une demande d'explication au cédant."
+            }
+          ]
+        },
+        {
+          "id": "signalement",
+          "title": "7. Signalement",
+          "blocks": [
+            {
+              "p": "Tout utilisateur ou visiteur peut signaler un contenu depuis la page [Signaler un contenu](/signaler) en indiquant le motif, la référence du contenu (adresse de la page ou code de l'annonce) et une description, ou par e-mail à l'adresse de contact. Les signalements sont examinés dans les meilleurs délais ; selon leur gravité, le contenu est corrigé, retiré ou conservé, et l'auteur du signalement est informé lorsqu'il a laissé une adresse. Les signalements abusifs ou répétés peuvent entraîner la suspension du compte de leur auteur."
+            }
+          ]
+        },
+        {
+          "id": "confidentialite",
+          "title": "8. Confidentialité et loyauté",
+          "blocks": [
+            {
+              "p": "Les informations échangées sur la plateforme sont confidentielles. Les parties s'interdisent de contourner la plateforme pour éluder la rémunération prévue au mandat : le cédant informe l'éditeur de toute négociation directe avec un repreneur présenté ; le repreneur informe le cédant et l'éditeur de toute négociation directe engagée après un accord de confidentialité. Les repreneurs présentés sont inscrits sur une liste nominative communiquée au cédant en fin de mandat."
+            }
+          ]
+        },
+        {
+          "id": "remuneration",
+          "title": "9. Rémunération",
+          "blocks": [
+            {
+              "p": "{{commissionSentence}}"
+            },
+            {
+              "p": "La commission est prévue dans le mandat simple signé par le cédant. Elle n'est due que si la cession (titres ou fonds, totale ou partielle, y compris par une société liée au repreneur) est conclue avec un repreneur nommément présenté par la plateforme, pendant le mandat ou dans les 18 mois qui suivent sa fin, et elle est exigible à la signature de l'acte définitif. Rien n'est demandé au repreneur, à aucune étape. {{hoguetArt6}}"
+            }
+          ]
+        },
+        {
+          "id": "responsabilite",
+          "title": "10. Responsabilité",
+          "blocks": [
+            {
+              "p": "L'éditeur fournit la plateforme, les contrôles et les outils décrits ci-dessus ; il ne garantit ni l'exactitude des informations fournies par les utilisateurs, ni la conclusion d'une cession, ni le résultat des estimations. Les décisions d'achat, de vente, de prix et de financement relèvent des seules parties, assistées de leurs conseils. L'éditeur n'est pas partie aux actes de cession."
+            },
+            {
+              "p": "L'éditeur s'efforce d'assurer la disponibilité du service mais ne garantit pas l'absence d'interruption. Sa responsabilité, lorsqu'elle est engagée, est limitée aux dommages directs et prévisibles, et au montant de la rémunération perçue pour l'opération concernée."
+            }
+          ]
+        },
+        {
+          "id": "suspension",
+          "title": "11. Suspension et résiliation",
+          "blocks": [
+            {
+              "p": "L'éditeur peut suspendre ou clôturer un compte en cas de manquement aux présentes conditions, notamment contournement des règles d'anonymat, informations fausses, fraude, signalements fondés ou usage abusif, après information de l'utilisateur sauf urgence. L'utilisateur peut supprimer son compte à tout moment. La suspension ou la clôture n'affecte pas les droits et obligations nés d'un mandat, d'un accord de confidentialité ou d'une offre déjà signés."
+            }
+          ]
+        },
+        {
+          "id": "donnees",
+          "title": "12. Données personnelles",
+          "blocks": [
+            {
+              "p": "Le traitement des données personnelles est décrit dans la [politique de confidentialité](/confidentialite), qui fait partie des présentes conditions."
+            }
+          ]
+        },
+        {
+          "id": "droit",
+          "title": "13. Droit applicable, médiation, litiges",
+          "blocks": [
+            {
+              "p": "Les présentes conditions sont soumises au droit français. En cas de litige avec un consommateur, celui-ci peut recourir au médiateur de la consommation mentionné dans les [mentions légales](/mentions-legales) lorsqu'il est désigné. À défaut d'accord amiable, les litiges relèvent des tribunaux compétents du siège de l'éditeur, le tribunal de commerce de Versailles pour les litiges entre professionnels."
+            },
+            {
+              "p": "L'éditeur peut modifier les présentes conditions ; la version applicable est celle en vigueur à la date d'utilisation, identifiée par la date figurant en haut de cette page. Les utilisateurs disposant d'un compte sont informés des modifications substantielles par e-mail."
+            }
+          ]
+        }
+      ]
+    },
+    "report": {
+      "path": "/signaler",
+      "title": "Signaler un contenu | {{brand}}",
+      "description": "Signalez une annonce ou un contenu inexact, trompeur, contenant des coordonnées ou contraire aux conditions d'utilisation de {{brand}}. Signalement examiné et traité avec un motif notifié.",
+      "h1": "Signaler un contenu",
+      "intro": "Une annonce contient des coordonnées, paraît inexacte ou hors périmètre, un message vous semble frauduleux ? Décrivez le problème : le signalement est enregistré et examiné. Vous pouvez aussi nous écrire directement par e-mail.",
+      "reasons": [
+        {
+          "value": "coordonnees",
+          "label": "Coordonnées ou identité visibles dans une annonce ou un message"
+        },
+        {
+          "value": "inexact",
+          "label": "Informations inexactes ou trompeuses"
+        },
+        {
+          "value": "hors_perimetre",
+          "label": "Entreprise hors du bâtiment ou annonce en double"
+        },
+        {
+          "value": "fraude",
+          "label": "Soupçon de fraude, d'usurpation ou de démarchage"
+        },
+        {
+          "value": "inapproprie",
+          "label": "Contenu inapproprié ou illicite"
+        },
+        {
+          "value": "autre",
+          "label": "Autre motif"
+        }
+      ],
+      "reasonLabel": "Motif",
+      "referenceLabel": "Référence du contenu",
+      "referenceHelp": "Adresse de la page ou code de l'annonce (ex. /company/…).",
+      "descriptionLabel": "Description",
+      "descriptionHelp": "Ce que vous avez constaté, en quelques phrases.",
+      "emailLabel": "Votre adresse e-mail (facultative)",
+      "emailHelp": "Pour être informé de la suite donnée. Elle n'est utilisée à aucune autre fin.",
+      "submit": "Envoyer le signalement",
+      "mailto": "Nous écrire par e-mail",
+      "mailSubject": "Signalement d'un contenu",
+      "successTitle": "Signalement enregistré",
+      "successText": "Merci. Il sera examiné dans les meilleurs délais ; si vous avez laissé une adresse, vous serez informé de la suite donnée. Pour compléter votre signalement ou joindre un document, écrivez-nous par e-mail.",
+      "errorText": "Le signalement n'a pas pu être enregistré. Écrivez-nous directement par e-mail : votre message est prérempli.",
+      "afterTitle": "Ce qui se passe ensuite",
+      "after": [
+        "Le signalement est examiné : relecture de l'annonce ou du message et contrôles sur les bases publiques.",
+        "Selon la gravité, le contenu est corrigé, retiré avec un motif notifié à son auteur, ou conservé.",
+        "Les signalements fondés peuvent entraîner la suspension du compte concerné, conformément aux [conditions générales d'utilisation](/cgu)."
+      ]
+    }
+  },
+  "notFound": {
+    "title": "Page introuvable | {{brand}}",
+    "h1": "Page introuvable",
+    "text": "La page que vous cherchez n'existe pas ou a été déplacée. Voici quelques pages utiles :",
+    "links": [
+      {
+        "to": "/",
+        "label": "Voir les annonces"
+      },
+      {
+        "to": "/estimer",
+        "label": "Estimer mon entreprise"
+      },
+      {
+        "to": "/register?role=seller",
+        "label": "Déposer une annonce"
+      },
+      {
+        "to": "/login",
+        "label": "Se connecter"
+      }
+    ]
+  }
+}

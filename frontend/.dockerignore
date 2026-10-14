@@ -1,0 +1,13 @@
+# Frontend Docker Ignore
+node_modules/
+.env
+.env.*
+build/
+.git/
+.gitignore
+README.md
+*.log
+.vscode/
+.idea/
+coverage/
+.eslintcache

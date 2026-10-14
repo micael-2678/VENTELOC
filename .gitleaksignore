@@ -1,0 +1,8 @@
+# Fuites historiques connues (audit du 9 octobre 2026, docs/revue-2026-10/tech-couts.md §5.1).
+# Les clés concernées ont été RÉVOQUÉES et régénérées ; elles restent dans l'historique Git.
+# Format : <commit>:<fichier>:<règle>:<ligne> (empreintes produites par `gitleaks git`).
+608c5f4e22b639ad4feac1da0b09b0a716ecc8ce:DOKPLOY_DEPLOYMENT.md:stripe-access-token:87
+608c5f4e22b639ad4feac1da0b09b0a716ecc8ce:DOKPLOY_DEPLOYMENT.md:sendinblue-api-token:90
+# Faux positif (gitleaks ≥ 8.28, règle generic-api-key) : exemple de documentation
+# « AWS_ACCESS_KEY_ID=<clé>  AWS_SECRET_ACCESS_KEY=<secret> » dans le guide Dokploy.
+95d4e0c100cf5b0f955596b93f98741c67bd31e8:DOKPLOY_DEPLOYMENT.md:generic-api-key:93

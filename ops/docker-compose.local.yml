@@ -1,0 +1,8 @@
+# Surcharge pour un lancement local ou un serveur SANS Dokploy (aucun Traefik devant) : publie nginx sur l'hôte.
+#   docker compose -f docker-compose.yml -f ops/docker-compose.local.yml up -d     → http://localhost:8080
+# HTTP_PORT change le port (ex. HTTP_PORT=80 sur un serveur nu, derrière votre propre terminaison TLS).
+# Ne pas utiliser dans Dokploy : les ports 80/443 de l'hôte y appartiennent à Traefik.
+services:
+  frontend:
+    ports:
+      - "${HTTP_PORT:-8080}:80"

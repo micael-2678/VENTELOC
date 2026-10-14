@@ -1,0 +1,31 @@
+{
+  "generated": "2026-10-10",
+  "routes": [
+    {
+      "path": "/",
+      "changefreq": "daily"
+    },
+    {
+      "path": "/estimer",
+      "changefreq": "monthly"
+    },
+    {
+      "path": "/mentions-legales",
+      "changefreq": "yearly"
+    },
+    {
+      "path": "/confidentialite",
+      "changefreq": "yearly",
+      "lastmod": "2026-10-10"
+    },
+    {
+      "path": "/cgu",
+      "changefreq": "yearly",
+      "lastmod": "2026-10-10"
+    },
+    {
+      "path": "/signaler",
+      "changefreq": "yearly"
+    }
+  ]
+}

@@ -1,0 +1,103 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  secrets:
+    # Détection de secrets sur tout l'historique avec le binaire gitleaks (gratuit, version épinglée et vérifiée
+    # par empreinte) : même résultat sur push et pull_request, sans licence ni appel à l'API GitHub.
+    # Les fuites historiques déjà révoquées et les faux positifs sont listés dans .gitleaksignore.
+    runs-on: ubuntu-latest
+    env:
+      GITLEAKS_VERSION: 8.30.0
+      GITLEAKS_SHA256: 79a3ab579b53f71efd634f3aaf7e04a0fa0cf206b7ed434638d1547a2470a66e
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks (historique complet)
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/gitleaks.tgz" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/gitleaks.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/gitleaks.tgz" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" git --redact --verbose --exit-code 1 .
+
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Dépendances
+        run: |
+          pip install "setuptools<70" wheel
+          pip install --no-build-isolation sib-api-v3-sdk
+          grep -v -i "sib-api" requirements.txt > /tmp/req.txt
+          pip install -r /tmp/req.txt -r requirements-dev.txt
+      - name: Tests API
+        run: pytest -q
+      - name: Variables d'environnement documentées (backend/.env.example)
+        working-directory: .
+        run: ops/tests/check_env_doc.sh
+
+  ops:
+    # Scripts d'exploitation et configuration de déploiement, sans Docker en marche ni MongoDB (outils simulés)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntaxe des scripts
+        run: for f in ops/*.sh ops/tests/*.sh; do bash -n "$f"; done
+      - name: Sauvegarde et restauration (mongodump simulé, .env copié de .env.example)
+        run: |
+          ops/tests/test_ops.sh
+          cp .env.example .env && RESTORE_DRY_RUN=1 ops/restore.sh --test x.archive.gz && rm .env
+      - name: nginx du frontend (IP client, /search, cache, CSP)
+        run: |
+          command -v nginx || (sudo apt-get update -q && sudo apt-get install -y -q nginx-core)
+          ops/tests/test_nginx.sh
+      - name: docker-compose.yml valide
+        run: |
+          cp .env.example .env
+          docker compose config -q
+          docker compose -f docker-compose.yml -f ops/docker-compose.local.yml config -q
+          rm .env
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      # Mêmes versions que l'image Docker (frontend/Dockerfile) : package-lock.json, jamais une résolution à neuf
+      - name: Dépendances (package-lock.json)
+        run: npm ci --legacy-peer-deps
+      - name: Lint
+        run: npm run lint
+      - name: Tests Jest
+        run: CI=true npx craco test --watchAll=false
+      - name: Build (les avertissements font échouer)
+        run: CI=true npm run build
+
+  docker:
+    # Construction des images de production (sur main seulement : quelques minutes de plus)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image backend
+        run: docker build -t cessionbatiment-backend ./backend
+      - name: Image frontend
+        run: docker build -t cessionbatiment-frontend ./frontend
