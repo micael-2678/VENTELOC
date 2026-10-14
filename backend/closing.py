@@ -2,9 +2,9 @@
 Étape de vente, facture et relances (SPEC §4.5), module nouveau.
 
 - Un `closing` est créé à l'acceptation d'une offre (`create_closing_for_offer`, appelée par server.py, ou
-  `POST /closing/from-offer/{offer_id}` pour une offre déjà acceptée) : {company_id, buyer_id, seller_id, offer_id,
+  `POST /closing/from-offer/{offer_id}` pour une offre déjà acceptée) : {property_id, buyer_id, seller_id, offer_id,
   sale_object, expected_date, redacteur, status} ; ou sans offre acceptée, par le cédant, pour un repreneur présenté
-  (`POST /closing/direct {company_id, buyer_id}`, SPEC §6 de l'API : `buyer_id` dans `presented_buyers`). Les deux parties reçoivent une checklist et peuvent renseigner le
+  (`POST /closing/direct {property_id, buyer_id}`, SPEC §6 de l'API : `buyer_id` dans `presented_buyers`). Les deux parties reçoivent une checklist et peuvent renseigner le
   rédacteur d'acte (`PUT /closing/{id}/redacteur`).
 - Relances J+30 / J+60 / J+90 (tâche quotidienne) avec trois réponses en un clic par lien signé
   (`GET /closing/{id}/status/{token}?answer=en_cours|signe|abandonne`).
@@ -145,7 +145,7 @@ EMAIL_TEMPLATES.setdefault("closing_checklist", {
     "html": """
     <h2>L'offre est acceptée, place à la signature</h2>
     <p>Bonjour {name},</p>
-    <p>L'offre de <strong>{amount}</strong> sur l'entreprise {company_label} est acceptée. Voici les étapes qui mènent à l'acte de cession :</p>
+    <p>L'offre de <strong>{amount}</strong> sur l'entreprise {property_label} est acceptée. Voici les étapes qui mènent à l'acte de cession :</p>
     <ol>
       <li><strong>Financement</strong> : accord de prêt ou justificatif des fonds du repreneur.</li>
       <li><strong>Audit</strong> : vérification des comptes, des contrats, des qualifications et de l'assurance décennale.</li>
@@ -158,11 +158,11 @@ EMAIL_TEMPLATES.setdefault("closing_checklist", {
 })
 
 EMAIL_TEMPLATES.setdefault("closing_followup", {
-    "subject": "Où en est la vente de {company_label} ?",
+    "subject": "Où en est la vente de {property_label} ?",
     "html": """
     <h2>Où en est la vente ?</h2>
     <p>Bonjour {name},</p>
-    <p>L'offre sur l'entreprise {company_label} a été acceptée il y a {days} jours. Où en êtes-vous ? Un seul clic suffit :</p>
+    <p>L'offre sur l'entreprise {property_label} a été acceptée il y a {days} jours. Où en êtes-vous ? Un seul clic suffit :</p>
     <p>
       <a href="{link_en_cours}">Toujours en cours</a><br>
       <a href="{link_signe}">L'acte est signé</a><br>
@@ -174,11 +174,11 @@ EMAIL_TEMPLATES.setdefault("closing_followup", {
 })
 
 EMAIL_TEMPLATES.setdefault("closing_redacteur_set", {
-    "subject": "Rédacteur de l'acte renseigné pour {company_label}",
+    "subject": "Rédacteur de l'acte renseigné pour {property_label}",
     "html": """
     <h2>Rédacteur de l'acte</h2>
     <p>Bonjour {name},</p>
-    <p>{by_label} a renseigné le rédacteur de l'acte de cession de {company_label} : <strong>{redacteur}</strong>.</p>
+    <p>{by_label} a renseigné le rédacteur de l'acte de cession de {property_label} : <strong>{redacteur}</strong>.</p>
     <p>Vous pouvez corriger ces coordonnées depuis votre espace. À la confirmation de la vente, l'ordre de paiement des honoraires est adressé au rédacteur renseigné ou confirmé par le cédant.</p>
     <p>Cordialement,<br>L'équipe {site_name}</p>
     """,
@@ -189,7 +189,7 @@ EMAIL_TEMPLATES.setdefault("closing_declared_to_confirm", {
     "html": """
     <h2>Une vente a été déclarée</h2>
     <p>Bonjour {name},</p>
-    <p>{by_label} a déclaré la vente de l'entreprise {company_label} : acte signé le <strong>{signed_on}</strong>, prix de <strong>{final_price}</strong>, {sale_object}.</p>
+    <p>{by_label} a déclaré la vente de l'entreprise {property_label} : acte signé le <strong>{signed_on}</strong>, prix de <strong>{final_price}</strong>, {sale_object}.</p>
     <p>Merci de confirmer ou de contester cette déclaration depuis votre espace. Sans réponse de votre part, elle sera considérée comme confirmée le {deadline}.</p>
     <p>À la confirmation, la facture d'honoraires de {site_name} est émise au cédant conformément au mandat.</p>
     <p>Cordialement,<br>L'équipe {site_name}</p>
@@ -201,7 +201,7 @@ EMAIL_TEMPLATES.setdefault("closing_declared_by_buyer", {
     "html": """
     <h2>Une vente a été déclarée</h2>
     <p>Bonjour {name},</p>
-    <p>{by_label} a déclaré la vente de l'entreprise {company_label} : acte signé le <strong>{signed_on}</strong>, prix de <strong>{final_price}</strong>, {sale_object}.</p>
+    <p>{by_label} a déclaré la vente de l'entreprise {property_label} : acte signé le <strong>{signed_on}</strong>, prix de <strong>{final_price}</strong>, {sale_object}.</p>
     <p>Merci de confirmer ou de contester cette déclaration depuis votre espace, de préférence avant le {deadline}. Rien n'est facturé ni retiré tant que vous ne l'avez pas confirmée : sans réponse, notre équipe reprendra contact avec vous.</p>
     <p>À la confirmation, la facture d'honoraires de {site_name} est émise au cédant conformément au mandat.</p>
     <p>Cordialement,<br>L'équipe {site_name}</p>
@@ -209,20 +209,20 @@ EMAIL_TEMPLATES.setdefault("closing_declared_by_buyer", {
 })
 
 EMAIL_TEMPLATES.setdefault("closing_declared_admin", {
-    "subject": "Vente déclarée : {company_label}",
+    "subject": "Vente déclarée : {property_label}",
     "html": """
     <h2>Vente déclarée</h2>
-    <p>{by_label} a déclaré la vente de {company_label} (annonce {company_id}) : acte signé le {signed_on}, prix {final_price}, {sale_object}.</p>
+    <p>{by_label} a déclaré la vente de {property_label} (annonce {property_id}) : acte signé le {signed_on}, prix {final_price}, {sale_object}.</p>
     <p>Confirmation attendue de l'autre partie avant le {deadline} (automatique ensuite pour une déclaration du cédant ; une déclaration du repreneur attend l'accord du cédant ou votre arbitrage). Honoraires estimés : {commission_ht} HT.</p>
     """,
 })
 
 EMAIL_TEMPLATES.setdefault("closing_disputed", {
-    "subject": "Déclaration de vente contestée : {company_label}",
+    "subject": "Déclaration de vente contestée : {property_label}",
     "html": """
     <h2>La déclaration de vente est contestée</h2>
     <p>Bonjour {name},</p>
-    <p>{by_label} conteste la déclaration de vente de {company_label} pour le motif suivant :</p>
+    <p>{by_label} conteste la déclaration de vente de {property_label} pour le motif suivant :</p>
     <p><em>{reason}</em></p>
     <p>Nous examinons la situation et revenons vers vous. Vous pouvez corriger votre déclaration depuis votre espace si une information était inexacte.</p>
     <p>Cordialement,<br>L'équipe {site_name}</p>
@@ -230,21 +230,21 @@ EMAIL_TEMPLATES.setdefault("closing_disputed", {
 })
 
 EMAIL_TEMPLATES.setdefault("closing_disputed_admin", {
-    "subject": "Contestation d'une vente déclarée : {company_label}",
+    "subject": "Contestation d'une vente déclarée : {property_label}",
     "html": """
     <h2>Déclaration de vente contestée</h2>
-    <p>{by_label} conteste la déclaration de vente de {company_label} (annonce {company_id}) : acte déclaré signé le {signed_on}, prix {final_price}.</p>
+    <p>{by_label} conteste la déclaration de vente de {property_label} (annonce {property_id}) : acte déclaré signé le {signed_on}, prix {final_price}.</p>
     <p>Motif : <em>{reason}</em></p>
     <p>La ligne est dans « À faire » : confirmer la vente ou annuler la déclaration depuis l'administration.</p>
     """,
 })
 
 EMAIL_TEMPLATES.setdefault("closing_confirmed_buyer", {
-    "subject": "Vente confirmée : {company_label}",
+    "subject": "Vente confirmée : {property_label}",
     "html": """
     <h2>Félicitations pour cette reprise</h2>
     <p>Bonjour {name},</p>
-    <p>La vente de l'entreprise {company_label} est confirmée (acte signé le {signed_on}). Nous vous souhaitons une belle réussite.</p>
+    <p>La vente de l'entreprise {property_label} est confirmée (acte signé le {signed_on}). Nous vous souhaitons une belle réussite.</p>
     <p>Pensez à notifier le changement de dirigeant aux organismes de qualification et à votre assureur décennale ; le diagnostic de transmissibilité reste consultable depuis votre espace.</p>
     <p>Cordialement,<br>L'équipe {site_name}</p>
     """,
@@ -255,7 +255,7 @@ EMAIL_TEMPLATES.setdefault("invoice_issued", {
     "html": """
     <h2>Facture d'honoraires</h2>
     <p>Bonjour {name},</p>
-    <p>La vente de {company_label} est confirmée. Conformément au mandat n° {registry_number}, voici la facture d'honoraires de {site_name} :</p>
+    <p>La vente de {property_label} est confirmée. Conformément au mandat n° {registry_number}, voici la facture d'honoraires de {site_name} :</p>
     <ul>
       <li>Facture n° <strong>{number}</strong> du {issued_on}</li>
       <li>Montant : <strong>{total_ht} HT</strong>, TVA {vat}, soit <strong>{total_ttc} TTC</strong></li>
@@ -320,11 +320,11 @@ EMAIL_TEMPLATES.setdefault("invoice_partial_payment", {
 })
 
 EMAIL_TEMPLATES.setdefault("payment_order_redacteur", {
-    "subject": "Ordre de paiement des honoraires — cession de {company_label}",
+    "subject": "Ordre de paiement des honoraires — cession de {property_label}",
     "html": """
     <h2>Ordre de paiement des honoraires d'intermédiation</h2>
     <p>Bonjour {name},</p>
-    <p>Vous êtes désigné comme rédacteur de l'acte de cession de la société {company_label}. Dans le cadre du mandat de vente n° {registry_number} conclu avec {site_name} (AlterEgo SAS, carte professionnelle T), le cédant a donné ordre irrévocable de régler nos honoraires sur le prix de cession.</p>
+    <p>Vous êtes désigné comme rédacteur de l'acte de cession de la société {property_label}. Dans le cadre du mandat de vente n° {registry_number} conclu avec {site_name} (AlterEgo SAS, carte professionnelle T), le cédant a donné ordre irrévocable de régler nos honoraires sur le prix de cession.</p>
     <ul>
       <li>Facture n° <strong>{number}</strong> du {issued_on} : <strong>{total_ttc} TTC</strong> ({total_ht} HT)</li>
       <li>Échéance : {due_on}</li>
@@ -385,12 +385,12 @@ def fmt_siren(value: str) -> str:
     return digits or ""
 
 
-def company_siren(company: dict) -> str:
-    return re.sub(r"\D", "", str(company.get("siren") or company.get("siret") or ""))[:9]
+def property_siren(property: dict) -> str:
+    return re.sub(r"\D", "", str(property.get("siren") or property.get("siret") or ""))[:9]
 
 
-def company_label(company: dict) -> str:
-    return company.get("company_name") or company.get("title") or f"annonce {str(company.get('id', ''))[:8]}"
+def property_label(property: dict) -> str:
+    return property.get("company_name") or property.get("title") or f"annonce {str(property.get('id', ''))[:8]}"
 
 
 def vat_number() -> str:
@@ -492,13 +492,13 @@ async def close_todos(todo_type: str, key: str, note: str = "") -> int:
     return res.modified_count
 
 
-async def _mandate_for(company: dict) -> Optional[dict]:
-    """Mandat signé de l'annonce (company.mandate_id, sinon le dernier mandat signé de la société)"""
-    if company.get("mandate_id"):
-        mandate = await db.generated_contracts.find_one({"id": company["mandate_id"], "type": "mandat"}, {"_id": 0})
+async def _mandate_for(property: dict) -> Optional[dict]:
+    """Mandat signé de l'annonce (property.mandate_id, sinon le dernier mandat signé de la société)"""
+    if property.get("mandate_id"):
+        mandate = await db.generated_contracts.find_one({"id": property["mandate_id"], "type": "mandat"}, {"_id": 0})
         if mandate:
             return mandate
-    return await db.generated_contracts.find_one({"company_id": company["id"], "type": "mandat", "status": "signed"},
+    return await db.generated_contracts.find_one({"property_id": property["id"], "type": "mandat", "status": "signed"},
                                                  {"_id": 0}, sort=[("signed_at", -1)])
 
 
@@ -526,29 +526,29 @@ def is_direct_offer_id(value) -> bool:
     return isinstance(value, str) and value.startswith(DIRECT_OFFER_PREFIX)
 
 
-async def _has_test_data(company: dict, *user_ids) -> bool:
+async def _has_test_data(property: dict, *user_ids) -> bool:
     """Donnée de test par ses liens (indépendamment du mode) : annonce de test ou partie dont le compte est un compte de test"""
-    if is_test_related(company):
+    if is_test_related(property):
         return True
     ids = [u for u in user_ids if u]
     return bool(ids) and await db.users.find_one({"id": {"$in": ids}, "is_test": True}, {"_id": 0, "id": 1}) is not None
 
 
-async def _is_test_closing(company: dict, *user_ids) -> bool:
+async def _is_test_closing(property: dict, *user_ids) -> bool:
     """Étape de vente de test : mode test actif, annonce de test ou partie dont le compte est un compte de test"""
-    return test_mode_enabled() or await _has_test_data(company, *user_ids)
+    return test_mode_enabled() or await _has_test_data(property, *user_ids)
 
 
-async def _new_closing(company: dict, buyer_id: str, seller_id: str, sale_object: Optional[str], expected: Optional[date],
+async def _new_closing(property: dict, buyer_id: str, seller_id: str, sale_object: Optional[str], expected: Optional[date],
                        amount: float, offer_id: Optional[str], accepted_at: Optional[str], notify: bool, origin: str) -> dict:
     now = _now()
     if sale_object not in SALE_OBJECTS:
         sale_object = None
     closing = {
         "id": str(uuid.uuid4()),
-        "company_id": company["id"],
-        "company_label": company_label(company),
-        "company_title": company.get("title") or company_label(company),
+        "property_id": property["id"],
+        "property_label": property_label(property),
+        "property_title": property.get("title") or property_label(property),
         "buyer_id": buyer_id,
         "seller_id": seller_id,
         "offer_id": offer_id,
@@ -571,38 +571,38 @@ async def _new_closing(company: dict, buyer_id: str, seller_id: str, sale_object
         "tokens": {"seller": secrets.token_urlsafe(24), "buyer": secrets.token_urlsafe(24)},
         "payment_order_token": secrets.token_urlsafe(24),
     }
-    if await _is_test_closing(company, buyer_id, seller_id):
+    if await _is_test_closing(property, buyer_id, seller_id):
         closing["is_test"] = True
     await db.closings.insert_one(closing)
     closing.pop("_id", None)
     if notify:
         amount_text = fmt_eur_fr(closing["offer_amount"]) if closing["offer_amount"] else "à définir dans l'acte"
         for user_id in (seller_id, buyer_id):
-            await email_user(user_id, "closing_checklist", amount=amount_text, company_label=closing["company_label"])
+            await email_user(user_id, "closing_checklist", amount=amount_text, property_label=closing["property_label"])
     return closing
 
 
-async def create_closing_for_offer(offer: dict, company: dict, notify: bool = True) -> dict:
+async def create_closing_for_offer(offer: dict, property: dict, notify: bool = True) -> dict:
     """Crée (une seule fois) l'étape de vente d'une offre acceptée et envoie la checklist aux deux parties.
     Appelée par server.py à l'acceptation d'une offre (contre-signature du cédant ou acceptation d'une contre-proposition)."""
     existing = await db.closings.find_one({"offer_id": offer["id"]}, {"_id": 0})
     if existing:
         return existing
-    closing = await _new_closing(company, offer["buyer_id"], offer.get("seller_id") or company.get("seller_id"),
-                                 offer.get("sale_object") or company.get("sale_object"), _parse_date(offer.get("target_date")),
+    closing = await _new_closing(property, offer["buyer_id"], offer.get("seller_id") or property.get("seller_id"),
+                                 offer.get("sale_object") or property.get("sale_object"), _parse_date(offer.get("target_date")),
                                  offer.get("amount") or 0, offer["id"], offer.get("responded_at"), notify, "offer")
     await db.offers.update_one({"id": offer["id"]}, {"$set": {"closing_id": closing["id"]}})
     return closing
 
 
-async def create_closing_direct(company: dict, buyer_id: str, notify: bool = True) -> dict:
+async def create_closing_direct(property: dict, buyer_id: str, notify: bool = True) -> dict:
     """Vente via la plateforme sans offre acceptée : étape de vente ouverte par le cédant pour un repreneur présenté
     (une seule étape en cours par couple annonce / repreneur)."""
-    existing = await db.closings.find_one({"company_id": company["id"], "buyer_id": buyer_id,
+    existing = await db.closings.find_one({"property_id": property["id"], "buyer_id": buyer_id,
                                            "status": {"$in": [STATUS_IN_PROGRESS, STATUS_DECLARED, STATUS_DISPUTED]}}, {"_id": 0})
     if existing:
         return existing
-    return await _new_closing(company, buyer_id, company.get("seller_id"), company.get("sale_object"), None,
+    return await _new_closing(property, buyer_id, property.get("seller_id"), property.get("sale_object"), None,
                               0, DIRECT_OFFER_PREFIX + str(uuid.uuid4()), None, notify, "direct")
 
 
@@ -652,7 +652,7 @@ class ResolveInput(BaseModel):
 
 
 class DirectClosingInput(BaseModel):
-    company_id: str
+    property_id: str
     buyer_id: str
 
 
@@ -670,9 +670,9 @@ async def _closing_view(closing: dict, user: dict) -> dict:
     doc = public_closing(closing)
     doc["role"] = closing_role(closing, user)
     doc["followup_links"] = None
-    if not doc.get("company_title"):
-        company = await db.companies.find_one({"id": closing.get("company_id")}, {"_id": 0, "title": 1, "company_name": 1, "id": 1})
-        doc["company_title"] = (company or {}).get("title") or closing.get("company_label") or ""
+    if not doc.get("property_title"):
+        property = await db.properties.find_one({"id": closing.get("property_id")}, {"_id": 0, "title": 1, "company_name": 1, "id": 1})
+        doc["property_title"] = (property or {}).get("title") or closing.get("property_label") or ""
     # Facture et commission : cédant (débiteur) et admin uniquement. Le repreneur ne voit ni l'adresse, ni l'e-mail,
     # ni le SIREN du cédant (bloc débiteur), ni le montant des honoraires.
     seller_side = doc["role"] in ("seller", "admin")
@@ -708,10 +708,10 @@ async def closing_from_offer(offer_id: str, current_user: dict = Depends(get_cur
         raise HTTPException(status_code=403, detail="Non autorisé")
     if offer.get("status") != "accepted":
         raise HTTPException(status_code=400, detail="Seule une offre acceptée ouvre une étape de vente")
-    company = await db.companies.find_one({"id": offer["company_id"]}, {"_id": 0})
-    if not company:
+    property = await db.properties.find_one({"id": offer["property_id"]}, {"_id": 0})
+    if not property:
         raise HTTPException(status_code=404, detail="Entreprise introuvable")
-    closing = await create_closing_for_offer(offer, company)
+    closing = await create_closing_for_offer(offer, property)
     return await _closing_view(closing, current_user)
 
 
@@ -719,16 +719,16 @@ async def closing_from_offer(offer_id: str, current_user: dict = Depends(get_cur
 async def closing_direct(data: DirectClosingInput, current_user: dict = Depends(get_current_user)):
     """Cédant : ouvre l'étape de vente avec un repreneur présenté (NDA signé) sans offre acceptée sur la plateforme ;
     la déclaration de vente (§7) suit. Le repreneur doit figurer dans `presented_buyers` de l'annonce."""
-    company = await db.companies.find_one({"id": data.company_id}, {"_id": 0})
-    if not company:
+    property = await db.properties.find_one({"id": data.property_id}, {"_id": 0})
+    if not property:
         raise HTTPException(status_code=404, detail="Entreprise introuvable")
-    if current_user.get("role") != "admin" and current_user["id"] not in (company.get("seller_id"), company.get("president_id")):
+    if current_user.get("role") != "admin" and current_user["id"] not in (property.get("seller_id"), property.get("president_id")):
         raise HTTPException(status_code=403, detail={"code": "not_allowed", "message": "Seul le cédant peut ouvrir une étape de vente"})
-    presented = {p.get("buyer_id") for p in (company.get("presented_buyers") or [])}
+    presented = {p.get("buyer_id") for p in (property.get("presented_buyers") or [])}
     if data.buyer_id not in presented:
         raise HTTPException(status_code=400, detail={"code": "validation", "message": "Ce repreneur ne figure pas sur la liste des repreneurs présentés (accord de confidentialité signé)",
                                                      "missing": ["buyer_id"]})
-    closing = await create_closing_direct(company, data.buyer_id)
+    closing = await create_closing_direct(property, data.buyer_id)
     return await _closing_view(closing, current_user)
 
 
@@ -774,7 +774,7 @@ async def set_redacteur(closing_id: str, data: RedacteurInput, current_user: dic
             closing = await db.closings.find_one({"id": closing_id}, {"_id": 0}) or closing
     if role in ("seller", "buyer"):
         other_id = closing.get(f"{_other_role(role)}_id")
-        await email_user(other_id, "closing_redacteur_set", company_label=closing["company_label"],
+        await email_user(other_id, "closing_redacteur_set", property_label=closing["property_label"],
                          by_label=party_label(role), redacteur=_redacteur_text(redacteur))
     return await _closing_view(closing, current_user)
 
@@ -913,11 +913,11 @@ async def declare_sale(closing_id: str, data: DeclareInput, current_user: dict =
                  "updated_at": _iso(now)},
         "$push": push})
     # Le SIREN n'est plus à surveiller (veille BODACC) : incidents clos, vente notée sur l'annonce
-    await db.incidents.update_many({"company_id": closing["company_id"], "status": "open"},
+    await db.incidents.update_many({"property_id": closing["property_id"], "status": "open"},
                                    {"$set": {"status": "closed", "closed_at": _iso(now), "note": "Vente déclarée"}})
-    await db.companies.update_one({"id": closing["company_id"]}, {"$set": {"sale_declared_at": _iso(now), "closing_id": closing_id}})
+    await db.properties.update_one({"id": closing["property_id"]}, {"$set": {"sale_declared_at": _iso(now), "closing_id": closing_id}})
     commission = business_model.calculate_commission(declaration["final_price"])
-    values = {"company_label": closing["company_label"], "company_id": closing["company_id"], "by_label": party_label(role),
+    values = {"property_label": closing["property_label"], "property_id": closing["property_id"], "by_label": party_label(role),
               "signed_on": fmt_date_fr(signed_on), "final_price": fmt_eur_fr(declaration["final_price"]),
               "sale_object": SALE_OBJECT_LABELS[sale_object], "deadline": fmt_date_fr(deadline),
               "commission_ht": fmt_eur_cents(commission["final_commission_ht"])}
@@ -947,7 +947,7 @@ async def confirm_closing(closing: dict, by: str, now: Optional[datetime] = None
     if res.modified_count == 0:
         return await db.closings.find_one({"id": closing["id"]}, {"_id": 0})
     closing.update({"status": STATUS_CONFIRMED, "confirmed_at": _iso(now), "confirmed_by": by})
-    await db.companies.update_one({"id": closing["company_id"]},
+    await db.properties.update_one({"id": closing["property_id"]},
                                   {"$set": {"status": "sold", "sold_at": _iso(now), "sale_declared_at": _iso(now),
                                             "sold_via_platform": True, "closing_id": closing["id"], "updated_at": _iso(now)}})
     if not is_direct_offer_id(closing.get("offer_id")):
@@ -955,7 +955,7 @@ async def confirm_closing(closing: dict, by: str, now: Optional[datetime] = None
     await close_todos(TODO_CLOSING_DISPUTED, closing["id"], "Vente confirmée")
     await close_todos(TODO_DECLARATION_UNCONFIRMED, closing["id"], "Vente confirmée")
     invoice = await issue_invoice(closing, now)
-    await email_user(closing.get("buyer_id"), "closing_confirmed_buyer", company_label=closing["company_label"],
+    await email_user(closing.get("buyer_id"), "closing_confirmed_buyer", property_label=closing["property_label"],
                      signed_on=fmt_date_fr(declaration["signed_on"]))
     closing["invoice_id"] = invoice["id"]
     return closing
@@ -986,12 +986,12 @@ async def dispute_sale(closing_id: str, data: DisputeInput, current_user: dict =
     now = _now()
     dispute = {"reason": data.reason.strip(), "by": role, "by_user_id": current_user["id"], "at": _iso(now)}
     await db.closings.update_one({"id": closing_id}, {"$set": {"status": STATUS_DISPUTED, "dispute": dispute, "updated_at": _iso(now)}})
-    values = {"company_label": closing["company_label"], "company_id": closing["company_id"], "by_label": party_label(role),
+    values = {"property_label": closing["property_label"], "property_id": closing["property_id"], "by_label": party_label(role),
               "reason": dispute["reason"], "signed_on": fmt_date_fr(declaration.get("signed_on")),
               "final_price": fmt_eur_fr(declaration.get("final_price") or 0)}
     await add_todo(TODO_CLOSING_DISPUTED, closing_id,
-                   f"Vente contestée : {closing['company_label']} — {party_label(role).lower()} conteste la déclaration",
-                   ref={"closing_id": closing_id, "company_id": closing["company_id"], "reason": dispute["reason"]},
+                   f"Vente contestée : {closing['property_label']} — {party_label(role).lower()} conteste la déclaration",
+                   ref={"closing_id": closing_id, "property_id": closing["property_id"], "reason": dispute["reason"]},
                    action=f"/api/admin/closings/{closing_id}/resolve")
     await email_user(declaration.get("declared_by_user_id"), "closing_disputed", **values)
     await email_admin("closing_disputed_admin", **values)
@@ -1003,7 +1003,7 @@ async def dispute_sale(closing_id: str, data: DisputeInput, current_user: dict =
 # Facture
 
 
-async def build_debtor(closing: dict, company: dict, mandate: Optional[dict]) -> dict:
+async def build_debtor(closing: dict, property: dict, mandate: Optional[dict]) -> dict:
     """Débiteur : toujours le cédant — nom, adresse postale du mandat (sinon profil), société, SIREN"""
     seller = await db.users.find_one({"id": closing["seller_id"]}, {"_id": 0, "password_hash": 0}) or {}
     address = ((mandate or {}).get("mandant_address") or seller.get("address") or seller.get("company_address") or "").strip()
@@ -1013,9 +1013,9 @@ async def build_debtor(closing: dict, company: dict, mandate: Optional[dict]) ->
         "email": seller.get("email", ""),
         "address": address,
         "address_source": "mandat" if (mandate or {}).get("mandant_address") else ("profil" if address else ""),
-        "company_name": company.get("company_name") or "",
-        "siren": company_siren(company),
-        "legal_structure": company.get("legal_structure") or "",
+        "company_name": property.get("company_name") or "",
+        "siren": property_siren(property),
+        "legal_structure": property.get("legal_structure") or "",
     }
 
 
@@ -1054,14 +1054,14 @@ async def issue_invoice(closing: dict, now: Optional[datetime] = None) -> dict:
         return existing
     declaration = closing["declaration"]
     sale_object = declaration["sale_object"]
-    company = await db.companies.find_one({"id": closing["company_id"]}, {"_id": 0}) or {"id": closing["company_id"]}
-    mandate = await _mandate_for(company)
-    debtor = await build_debtor(closing, company, mandate)
+    property = await db.properties.find_one({"id": closing["property_id"]}, {"_id": 0}) or {"id": closing["property_id"]}
+    mandate = await _mandate_for(property)
+    debtor = await build_debtor(closing, property, mandate)
     commission = business_model.calculate_commission(declaration["final_price"])
     terms = INVOICE_TERMS[sale_object]
     issued_on = now.date()
     due_on = invoice_due_on(_parse_date(declaration["signed_on"]) or issued_on, issued_on, sale_object)
-    test = bool(closing.get("is_test")) or await _is_test_closing(company, closing.get("buyer_id"), closing.get("seller_id"))
+    test = bool(closing.get("is_test")) or await _is_test_closing(property, closing.get("buyer_id"), closing.get("seller_id"))
     if test:
         # Facture de test : compteur séparé, le compteur réel des factures n'avance jamais
         sequence = await next_sequence(INVOICE_TEST_COUNTER)
@@ -1078,8 +1078,8 @@ async def issue_invoice(closing: dict, now: Optional[datetime] = None) -> dict:
         "terms_version": business_model.COMMISSION_TERMS_VERSION,
         "closing_id": closing["id"],
         "offer_id": None if is_direct_offer_id(closing.get("offer_id")) else closing.get("offer_id"),
-        "company_id": closing["company_id"],
-        "company_label": closing.get("company_label") or company_label(company),
+        "property_id": closing["property_id"],
+        "property_label": closing.get("property_label") or property_label(property),
         "buyer_id": closing.get("buyer_id"),
         "mandate_id": (mandate or {}).get("id"),
         "mandate_number": mandate_number,
@@ -1089,7 +1089,7 @@ async def issue_invoice(closing: dict, now: Optional[datetime] = None) -> dict:
         "signed_on": declaration["signed_on"],
         "final_price": declaration["final_price"],
         "debtor": debtor,
-        "lines": invoice_lines(commission, sale_object, mandate_number, debtor["company_name"] or closing.get("company_label", "")),
+        "lines": invoice_lines(commission, sale_object, mandate_number, debtor["company_name"] or closing.get("property_label", "")),
         "commission": commission,
         "total_ht": commission["final_commission_ht"],
         "vat_rate": commission["vat_rate"],
@@ -1122,14 +1122,14 @@ async def issue_invoice(closing: dict, now: Optional[datetime] = None) -> dict:
     # Une étape de vente réelle (annonce et parties réelles) facturée pendant l'essai garde son statut : seule sa facture est
     # une facture de test (supprimée par la purge, une facture réelle pourra ensuite être émise) ; l'étape n'est marquée
     # de test que si elle l'est par ses liens
-    if test and (closing.get("is_test") or await _has_test_data(company, closing.get("buyer_id"), closing.get("seller_id"))):
+    if test and (closing.get("is_test") or await _has_test_data(property, closing.get("buyer_id"), closing.get("seller_id"))):
         closing_update["is_test"] = True
     await db.closings.update_one({"id": closing["id"]}, {"$set": closing_update})
     closing["invoice_id"] = invoice["id"]
     if not debtor["address"]:
         await add_todo(TODO_INVOICE_ADDRESS, invoice["id"],
                        f"Facture n° {number} : adresse postale du cédant absente du mandat et du profil",
-                       ref={"invoice_id": invoice["id"], "closing_id": closing["id"], "company_id": closing["company_id"]})
+                       ref={"invoice_id": invoice["id"], "closing_id": closing["id"], "property_id": closing["property_id"]})
     # E-mail au cédant (lien vers le PDF, authentifié ou par jeton du lien)
     redacteur = closing.get("redacteur") or {}
     if redacteur.get("email") and redacteur_trusted(redacteur):
@@ -1139,7 +1139,7 @@ async def issue_invoice(closing: dict, now: Optional[datetime] = None) -> dict:
                           "depuis votre espace pour que nous lui adressions l'ordre de paiement prévu au mandat.")
     else:
         redacteur_line = "Renseignez le rédacteur de l'acte depuis votre espace pour que nous lui adressions l'ordre de paiement prévu au mandat."
-    await email_user(debtor["user_id"], "invoice_issued", number=number, company_label=invoice["company_label"],
+    await email_user(debtor["user_id"], "invoice_issued", number=number, property_label=invoice["property_label"],
                      registry_number=mandate_number, issued_on=fmt_date_fr(issued_on), total_ht=fmt_eur_cents(invoice["total_ht"]),
                      vat=fmt_eur_cents(invoice["vat"]), total_ttc=fmt_eur_cents(invoice["total_ttc"]), due_on=fmt_date_fr(due_on),
                      payment_terms=terms["text"], link=invoice_link(invoice), redacteur_line=redacteur_line)
@@ -1169,10 +1169,10 @@ async def send_payment_order(closing: dict, invoice: dict) -> bool:
     if not redacteur_trusted(redacteur):
         await add_todo(TODO_PAYMENT_ORDER, closing["id"],
                        f"Ordre de paiement {invoice.get('number', '')} : rédacteur indiqué par le repreneur, à confirmer par le cédant",
-                       ref={"closing_id": closing["id"], "invoice_id": invoice.get("id"), "company_id": closing.get("company_id")})
+                       ref={"closing_id": closing["id"], "invoice_id": invoice.get("id"), "property_id": closing.get("property_id")})
         return False
     link = site_url(f"/api/closing/{closing['id']}/payment-order.pdf?token={closing.get('payment_order_token', '')}")
-    subject, html = render_email("payment_order_redacteur", name=redacteur.get("name", ""), company_label=closing["company_label"],
+    subject, html = render_email("payment_order_redacteur", name=redacteur.get("name", ""), property_label=closing["property_label"],
                                  registry_number=invoice.get("mandate_number", ""), number=invoice["number"],
                                  issued_on=fmt_date_fr(invoice["issued_on"]), total_ttc=fmt_eur_cents(invoice["total_ttc"]),
                                  total_ht=fmt_eur_cents(invoice["total_ht"]), due_on=fmt_date_fr(invoice["due_on"]),
@@ -1307,7 +1307,7 @@ def invoice_pdf(invoice: dict) -> bytes:
         _two_columns(_debtor_block(invoice["debtor"], st), [
             _p("Opération", st["cellb"]),
             _p(f"{SALE_OBJECT_LABELS.get(invoice['sale_object'], '').capitalize()} de la société "
-               f"{invoice['debtor'].get('company_name') or invoice.get('company_label', '')}", st["cell"]),
+               f"{invoice['debtor'].get('company_name') or invoice.get('property_label', '')}", st["cell"]),
             _p(f"Prix de cession : {fmt_eur_cents(invoice['final_price'])}", st["cell"]),
             _p("Nature : prestation de services (intermédiation, loi Hoguet)", st["cell"]),
         ]),
@@ -1376,7 +1376,7 @@ def payment_order_pdf(closing: dict, invoice: dict, seller: dict) -> bytes:
                      _debtor_block(debtor, st, heading="Donneur d'ordre (cédant, débiteur des honoraires)")),
         Spacer(1, 12),
         _p("Objet", st["h"]),
-        _p(f"Cession de la société {debtor.get('company_name') or closing.get('company_label', '')} "
+        _p(f"Cession de la société {debtor.get('company_name') or closing.get('property_label', '')} "
            f"({SALE_OBJECT_LABELS.get(invoice['sale_object'], '')}), acte signé le {fmt_date_fr(invoice.get('signed_on'))}, "
            f"prix de {fmt_eur_cents(invoice['final_price'])}, repreneur présenté par {site_name()} dans le cadre du mandat de vente "
            f"n° {invoice.get('mandate_number', '')}.", st["p"]),
@@ -1430,7 +1430,7 @@ def formal_notice_pdf(invoice: dict, today: Optional[date] = None) -> bytes:
         _p(f"En exécution du mandat de vente n° {invoice.get('mandate_number', '')}, nous vous avons adressé la facture d'honoraires "
            f"n° {invoice['number']} d'un montant de {fmt_eur_cents(invoice['total_ttc'])} TTC ({fmt_eur_cents(invoice['total_ht'])} HT), "
            f"relative à la {SALE_OBJECT_LABELS.get(invoice['sale_object'], 'cession')} de la société "
-           f"{debtor.get('company_name') or invoice.get('company_label', '')}, dont l'acte a été signé le {fmt_date_fr(invoice.get('signed_on'))}.", st["p"]),
+           f"{debtor.get('company_name') or invoice.get('property_label', '')}, dont l'acte a été signé le {fmt_date_fr(invoice.get('signed_on'))}.", st["p"]),
         _p(f"Cette facture, échue le {fmt_date_fr(invoice['due_on'])} (soit depuis {overdue_days} jours), demeure impayée malgré nos rappels "
            f"des {reminder_dates}.", st["p"]),
         _p((f"Compte tenu des acomptes reçus ({fmt_eur_cents(invoice.get('paid_amount'))} TTC), le solde restant dû s'élève à "
@@ -1739,7 +1739,7 @@ async def admin_resolve_closing(closing_id: str, data: ResolveInput, current_use
             "$set": {"status": STATUS_IN_PROGRESS, "declaration": None, "dispute": None, "updated_at": _iso(now),
                      "resolution": {"action": "cancel", "note": data.note or "", "by": current_user["id"], "at": _iso(now),
                                     "cancelled_declaration": closing.get("declaration")}}})
-        await db.companies.update_one({"id": closing["company_id"]}, {"$unset": {"sale_declared_at": ""}})
+        await db.properties.update_one({"id": closing["property_id"]}, {"$unset": {"sale_declared_at": ""}})
         await close_todos(TODO_CLOSING_DISPUTED, closing_id, "Déclaration annulée par l'admin")
         await close_todos(TODO_DECLARATION_UNCONFIRMED, closing_id, "Déclaration annulée par l'admin")
         closing = await db.closings.find_one({"id": closing_id}, {"_id": 0})
@@ -1782,7 +1782,7 @@ async def _followup_closings(now: datetime) -> int:
         if not await claim_once("closing_followup", f"{closing['id']}:{day}"):
             continue
         for role in ("seller", "buyer"):
-            await email_user(closing.get(f"{role}_id"), "closing_followup", company_label=closing.get("company_label", ""),
+            await email_user(closing.get(f"{role}_id"), "closing_followup", property_label=closing.get("property_label", ""),
                              days=str(day), **followup_links(closing, role))
         await db.closings.update_one({"id": closing["id"]}, {"$push": {"followups_sent": {"day": day, "at": _iso(now)}}})
         sent += 1
@@ -1799,8 +1799,8 @@ async def _auto_confirm(now: datetime) -> int:
         if declaration.get("declared_by") not in AUTO_CONFIRM_DECLARANTS:
             # Déclaration du repreneur restée sans réponse : arbitrage admin (aucune facture sans accord du cédant)
             await add_todo(TODO_DECLARATION_UNCONFIRMED, closing["id"],
-                           f"Vente déclarée par le repreneur sans confirmation du cédant : {closing.get('company_label', '')}",
-                           ref={"closing_id": closing["id"], "company_id": closing.get("company_id")},
+                           f"Vente déclarée par le repreneur sans confirmation du cédant : {closing.get('property_label', '')}",
+                           ref={"closing_id": closing["id"], "property_id": closing.get("property_id")},
                            action=f"/api/admin/closings/{closing['id']}/resolve")
             continue
         if not await claim_once("closing_autoconfirm", closing["id"]):
@@ -1852,7 +1852,7 @@ async def _invoice_reminders(now: datetime) -> int:
                                f"Facture n° {invoice['number']} impayée ({fmt_eur_cents(invoice_balance(invoice))} TTC restant dus, échue le "
                                f"{fmt_date_fr(due)}) : mise en demeure à envoyer à {debtor.get('name', '')}",
                                ref={"invoice_id": invoice["id"], "invoice_number": invoice["number"], "closing_id": invoice.get("closing_id"),
-                                    "company_id": invoice.get("company_id"), "debtor_name": debtor.get("name", ""),
+                                    "property_id": invoice.get("property_id"), "debtor_name": debtor.get("name", ""),
                                     "debtor_email": debtor.get("email", ""), "total_ttc": invoice["total_ttc"], "due_on": invoice["due_on"]},
                                action=f"/api/admin/invoices/{invoice['id']}/mise-en-demeure.pdf")
                 actions += 1

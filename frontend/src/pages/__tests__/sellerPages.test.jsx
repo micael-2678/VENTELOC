@@ -50,7 +50,7 @@ const setValue = (el, value) => {
 };
 
 const user = { id: 'u1', role: 'seller', first_name: 'Michel', last_name: 'Dupont', email: 'michel@exemple.fr', email_verified: true, identity_verified: false };
-const company = {
+const property = {
   id: 'c1', seller_id: 'u1', status: 'published', title: 'Entreprise de plomberie-chauffage · Bretagne · 6 salariés', trades: ['plomberie-chauffage'],
   region: 'Bretagne', department: '29', staff_count: 6, ca_n: 780000, asking_price: 290000, views: 12, mandat_signed: true, mandate_id: 'm1',
   moderation: { status: 'pending', flags: ['naf_connexe'] },
@@ -70,19 +70,19 @@ beforeEach(() => {
   sessionStorage.clear();
   api.get.mockImplementation((url) => Promise.resolve({ data: route(url, {
     '/kyc/status': { verified: false, status: 'not_started' },
-    '/companies/c1/stats': { views: 12, favorites_count: 3, unique_contacts: 1, offers_count: 0 },
-    '/companies/c1': company,
-    '/companies': [company],
+    '/properties/c1/stats': { views: 12, favorites_count: 3, unique_contacts: 1, offers_count: 0 },
+    '/properties/c1': property,
+    '/properties': [property],
     '/seller/mandat/status/c1': { mandat_signed: true, mandat, presented_buyers: [{ buyer_id: 'b1', label: 'Repreneur n°123456', name: 'Claire Martin', at: '2026-10-05T10:00:00Z' }] },
     '/dataroom/c1/access-requests': [{ id: 'r1', buyer_id: 'b1', buyer_card: buyerCard, message: 'Je reprends dans le Finistère.', status: 'pending', created_at: '2026-10-08T10:00:00Z', expires_at: '2026-10-18T10:00:00Z' }],
     '/dataroom/c1/documents': { documents: [] },
     '/dataroom/c1/access-log': { logs: [] },
-    '/companies/c1/photos': [],
-    '/offers/company/c1': { offers: [] },
+    '/properties/c1/photos': [],
+    '/offers/property/c1': { offers: [] },
     '/closing/my': { closings: [] },
     '/messages/conversations': [
-      { id: 'conv1', company_id: 'c1', company_title: company.title, buyer_id: 'b1', seller_id: 'u1', other_party_label: 'Repreneur n°123456', buyer_card: buyerCard, last_message: 'Bonjour', last_at: '2026-10-08T10:00:00Z', unread_count: 2, nda_signed: false, identity_revealed: false, access_status: 'pending' },
-      { id: 'conv2', company_id: 'c1', company_title: company.title, buyer_id: 'b2', seller_id: 'u1', other_party_label: 'Claire Martin', last_message: 'Merci', last_at: '2026-10-07T10:00:00Z', unread_count: 0, nda_signed: true, identity_revealed: true, access_status: 'granted' },
+      { id: 'conv1', property_id: 'c1', property_title: property.title, buyer_id: 'b1', seller_id: 'u1', other_party_label: 'Repreneur n°123456', buyer_card: buyerCard, last_message: 'Bonjour', last_at: '2026-10-08T10:00:00Z', unread_count: 2, nda_signed: false, identity_revealed: false, access_status: 'pending' },
+      { id: 'conv2', property_id: 'c1', property_title: property.title, buyer_id: 'b2', seller_id: 'u1', other_party_label: 'Claire Martin', last_message: 'Merci', last_at: '2026-10-07T10:00:00Z', unread_count: 0, nda_signed: true, identity_revealed: true, access_status: 'granted' },
     ],
     '/messages': [
       { id: 'm1', conversation_id: 'conv2', sender_id: 'b2', sender_label: 'Claire Martin', is_mine: false, content: 'Bonjour, votre entreprise m\'intéresse.', created_at: '2026-10-07T09:00:00Z', read: true, kind: 'message' },
@@ -90,12 +90,12 @@ beforeEach(() => {
     ],
   }) }));
   api.post.mockImplementation((url) => Promise.resolve({ data: route(url, {
-    '/companies': { ...company, id: 'c-new', status: 'draft', mandat_signed: false, mandate_id: null, moderation: null },
+    '/properties': { ...property, id: 'c-new', status: 'draft', mandat_signed: false, mandate_id: null, moderation: null },
     '/seller/mandat/generate': { already_signed: false, contract_id: 'k1', contract_number: 'MANDAT-20261010-ABCD', content: 'MANDAT DE VENTE SIMPLE (NON EXCLUSIF)\n\nArticle 1…', summary: ['Mandat simple, sans exclusivité.', 'Objet : la cession des titres.', 'Durée 12 mois, résiliable à tout moment.', 'Rémunération à votre charge, due uniquement à la vente.', 'Clause de suite de 18 mois.'], terms_version: 'v2', terms_date: '10/10/2026' },
     '/estimates': { low: 250000, high: 400000, mid: 325000 },
     '/messages': { id: 'sent-1', conversation_id: 'conv2', content: 'Bonjour Claire', created_at: '2026-10-09T10:00:00Z', kind: 'message' },
   }) }));
-  api.put.mockImplementation((url) => Promise.resolve({ data: url.startsWith('/companies/') ? { ...company, id: url.split('/')[2] } : { ok: true } }));
+  api.put.mockImplementation((url) => Promise.resolve({ data: url.startsWith('/properties/') ? { ...property, id: url.split('/')[2] } : { ok: true } }));
 });
 
 afterEach(() => {
@@ -145,7 +145,7 @@ describe('CreateListing', () => {
     setValue(c.querySelector('[data-testid="region-select"]'), 'Bretagne');
     await flush();
     await click(c.querySelector('[data-testid="next-step"]'));
-    expect(api.post).toHaveBeenCalledWith('/companies', expect.objectContaining({ trades: ['isolation'], region: 'Bretagne' }));
+    expect(api.post).toHaveBeenCalledWith('/properties', expect.objectContaining({ trades: ['isolation'], region: 'Bretagne' }));
     expect(c.textContent).toMatch(/Vos chiffres clés/);
     expect(c.querySelector('[data-testid="ca-n-input"]')).toBeTruthy();
   });
@@ -158,8 +158,8 @@ describe('CreateListing', () => {
   });
 
   test('écran 3 : contrôle anti-coordonnées et aperçu anonyme', async () => {
-    const draft = { ...company, id: 'd1', status: 'draft', mandat_signed: false, mandate_id: null, moderation: null, description: '', sale_object: '', sale_reason: '' };
-    api.get.mockImplementation((url) => Promise.resolve({ data: url.startsWith('/companies/d1') ? draft : url.startsWith('/kyc') ? { verified: false } : {} }));
+    const draft = { ...property, id: 'd1', status: 'draft', mandat_signed: false, mandate_id: null, moderation: null, description: '', sale_object: '', sale_reason: '' };
+    api.get.mockImplementation((url) => Promise.resolve({ data: url.startsWith('/properties/d1') ? draft : url.startsWith('/kyc') ? { verified: false } : {} }));
     const c = await render(<CreateListing user={user} />, '/seller/edit/d1', '/seller/edit/:id');
     expect(c.textContent).toMatch(/Votre projet de cession/);
     expect(c.querySelector('[data-testid="listing-anonymous-preview"]')).toBeTruthy();
@@ -175,8 +175,8 @@ describe('CreateListing', () => {
 
 describe('MandatePage', () => {
   test('adresse + objet puis résumé en 5 points ; signature avec le code seul', async () => {
-    api.get.mockImplementation((url) => Promise.resolve({ data: url.startsWith('/seller/mandat/status') ? { mandat_signed: false, mandat: null, presented_buyers: [] } : { ...company, status: 'mandat_en_attente', mandat_signed: false, sale_object: 'titres', company_name: 'SARL Exemple' } }));
-    const c = await render(<MandatePage user={user} />, '/seller/mandat/c1', '/seller/mandat/:companyId');
+    api.get.mockImplementation((url) => Promise.resolve({ data: url.startsWith('/seller/mandat/status') ? { mandat_signed: false, mandat: null, presented_buyers: [] } : { ...property, status: 'mandat_en_attente', mandat_signed: false, sale_object: 'titres', company_name: 'SARL Exemple' } }));
+    const c = await render(<MandatePage user={user} />, '/seller/mandat/c1', '/seller/mandat/:propertyId');
     expect(c.querySelector('[data-testid="mandant-form"]')).toBeTruthy();
     expect(c.textContent).not.toMatch(/qui paiera la commission/i);
     await click(c.querySelector('[data-testid="prepare-mandate"]'));
@@ -188,8 +188,8 @@ describe('MandatePage', () => {
     setValue(c.querySelector('[data-testid="capacity-select"]'), 'dirigeant');
     await flush();
     await click(c.querySelector('[data-testid="prepare-mandate"]'));
-    expect(api.put).toHaveBeenCalledWith('/companies/c1', expect.objectContaining({ mandant_address: expect.objectContaining({ line1: '12 rue des Artisans', postal_code: '29200', city: 'Brest' }), sale_object: 'titres', mandant_capacity: 'dirigeant' }));
-    expect(api.post).toHaveBeenCalledWith('/seller/mandat/generate', null, { params: { company_id: 'c1' } });
+    expect(api.put).toHaveBeenCalledWith('/properties/c1', expect.objectContaining({ mandant_address: expect.objectContaining({ line1: '12 rue des Artisans', postal_code: '29200', city: 'Brest' }), sale_object: 'titres', mandant_capacity: 'dirigeant' }));
+    expect(api.post).toHaveBeenCalledWith('/seller/mandat/generate', null, { params: { property_id: 'c1' } });
     const summary = c.querySelector('[data-testid="mandate-summary"]');
     expect(summary.querySelectorAll('ol li').length).toBe(5);
     expect(summary.textContent).toMatch(/Version du 10\/10\/2026/);
@@ -200,9 +200,9 @@ describe('MandatePage', () => {
   });
 
   test('400 validation renvoie au formulaire avec le champ manquant', async () => {
-    api.get.mockImplementation((url) => Promise.resolve({ data: url.startsWith('/seller/mandat/status') ? { mandat: null } : { ...company, status: 'mandat_en_attente', mandat_signed: false, sale_object: 'fonds', mandant_address: '12 rue X, 29200 Brest' } }));
+    api.get.mockImplementation((url) => Promise.resolve({ data: url.startsWith('/seller/mandat/status') ? { mandat: null } : { ...property, status: 'mandat_en_attente', mandat_signed: false, sale_object: 'fonds', mandant_address: '12 rue X, 29200 Brest' } }));
     api.post.mockRejectedValueOnce({ response: { status: 400, data: { detail: { code: 'validation', message: 'Complétez votre annonce : dénomination de la société', missing: ['company_name'] } } } });
-    const c = await render(<MandatePage user={user} />, '/seller/mandat/c1', '/seller/mandat/:companyId');
+    const c = await render(<MandatePage user={user} />, '/seller/mandat/c1', '/seller/mandat/:propertyId');
     expect(c.querySelector('[data-testid="address-line1"]').value).toBe('12 rue X');
     setValue(c.querySelector('[data-testid="capacity-select"]'), 'associe');
     await flush();

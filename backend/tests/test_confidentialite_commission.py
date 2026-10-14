@@ -14,9 +14,9 @@ def setup_deal(api, client):
     seller, buyer = api.register(uid("vendeur"), "seller"), api.register(uid("acheteur"), "buyer")
     for u in (seller, buyer):
         api.verify_kyc(u)
-    c = client.post("/api/companies", headers=api.h(seller), json=listing()).json()
+    c = client.post("/api/properties", headers=api.h(seller), json=listing()).json()
     api.publish(seller, c["id"])
-    client.post(f"/api/companies/{c['id']}/contact", headers=api.h(buyer))
+    client.post(f"/api/properties/{c['id']}/contact", headers=api.h(buyer))
     return seller, buyer, c["id"]
 
 
@@ -26,13 +26,13 @@ def all_text(obj):
 
 def test_no_member_email_in_messages_requests_offers(api, client):
     seller, buyer, cid = setup_deal(api, client)
-    client.post("/api/messages", headers=api.h(buyer), json={"receiver_id": seller["id"], "company_id": cid, "content": "Bonjour"})
-    client.post("/api/messages", headers=api.h(seller), json={"receiver_id": buyer["id"], "company_id": cid, "content": "Bonjour"})
+    client.post("/api/messages", headers=api.h(buyer), json={"receiver_id": seller["id"], "property_id": cid, "content": "Bonjour"})
+    client.post("/api/messages", headers=api.h(seller), json={"receiver_id": buyer["id"], "property_id": cid, "content": "Bonjour"})
     conv_seller = client.get("/api/messages/conversations", headers=api.h(seller)).json()
     conv_buyer = client.get("/api/messages", headers=api.h(buyer)).json()
     assert buyer["email"] not in all_text(conv_seller)
     assert seller["email"] not in all_text(conv_buyer)
-    conv = next(x for x in conv_seller if x["company_id"] == cid)
+    conv = next(x for x in conv_seller if x["property_id"] == cid)
     assert conv["other_party_label"].startswith("Acquéreur n°") and "name" not in conv["buyer_card"]
     thread = client.get("/api/messages", params={"conversation_id": conv["id"]}, headers=api.h(seller)).json()
     labels = {m["sender_label"] for m in thread}
@@ -47,7 +47,7 @@ def test_no_member_email_in_messages_requests_offers(api, client):
 def test_contacts_masked_before_nda_visible_to_admin(api, client):
     seller, buyer, cid = setup_deal(api, client)
     r = client.post("/api/messages", headers=api.h(buyer), json={
-        "receiver_id": seller["id"], "company_id": cid, "content": "Appelez-moi au 06 12 34 56 78 ou jean@exemple.fr"})
+        "receiver_id": seller["id"], "property_id": cid, "content": "Appelez-moi au 06 12 34 56 78 ou jean@exemple.fr"})
     assert "06 12 34 56 78" not in r.text and "jean@exemple.fr" not in r.text
     seen = client.get("/api/messages", headers=api.h(seller)).json()
     assert all("06 12 34 56 78" not in m["content"] for m in seen)
@@ -77,8 +77,8 @@ def test_no_buyer_payment_route_and_public_config(api, client):
 def test_export_rgpd_sans_coordonnees_de_l_autre_partie(api, client):
     """GET /auth/export : les e-mails de l'autre partie (messages.sender_email, offres, NDA signed_by) ne sont pas exportés"""
     seller, buyer, cid = setup_deal(api, client)
-    client.post("/api/messages", headers=api.h(buyer), json={"receiver_id": seller["id"], "company_id": cid, "content": "Bonjour"})
-    client.post("/api/messages", headers=api.h(seller), json={"receiver_id": buyer["id"], "company_id": cid, "content": "Bonjour"})
+    client.post("/api/messages", headers=api.h(buyer), json={"receiver_id": seller["id"], "property_id": cid, "content": "Bonjour"})
+    client.post("/api/messages", headers=api.h(seller), json={"receiver_id": buyer["id"], "property_id": cid, "content": "Bonjour"})
     api.grant_dataroom(seller, buyer, cid)
     export_buyer = client.get("/api/auth/export", headers=api.h(buyer)).json()
     export_seller = client.get("/api/auth/export", headers=api.h(seller)).json()

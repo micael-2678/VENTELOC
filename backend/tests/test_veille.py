@@ -105,22 +105,22 @@ def test_fin_de_clause_de_suite():
 
 # ---------- Job mensuel ----------
 
-def _company(client, seller, siret, **extra):
+def _property(client, seller, siret, **extra):
     doc = {"id": str(uuid.uuid4()), "seller_id": seller["id"], "siret": siret, "company_name": extra.pop("name", "SECRET ENERGIE SAS"),
            "status": "published", "rge_types": ["Pompes à chaleur air/eau"], "region": "Bretagne", **extra}
-    db_call(client, server.db.companies.insert_one, doc)
+    db_call(client, server.db.properties.insert_one, doc)
     return doc
 
 
-def _mandat(client, company, status="signed", signed_days_ago=100, **extra):
-    doc = {"id": str(uuid.uuid4()), "type": "mandat", "company_id": company["id"], "seller_id": company["seller_id"],
+def _mandat(client, property, status="signed", signed_days_ago=100, **extra):
+    doc = {"id": str(uuid.uuid4()), "type": "mandat", "property_id": property["id"], "seller_id": property["seller_id"],
            "status": status, "signed_at": iso(-signed_days_ago), "created_at": iso(-signed_days_ago - 1), **extra}
     db_call(client, server.db.generated_contracts.insert_one, doc)
     return doc
 
 
-def _nda(client, company, buyer, signed_days_ago):
-    doc = {"id": str(uuid.uuid4()), "doc_type": "nda", "company_id": company["id"], "signer_id": buyer["id"],
+def _nda(client, property, buyer, signed_days_ago):
+    doc = {"id": str(uuid.uuid4()), "doc_type": "nda", "property_id": property["id"], "signer_id": buyer["id"],
            "signed_at": iso(-signed_days_ago)}
     db_call(client, server.db.documents.insert_one, doc)
     return doc
@@ -128,8 +128,8 @@ def _nda(client, company, buyer, signed_days_ago):
 
 def test_veille_cree_les_incidents_et_previent(api, client, emails, bodacc):
     seller = api.register(uid("veille"), "seller", first="Paul", last="Dupont")
-    company = _company(client, seller, "55203253400018")
-    _mandat(client, company, "signed", signed_days_ago=120, tail_ends_at=iso(700))
+    property = _property(client, seller, "55203253400018")
+    _mandat(client, property, "signed", signed_days_ago=120, tail_ends_at=iso(700))
     bodacc["by_siren"][SIREN] = [
         record("vente", date="2026-09-15", id="v1", acte=json.dumps({"descriptif": "Vente du fonds de commerce"})),
         record("modification", date="2026-09-20", id="m1", modificationsgenerales=json.dumps({"descriptif": "Nouveau gérant"})),
@@ -141,7 +141,7 @@ def test_veille_cree_les_incidents_et_previent(api, client, emails, bodacc):
     incidents = db_call(client, server.db.incidents.find({"siren": SIREN}, {"_id": 0}).to_list, 10)
     assert {i["event"]["id"] for i in incidents} == {"v1", "m1"}
     for i in incidents:
-        assert i["type"] == "bodacc" and i["status"] == "open" and i["company_id"] == company["id"] and i["created_at"]
+        assert i["type"] == "bodacc" and i["status"] == "open" and i["property_id"] == property["id"] and i["created_at"]
         assert i["sources"] and i["sources"][0].startswith("mandat signé (clause de suite jusqu'au ")
     # Requête BODACC depuis la date du mandat
     call = next(c for c in bodacc["calls"] if SIREN in c)
@@ -152,7 +152,7 @@ def test_veille_cree_les_incidents_et_previent(api, client, emails, bodacc):
     assert e and SIREN in e["html"] and "Vente du fonds de commerce" in e["html"] and "Nouveau gérant" in e["html"]
     assert "18 mois" in e["html"] and "Si la société a été cédée" in e["html"] and "15/09/2026" in e["html"]
     a = last_email("admin@test.fr", "Incident BODACC")
-    assert a and SIREN in a["html"] and company["id"] in a["html"]
+    assert a and SIREN in a["html"] and property["id"] in a["html"]
     assert len([x for x in emails if x["to"] == seller["email"] and "BODACC" in x["subject"]]) == 1
     run = db_call(client, server.db.veille_runs.find_one, {"incidents_created": 2})
     assert run and run["errors"] == []
@@ -182,38 +182,38 @@ def test_cibles_mandats_nda_et_exclusions(api, client, bodacc):
     buyer = api.register(uid("rep"), "buyer")
     now = datetime.now(timezone.utc)
     # 1. Mandat dénoncé, clause de suite en cours → surveillé
-    c1 = _company(client, seller, "11111111100011", name="Un")
+    c1 = _property(client, seller, "11111111100011", name="Un")
     _mandat(client, c1, "denounced", signed_days_ago=400, tail_ends_at=iso(300))
     # 2. Mandat expiré, clause de suite terminée → ignoré
-    c2 = _company(client, seller, "22222222200011", name="Deux")
+    c2 = _property(client, seller, "22222222200011", name="Deux")
     _mandat(client, c2, "expired", signed_days_ago=1000, tail_ends_at=iso(-10))
     # 3. Mandat signé sans tail_ends_at (ancien) → signature + 30 mois
-    c3 = _company(client, seller, "33333333300011", name="Trois")
+    c3 = _property(client, seller, "33333333300011", name="Trois")
     _mandat(client, c3, "signed", signed_days_ago=30)
     # 4. NDA signé il y a 10 mois, pas de mandat → surveillé depuis le NDA ; SIREN via `siren`
-    c4 = _company(client, seller, "", siren="444 444 444", name="Quatre")
+    c4 = _property(client, seller, "", siren="444 444 444", name="Quatre")
     _nda(client, c4, buyer, signed_days_ago=300)
     # 5. NDA de plus de 24 mois → ignoré
-    c5 = _company(client, seller, "55555555500011", name="Cinq")
+    c5 = _property(client, seller, "55555555500011", name="Cinq")
     _nda(client, c5, buyer, signed_days_ago=800)
     # 6. Vente déclarée (closing) → ignoré ; 7. annonce vendue → ignoré
-    c6 = _company(client, seller, "66666666600011", name="Six")
+    c6 = _property(client, seller, "66666666600011", name="Six")
     _mandat(client, c6, "signed", signed_days_ago=50, tail_ends_at=iso(800))
-    db_call(client, server.db.closings.insert_one, {"id": str(uuid.uuid4()), "company_id": c6["id"], "status": "confirmed"})
-    c7 = _company(client, seller, "77777777700011", name="Sept", status="sold")
+    db_call(client, server.db.closings.insert_one, {"id": str(uuid.uuid4()), "property_id": c6["id"], "status": "confirmed"})
+    c7 = _property(client, seller, "77777777700011", name="Sept", status="sold")
     _mandat(client, c7, "signed", signed_days_ago=50, tail_ends_at=iso(800))
     # 8. Mandat en attente de signature → ignoré
-    c8 = _company(client, seller, "88888888800011", name="Huit")
+    c8 = _property(client, seller, "88888888800011", name="Huit")
     _mandat(client, c8, "pending_signature", signed_days_ago=5, tail_ends_at=iso(800))
     # 9. Mandat + NDA sur la même société : une seule cible, depuis la date la plus ancienne
-    c9 = _company(client, seller, "99999999900011", name="Neuf")
+    c9 = _property(client, seller, "99999999900011", name="Neuf")
     _mandat(client, c9, "signed", signed_days_ago=60, tail_ends_at=iso(800))
     _nda(client, c9, buyer, signed_days_ago=200)
 
     targets = db_call(client, veille.collect_targets, now)
     assert {"111111111", "333333333", "444444444", "999999999"} <= set(targets)
     assert not {"222222222", "555555555", "666666666", "777777777", "888888888"} & set(targets)
-    assert targets["111111111"]["company_label"] == "Un" and targets["111111111"]["seller_id"] == seller["id"]
+    assert targets["111111111"]["property_label"] == "Un" and targets["111111111"]["seller_id"] == seller["id"]
     assert len(targets["999999999"]["sources"]) == 2
     assert abs((targets["999999999"]["since"] - (now - timedelta(days=200))).days) <= 1
     assert "NDA" in targets["444444444"]["sources"][0]
@@ -221,8 +221,8 @@ def test_cibles_mandats_nda_et_exclusions(api, client, bodacc):
 
 def test_panne_bodacc(api, client, bodacc):
     seller = api.register(uid("panne"), "seller")
-    company = _company(client, seller, "12121212100011")
-    _mandat(client, company, "signed", signed_days_ago=10, tail_ends_at=iso(800))
+    property = _property(client, seller, "12121212100011")
+    _mandat(client, property, "signed", signed_days_ago=10, tail_ends_at=iso(800))
     bodacc["error"] = ConnectionError("proxy")
     failures_before = db_call(client, server.db.job_failures.count_documents, {"job": "monthly:veille"})
     assert db_call(client, veille.monthly_job) == 0, "jamais d'exception : le planificateur attend un entier"

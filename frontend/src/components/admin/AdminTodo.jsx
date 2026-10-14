@@ -69,9 +69,9 @@ const RefChips = ({ row, onNavigate }) => {
   if (ref.due_on) chips.push(<Pill wrap key="due" tone="warning">Échéance {fmtDate(ref.due_on)}</Pill>);
   if (ref.reason) chips.push(<Pill wrap key="reason" tone="warning">Motif : {ref.reason}</Pill>);
   const links = [];
-  if (ref.company_id) {
-    links.push(<ExtLink key="fiche" href={`/company/${ref.company_id}`}>Fiche publique</ExtLink>);
-    links.push(<button key="listing" type="button" onClick={() => onNavigate('companies', { id: ref.company_id })} className="text-sm font-medium text-brand-blue underline underline-offset-2 hover:text-brand-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue rounded">Annonce</button>);
+  if (ref.property_id) {
+    links.push(<ExtLink key="fiche" href={`/property/${ref.property_id}`}>Fiche publique</ExtLink>);
+    links.push(<button key="listing" type="button" onClick={() => onNavigate('properties', { id: ref.property_id })} className="text-sm font-medium text-brand-blue underline underline-offset-2 hover:text-brand-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue rounded">Annonce</button>);
   }
   if (ref.closing_id) links.push(<button key="closing" type="button" onClick={() => onNavigate('closings', { id: ref.closing_id })} className="text-sm font-medium text-brand-blue underline underline-offset-2 hover:text-brand-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue rounded">Étape de vente</button>);
   if (ref.invoice_id) links.push(<button key="invoice" type="button" onClick={() => onNavigate('invoices', { id: ref.invoice_id })} className="text-sm font-medium text-brand-blue underline underline-offset-2 hover:text-brand-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue rounded">Facture</button>);
@@ -112,7 +112,7 @@ const AdminTodo = ({ data, loading, onReload, onNavigate, onEmailBlocked }) => {
     const kind = actionKind(action);
     if (kind === 'open') {
       const tab = tabForUrl(action.url);
-      if (tab) onNavigate(tab, { id: row.ref?.closing_id || row.ref?.invoice_id || row.ref?.mandate_id || row.ref?.user_id || row.ref?.company_id || null });
+      if (tab) onNavigate(tab, { id: row.ref?.closing_id || row.ref?.invoice_id || row.ref?.mandate_id || row.ref?.user_id || row.ref?.property_id || null });
       return;
     }
     if (kind === 'pdf') {

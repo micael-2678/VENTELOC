@@ -490,7 +490,7 @@
       ],
       "reasonLabel": "Motif",
       "referenceLabel": "Référence du contenu",
-      "referenceHelp": "Adresse de la page ou code de l'annonce (ex. /company/…).",
+      "referenceHelp": "Adresse de la page ou code de l'annonce (ex. /property/…).",
       "descriptionLabel": "Description",
       "descriptionHelp": "Ce que vous avez constaté, en quelques phrases.",
       "emailLabel": "Votre adresse e-mail (facultative)",

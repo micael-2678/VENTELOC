@@ -227,53 +227,53 @@ class Api:
 
     MANDANT_ADDRESS = {"line1": "12 rue de la Mer", "postal_code": "29200", "city": "Brest"}
 
-    def prepare_mandate(self, seller, company_id, address=None):
+    def prepare_mandate(self, seller, property_id, address=None):
         """Renseigne l'adresse postale du mandant et l'objet de la cession sur l'annonce (préalable au mandat v2).
         L'adresse est envoyée sous forme d'objet {line1, postal_code, city} (API.md §2) ; repli en chaîne tant que
-        PUT /companies/{id} n'accepte qu'un texte."""
+        PUT /properties/{id} n'accepte qu'un texte."""
         address = address or self.MANDANT_ADDRESS
-        company = self.c.get(f"/api/companies/{company_id}", headers=self.h(seller)).json()
+        property = self.c.get(f"/api/properties/{property_id}", headers=self.h(seller)).json()
         body = {"mandant_address": address}
-        if not company.get("sale_object"):
+        if not property.get("sale_object"):
             body["sale_object"] = "titres"
-        r = self.c.put(f"/api/companies/{company_id}", headers=self.h(seller), json=body)
+        r = self.c.put(f"/api/properties/{property_id}", headers=self.h(seller), json=body)
         if r.status_code == 422 and isinstance(address, dict):
             body["mandant_address"] = f"{address['line1']}, {address['postal_code']} {address['city']}"
-            r = self.c.put(f"/api/companies/{company_id}", headers=self.h(seller), json=body)
+            r = self.c.put(f"/api/properties/{property_id}", headers=self.h(seller), json=body)
         assert r.status_code == 200, r.text
         return r.json()
 
-    def mandate(self, seller, company_id, address=None, expect=200):
+    def mandate(self, seller, property_id, address=None, expect=200):
         """Adresse et objet renseignés, puis POST /seller/mandat/generate (réponse JSON)"""
-        self.prepare_mandate(seller, company_id, address)
-        r = self.c.post("/api/seller/mandat/generate", params={"company_id": company_id}, headers=self.h(seller))
+        self.prepare_mandate(seller, property_id, address)
+        r = self.c.post("/api/seller/mandat/generate", params={"property_id": property_id}, headers=self.h(seller))
         assert r.status_code == expect, r.text
         return r.json()
 
-    def publish(self, seller, company_id):
+    def publish(self, seller, property_id):
         """Adresse et objet renseignés, mandat signé (code par e-mail) puis publication par l'admin si l'annonce est en validation"""
-        m = self.mandate(seller, company_id)
+        m = self.mandate(seller, property_id)
         if not m.get("already_signed"):
             r = self.sign_mandate(seller, m["contract_id"])
             assert r.status_code == 200, r.text
-        r = self.c.put(f"/api/companies/{company_id}/status", params={"status": "published"}, headers=self.h(self.admin()))
+        r = self.c.put(f"/api/properties/{property_id}/status", params={"status": "published"}, headers=self.h(self.admin()))
         assert r.status_code == 200, r.text
 
-    def accept_dataroom(self, seller, buyer, company_id):
+    def accept_dataroom(self, seller, buyer, property_id):
         """Demande de dossier du repreneur acceptée par le cédant ; renvoie l'identifiant de la demande"""
-        r = self.c.post(f"/api/dataroom/{company_id}/request-access", headers=self.h(buyer))
+        r = self.c.post(f"/api/dataroom/{property_id}/request-access", headers=self.h(buyer))
         assert r.status_code == 200, r.text
-        reqs = self.c.get(f"/api/dataroom/{company_id}/access-requests", headers=self.h(seller)).json()
+        reqs = self.c.get(f"/api/dataroom/{property_id}/access-requests", headers=self.h(seller)).json()
         reqs = reqs["requests"] if isinstance(reqs, dict) else reqs
         req = next(x for x in reqs if x["buyer_id"] == buyer["id"])
         if req["status"] == "pending":
-            r = self.c.put(f"/api/dataroom/{company_id}/access/{req['id']}/validate", headers=self.h(seller))
+            r = self.c.put(f"/api/dataroom/{property_id}/access/{req['id']}/validate", headers=self.h(seller))
             assert r.status_code == 200, r.text
         return req["id"]
 
-    def sign_nda(self, buyer, company_id):
+    def sign_nda(self, buyer, property_id):
         """Génère et signe l'accord de confidentialité (identité vérifiée et demande acceptée requises)"""
-        nda = self.c.post("/api/contracts/generate-for-signature", headers=self.h(buyer), json={"company_id": company_id, "doc_type": "nda"})
+        nda = self.c.post("/api/contracts/generate-for-signature", headers=self.h(buyer), json={"property_id": property_id, "doc_type": "nda"})
         assert nda.status_code == 200, nda.text
         nda = nda.json()
         if nda.get("already_signed"):
@@ -282,13 +282,13 @@ class Api:
         assert r.status_code == 200, r.text
         return nda["contract_id"]
 
-    def grant_dataroom(self, seller, buyer, company_id):
+    def grant_dataroom(self, seller, buyer, property_id):
         """Parcours complet d'accès au dossier : demande → acceptation par le cédant → identité → NDA → origine des fonds
         (POST /dataroom/{id}/funds-declaration ouvre l'accès automatiquement)."""
-        self.accept_dataroom(seller, buyer, company_id)
+        self.accept_dataroom(seller, buyer, property_id)
         self.verify_kyc(buyer)
-        contract_id = self.sign_nda(buyer, company_id)
-        r = self.c.post(f"/api/dataroom/{company_id}/funds-declaration", headers=self.h(buyer),
+        contract_id = self.sign_nda(buyer, property_id)
+        r = self.c.post(f"/api/dataroom/{property_id}/funds-declaration", headers=self.h(buyer),
                         json={"source": "mixte", "amount": 300000, "financing_partner": "Banque Test"})
         assert r.status_code == 200 and r.json()["access_granted"] is True, r.text
         return contract_id

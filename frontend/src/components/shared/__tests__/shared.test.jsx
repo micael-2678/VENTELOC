@@ -120,7 +120,7 @@ describe('ErrorBoundary', () => {
 });
 
 // ------------------------------------------------------------------------------------------------
-const company = {
+const property = {
   id: 'abc123',
   trades: ['pac-clim-cvc', 'plomberie-chauffage', 'electricite'],
   rge_types: ['Pompes à chaleur air/eau'],
@@ -131,35 +131,35 @@ const company = {
   asking_price: 420000,
   created_at: '2026-10-03T10:00:00Z',
   is_rge: true,
-  company_checks: { in_ademe_list: true },
+  property_checks: { in_ademe_list: true },
 };
 
 describe('ListingCard', () => {
   test('titre généré, badge vert, prix fr-FR, lien et événement', () => {
-    expect(listingTitle(company)).toBe('Entreprise de PAC, climatisation · Bretagne · 9 salariés');
+    expect(listingTitle(property)).toBe('Entreprise de PAC, climatisation · Bretagne · 9 salariés');
     expect(listingTitle({ title: 'Titre serveur' })).toBe('Titre serveur');
-    expect(qualificationBadge(company)).toEqual({ kind: 'verified', label: 'RGE vérifié ADEME' });
+    expect(qualificationBadge(property)).toEqual({ kind: 'verified', label: 'RGE vérifié ADEME' });
     // Trois libellés distincts : RGE vérifié (vert), RGE déclaré (gris), autres qualifications nommées (gris)
-    expect(qualificationBadge({ rge_types: ['x'], company_checks: { in_ademe_list: false } })).toEqual({ kind: 'declared', label: 'RGE déclaré' });
+    expect(qualificationBadge({ rge_types: ['x'], property_checks: { in_ademe_list: false } })).toEqual({ kind: 'declared', label: 'RGE déclaré' });
     expect(qualificationBadge({ is_rge: true })).toEqual({ kind: 'declared', label: 'RGE déclaré' });
     expect(qualificationBadge({ other_qualifications: ['qualibat'] })).toEqual({ kind: 'declared', label: 'Qualibat déclaré' });
     expect(qualificationBadge({ other_qualifications: ['qualifelec', 'irve'] }).label).toBe('Qualifelec, IRVE déclarés');
     expect(qualificationBadge({ other_qualifications: ['qualibat', 'qualifelec', 'irve'] }).label).toBe('Qualibat, Qualifelec +1 déclarés');
     expect(qualificationBadge({})).toBeNull();
 
-    const c = withRouter(<ListingCard company={company} source="test" now={new Date('2026-10-10T12:00:00')} />);
+    const c = withRouter(<ListingCard property={property} source="test" now={new Date('2026-10-10T12:00:00')} />);
     const card = c.querySelector('[data-testid="listing-card"]');
     expect(card.tagName).toBe('ARTICLE');
     expect(card.className).toContain('min-w-0');
     const link = c.querySelector('a[data-testid="listing-card-link"]');
-    expect(link.getAttribute('href')).toBe('/company/abc123');
+    expect(link.getAttribute('href')).toBe('/property/abc123');
     expect(link.textContent).toBe('Entreprise de PAC, climatisation · Bretagne · 9 salariés');
     expect(c.querySelector('[data-testid="listing-card-badge"]').className).toContain('badge-verified');
     expect(c.textContent).toContain('Finistère (29)');
     expect(c.textContent).toContain('9 salariés');
     expect(c.querySelector('[data-testid="listing-card-price"]').textContent).toBe(formatPrice(420000));
     expect(c.textContent).toContain(formatCompactEuros(1148000));
-    expect(c.querySelector('time').getAttribute('dateTime')).toBe(company.created_at);
+    expect(c.querySelector('time').getAttribute('dateTime')).toBe(property.created_at);
     expect(c.querySelector('time').textContent).toBe('il y a 1 semaine');
     expect(c.querySelectorAll('ul[aria-label="Métiers"] li')).toHaveLength(3);
     // Sans gestionnaire de favori : pas de cœur (aperçu du cédant, favoris du tableau de bord)
@@ -173,35 +173,35 @@ describe('ListingCard', () => {
     expect(formatPrice(520000)).toBe('520\u00a0000\u00a0€');
     expect(formatPrice(1400000)).toBe('1\u00a0400\u00a0000\u00a0€');
     expect(formatPrice(520000)).not.toContain('\u202f');
-    expect(listingLocation(company)).toBe('Finistère (29)');
+    expect(listingLocation(property)).toBe('Finistère (29)');
     expect(listingLocation({ region: 'Bretagne', title: 'Entreprise de plomberie · Bretagne' })).toBe('');
     expect(listingLocation({ region: 'Bretagne', title: 'Entreprise de plomberie' })).toBe('Bretagne');
     expect(priceToEbitda({ asking_price: 520000, ebitda: 185000 })).toBe('2,8\u00a0×');
     expect(priceToEbitda({ asking_price: 520000, ebitda: 0 })).toBe('');
-    const withEbitda = withRouter(<ListingCard company={{ ...company, ebitda: 150000 }} />);
+    const withEbitda = withRouter(<ListingCard property={{ ...property, ebitda: 150000 }} />);
     expect(withEbitda.textContent).toContain('Prix/EBE');
     expect(withEbitda.textContent).toContain('2,8\u00a0×');
     expect(withEbitda.textContent).not.toContain('Bretagne · Finistère');
-    const noEbitda = withRouter(<ListingCard company={company} />);
+    const noEbitda = withRouter(<ListingCard property={property} />);
     expect(noEbitda.textContent).toContain('Effectif');
     expect(noEbitda.textContent).not.toContain('Prix/EBE');
   });
 
   test('liens marqués (module WordPress) : linkQuery ajouté à l\'adresse de la fiche', () => {
-    const c = withRouter(<ListingCard company={company} linkQuery="utm_source=wordpress&utm_medium=embed" />);
-    expect(c.querySelector('a[data-testid="listing-card-link"]').getAttribute('href')).toBe('/company/abc123?utm_source=wordpress&utm_medium=embed');
+    const c = withRouter(<ListingCard property={property} linkQuery="utm_source=wordpress&utm_medium=embed" />);
+    expect(c.querySelector('a[data-testid="listing-card-link"]').getAttribute('href')).toBe('/property/abc123?utm_source=wordpress&utm_medium=embed');
   });
 
   test('mode test : badge « Annonce de test » seulement pour une annonce is_test', () => {
-    const real = withRouter(<ListingCard company={company} />);
+    const real = withRouter(<ListingCard property={property} />);
     expect(real.querySelector('[data-testid="listing-card-test"]')).toBeNull();
-    const fake = withRouter(<ListingCard company={{ ...company, is_test: true }} />);
+    const fake = withRouter(<ListingCard property={{ ...property, is_test: true }} />);
     expect(fake.querySelector('[data-testid="listing-card-test"]').textContent).toBe('Annonce de test');
   });
 
   test('favori : bouton distinct du lien, état pressé, EBE affiché s\'il est renseigné', () => {
     const onToggle = jest.fn();
-    const c = withRouter(<ListingCard company={{ ...company, ebitda: 140000 }} favorite onToggleFavorite={onToggle} />);
+    const c = withRouter(<ListingCard property={{ ...property, ebitda: 140000 }} favorite onToggleFavorite={onToggle} />);
     const heart = c.querySelector('[data-testid="favorite-toggle"]');
     expect(heart.tagName).toBe('BUTTON');
     expect(heart.closest('a')).toBeNull();
@@ -227,7 +227,7 @@ describe('ListingCard', () => {
   });
 
   test('ancienne annonce (commission acquéreur) et formats', () => {
-    const c = withRouter(<ListingCard company={{ ...company, trades: [], commission_payer: 'repreneur' }} />);
+    const c = withRouter(<ListingCard property={{ ...property, trades: [], commission_payer: 'repreneur' }} />);
     expect(c.textContent).toContain('Commission à la charge de l\'acquéreur');
     expect(deActivity('isolation')).toBe('d\'isolation');
     expect(deActivity('Plomberie-chauffage')).toBe('de plomberie-chauffage');

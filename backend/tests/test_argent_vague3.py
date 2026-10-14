@@ -18,8 +18,8 @@ def _mandate(client, contract_id):
     return db_call(client, server.db.generated_contracts.find_one, {"id": contract_id}, {"_id": 0})
 
 
-def _company(client, company_id):
-    return db_call(client, server.db.companies.find_one, {"id": company_id}, {"_id": 0})
+def _property(client, property_id):
+    return db_call(client, server.db.properties.find_one, {"id": property_id}, {"_id": 0})
 
 
 # ---------- Mandat : dénonciation puis nouveau mandat pendant le préavis (contrats-argent-01) ----------
@@ -32,20 +32,20 @@ def test_nouveau_mandat_pendant_le_preavis_garde_l_annonce_en_ligne(api, client,
     assert m2["already_signed"] is False and m2["contract_id"] != m["contract_id"]
     r2 = api.sign_mandate(seller, m2["contract_id"])
     assert r2.status_code == 200, r2.text
-    company = _company(client, c["id"])
-    assert company["status"] == "published" and company["mandate_id"] == m2["contract_id"] and company["mandat_signed"] is True
+    property = _property(client, c["id"])
+    assert property["status"] == "published" and property["mandate_id"] == m2["contract_id"] and property["mandat_signed"] is True
     assert _mandate(client, m["contract_id"])["superseded_by"] == m2["contract_id"]
     # Date d'effet de la première dénonciation atteinte : l'annonce reste en ligne, aucun e-mail « fin de mandat »
     db_call(client, server.db.generated_contracts.update_one, {"id": m["contract_id"]}, {"$set": {"effective_at": iso(-1)}})
     emails.clear()
     assert run_jobs(api, client)["daily:mandate_denounce_effective"] == 0
-    company = _company(client, c["id"])
-    assert company["status"] == "published" and company["mandat_signed"] is True
+    property = _property(client, c["id"])
+    assert property["status"] == "published" and property["mandat_signed"] is True
     assert not last_email(seller["email"], "Fin de votre mandat")
     assert client.get(f"/api/seller/mandat/status/{c['id']}", headers=api.h(seller)).json()["mandat_signed"] is True
     # Garde-fou : même appelée directement, la fin d'un mandat qui ne couvre plus l'annonce ne la dépublie pas
     db_call(client, server.end_mandate, _mandate(client, m["contract_id"]), "test", "withdrawn", NOW)
-    assert _company(client, c["id"])["status"] == "published" and not last_email(seller["email"], "Fin de votre mandat")
+    assert _property(client, c["id"])["status"] == "published" and not last_email(seller["email"], "Fin de votre mandat")
 
 
 # ---------- Clause de suite recalculée à la dénonciation et à la caducité (contrats-argent-02) ----------
@@ -61,7 +61,7 @@ def test_clause_de_suite_comptee_depuis_la_fin_effective(api, client, emails):
     assert expected_tail < datetime.fromisoformat(signed["tail_ends_at"]), "la clause de suite ne court plus depuis l'échéance initiale"
     status = client.get(f"/api/seller/mandat/status/{c['id']}", headers=api.h(seller)).json()
     assert datetime.fromisoformat(status["mandat"]["tail_ends_at"]) == expected_tail
-    assert datetime.fromisoformat(_company(client, c["id"])["mandate_tail_ends_at"]) == expected_tail
+    assert datetime.fromisoformat(_property(client, c["id"])["mandate_tail_ends_at"]) == expected_tail
     # E-mail de fin de mandat à la date d'effet : clause de suite = effet + 18 mois
     db_call(client, server.db.generated_contracts.update_one, {"id": m["contract_id"]}, {"$set": {"effective_at": iso(-1)}})
     emails.clear()
@@ -73,13 +73,13 @@ def test_clause_de_suite_comptee_depuis_la_fin_effective(api, client, emails):
 
 def test_clause_de_suite_du_mandat_caduc(api, client):
     seller, c, m, signed = signed_mandate(api, client)
-    r = client.put(f"/api/companies/{c['id']}/status", params={"status": "removed", "reason": "coordonnees"}, headers=api.h(api.admin()))
+    r = client.put(f"/api/properties/{c['id']}/status", params={"status": "removed", "reason": "coordonnees"}, headers=api.h(api.admin()))
     assert r.status_code == 200
     mandat = _mandate(client, m["contract_id"])
     tail = datetime.fromisoformat(mandat["tail_ends_at"])
     void_at = datetime.fromisoformat(mandat["void_at"])
     assert mandat["status"] == "void" and tail == server.add_months(void_at, server.MANDATE_TAIL_MONTHS)
-    assert _company(client, c["id"])["mandate_tail_ends_at"] == mandat["tail_ends_at"]
+    assert _property(client, c["id"])["mandate_tail_ends_at"] == mandat["tail_ends_at"]
 
 
 # ---------- Nouveau mandat après une dénonciation effective : remise en ligne (contrats-argent-06) ----------
@@ -89,21 +89,21 @@ def test_nouveau_mandat_apres_denonciation_effective_republie(api, client, email
     client.post(f"/api/seller/mandat/{m['contract_id']}/denounce", headers=api.h(seller))
     db_call(client, server.db.generated_contracts.update_one, {"id": m["contract_id"]}, {"$set": {"effective_at": iso(-1)}})
     assert run_jobs(api, client)["daily:mandate_denounce_effective"] == 1
-    company = _company(client, c["id"])
-    assert company["status"] == "withdrawn" and company["withdrawn_reason"] == "mandate_ended"
+    property = _property(client, c["id"])
+    assert property["status"] == "withdrawn" and property["withdrawn_reason"] == "mandate_ended"
     m2 = api.mandate(seller, c["id"])
     r = api.sign_mandate(seller, m2["contract_id"])
     assert r.status_code == 200 and r.json()["listing_status"] == "published"
-    assert _company(client, c["id"])["status"] == "published"
-    assert client.get(f"/api/companies/{c['id']}").status_code == 200
+    assert _property(client, c["id"])["status"] == "published"
+    assert client.get(f"/api/properties/{c['id']}").status_code == 200
 
 
 def test_retrait_volontaire_pas_republie_par_un_nouveau_mandat(api, client):
     seller, c, m, signed = signed_mandate(api, client)
-    assert client.put(f"/api/companies/{c['id']}/status", params={"status": "withdrawn"}, headers=api.h(seller)).status_code == 200
+    assert client.put(f"/api/properties/{c['id']}/status", params={"status": "withdrawn"}, headers=api.h(seller)).status_code == 200
     db_call(client, server.db.generated_contracts.update_one, {"id": m["contract_id"]}, {"$set": {"ends_at": iso(-1)}})
     run_jobs(api, client)
-    assert _company(client, c["id"])["withdrawn_reason"] == "cedant"
+    assert _property(client, c["id"])["withdrawn_reason"] == "cedant"
     m2 = api.mandate(seller, c["id"])
     assert api.sign_mandate(seller, m2["contract_id"]).json()["listing_status"] == "withdrawn"
 
@@ -124,7 +124,7 @@ def test_numero_de_registre_sans_doublon(api, client):
 def test_contre_proposition_avec_dossier_de_preuve_du_cedant(api, client, emails):
     seller, c = published(api, client)
     buyer = presented_buyer(api, client, seller, c["id"])
-    created = client.post("/api/offers", headers=api.h(buyer), json={"company_id": c["id"], **OFFER}).json()
+    created = client.post("/api/offers", headers=api.h(buyer), json={"property_id": c["id"], **OFFER}).json()
     offer, contract_id = created["offer"], created["contract_id"]
     api.sign_contract(buyer, contract_id)
     r = client.put(f"/api/offers/{offer['id']}/respond", headers={**api.h(seller), "User-Agent": "NavigateurCedant/1.0"},
@@ -148,7 +148,7 @@ def test_contre_proposition_avec_dossier_de_preuve_du_cedant(api, client, emails
 def test_validite_de_l_offre_comptee_depuis_la_signature(api, client):
     seller, c = published(api, client)
     buyer = presented_buyer(api, client, seller, c["id"])
-    created = client.post("/api/offers", headers=api.h(buyer), json={"company_id": c["id"], **OFFER}).json()
+    created = client.post("/api/offers", headers=api.h(buyer), json={"property_id": c["id"], **OFFER}).json()
     offer, contract_id = created["offer"], created["contract_id"]
     # Offre déposée il y a 5 jours (échéance initiale : dépôt + 30 j), signée aujourd'hui
     old_expiry = datetime.fromisoformat(offer["expires_at"])

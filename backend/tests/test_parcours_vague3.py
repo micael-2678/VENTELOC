@@ -12,19 +12,19 @@ from conftest import listing
 from test_parcours_v2 import ago, db_call, mails_to, published_listing, run_jobs, uid, unique_siret
 
 
-def _request(api, client, company_id, buyer):
-    r = client.post(f"/api/dataroom/{company_id}/request-access", headers=api.h(buyer))
+def _request(api, client, property_id, buyer):
+    r = client.post(f"/api/dataroom/{property_id}/request-access", headers=api.h(buyer))
     assert r.status_code == 200, r.text
     return r.json()
 
 
-def _antedate_request(client, company_id, buyer_id, days, expires_in_days):
-    db_call(client, server.db.dataroom_access.update_one, {"company_id": company_id, "buyer_id": buyer_id},
+def _antedate_request(client, property_id, buyer_id, days, expires_in_days):
+    db_call(client, server.db.dataroom_access.update_one, {"property_id": property_id, "buyer_id": buyer_id},
             {"$set": {"requested_at": ago(days), "expires_at": (datetime.now(timezone.utc) + timedelta(days=expires_in_days)).isoformat()}})
 
 
-def _stored_request(client, company_id, buyer_id):
-    return db_call(client, server.db.dataroom_access.find_one, {"company_id": company_id, "buyer_id": buyer_id})
+def _stored_request(client, property_id, buyer_id):
+    return db_call(client, server.db.dataroom_access.find_one, {"property_id": property_id, "buyer_id": buyer_id})
 
 
 # ---------- parcours-jobs-01 : nouvelle demande après expiration ----------
@@ -55,11 +55,11 @@ def test_pending_requests_closed_when_listing_leaves_the_site(api, client, email
     seller, c = published_listing(api, client)
     buyer = api.register(uid("rep"), "buyer")
     _request(api, client, c["id"], buyer)
-    r = client.put(f"/api/companies/{c['id']}/status", params={"status": "withdrawn"}, headers=api.h(seller))
+    r = client.put(f"/api/properties/{c['id']}/status", params={"status": "withdrawn"}, headers=api.h(seller))
     assert r.status_code == 200, r.text
     req = _stored_request(client, c["id"], buyer["id"])
     assert req["status"] == "closed" and req["closed_reason"] == "listing_withdrawn"
-    notice = db_call(client, server.db.messages.find_one, {"company_id": c["id"], "message_type": "access_closed"})
+    notice = db_call(client, server.db.messages.find_one, {"property_id": c["id"], "message_type": "access_closed"})
     assert notice and notice["receiver_id"] == buyer["id"]
     _antedate_request(client, c["id"], buyer["id"], 11, -1)
     run_jobs(api, client, emails, reset_gate=True)
@@ -68,7 +68,7 @@ def test_pending_requests_closed_when_listing_leaves_the_site(api, client, email
     seller2, c2 = published_listing(api, client)
     buyer2 = api.register(uid("rep"), "buyer")
     _request(api, client, c2["id"], buyer2)
-    db_call(client, server.db.companies.update_one, {"id": c2["id"]}, {"$set": {"status": "sold_elsewhere"}})
+    db_call(client, server.db.properties.update_one, {"id": c2["id"]}, {"$set": {"status": "sold_elsewhere"}})
     _antedate_request(client, c2["id"], buyer2["id"], 3, 7)
     run_jobs(api, client, emails, reset_gate=True)
     assert not mails_to(emails, seller2["email"], "attend votre réponse")
@@ -92,9 +92,9 @@ def test_transactional_reminders_reach_opted_out_seller(api, client, emails):
     lazy = api.register(uid("cedant"), "seller")
     api.verify_kyc(lazy)
     client.put("/api/auth/profile", headers=api.h(lazy), json={"notifications_opt_out": True})
-    m = client.post("/api/companies", headers=api.h(lazy), json=listing(siret=unique_siret())).json()
+    m = client.post("/api/properties", headers=api.h(lazy), json=listing(siret=unique_siret())).json()
     assert m["status"] == "mandat_en_attente"
-    db_call(client, server.db.companies.update_one, {"id": m["id"]}, {"$set": {"mandate_pending_since": ago(2)}})
+    db_call(client, server.db.properties.update_one, {"id": m["id"]}, {"$set": {"mandate_pending_since": ago(2)}})
     run_jobs(api, client, emails, reset_gate=True)
     assert len(mails_to(emails, lazy["email"], "Signez votre mandat")) == 1
 
@@ -106,10 +106,10 @@ def test_seller_reminder_single_recap_only_for_listings_online(api, client, emai
     other_seller, sold = published_listing(api, client)
     buyers = [api.register(uid("rep"), "buyer") for _ in range(3)]
     for b in buyers[:2]:
-        assert client.post(f"/api/companies/{c['id']}/contact", headers=api.h(b), json={"message": "Bonjour, je suis intéressé"}).status_code == 200
-    assert client.post(f"/api/companies/{sold['id']}/contact", headers=api.h(buyers[2]), json={"message": "Bonjour"}).status_code == 200
-    assert client.put(f"/api/companies/{sold['id']}/status", params={"status": "sold_elsewhere"}, headers=api.h(other_seller)).status_code == 200
-    db_call(client, server.db.conversations.update_many, {"company_id": {"$in": [c["id"], sold["id"]]}}, {"$set": {"last_at": ago(4)}})
+        assert client.post(f"/api/properties/{c['id']}/contact", headers=api.h(b), json={"message": "Bonjour, je suis intéressé"}).status_code == 200
+    assert client.post(f"/api/properties/{sold['id']}/contact", headers=api.h(buyers[2]), json={"message": "Bonjour"}).status_code == 200
+    assert client.put(f"/api/properties/{sold['id']}/status", params={"status": "sold_elsewhere"}, headers=api.h(other_seller)).status_code == 200
+    db_call(client, server.db.conversations.update_many, {"property_id": {"$in": [c["id"], sold["id"]]}}, {"$set": {"last_at": ago(4)}})
     run_jobs(api, client, emails, reset_gate=True)
     recap = mails_to(emails, seller["email"], "attendent votre réponse")
     assert len(recap) == 1 and recap[0]["subject"] == "2 acquéreurs attendent votre réponse" and "Ne plus recevoir" in recap[0]["html"]
@@ -126,8 +126,8 @@ def test_legacy_reminders_carry_unsubscribe_and_respect_opt_out(api, client, ema
     opted = api.register(uid("rep"), "buyer")
     client.put("/api/auth/profile", headers=api.h(opted), json={"notifications_opt_out": True})
     for b in (buyer, opted):
-        client.post(f"/api/companies/{c['id']}/contact", headers=api.h(b), json={"message": "Bonjour"})
-    db_call(client, server.db.contacts.update_many, {"company_id": c["id"]}, {"$set": {"created_at": ago(31)}})
+        client.post(f"/api/properties/{c['id']}/contact", headers=api.h(b), json={"message": "Bonjour"})
+    db_call(client, server.db.contacts.update_many, {"property_id": c["id"]}, {"$set": {"created_at": ago(31)}})
     lazy = api.register(uid("sansannonce"), "seller")
     lazy_opted = api.register(uid("sansannonce"), "seller")
     client.put("/api/auth/profile", headers=api.h(lazy_opted), json={"notifications_opt_out": True})
@@ -170,17 +170,17 @@ def test_admin_reminds_seller_from_todo(api, client, emails):
 def test_duplicate_siren_blocked_while_first_listing_paused(api, client, emails):
     siret = unique_siret()
     seller1, c1 = published_listing(api, client, siret=siret)
-    assert client.put(f"/api/companies/{c1['id']}/status", params={"status": "paused"}, headers=api.h(seller1)).status_code == 200
+    assert client.put(f"/api/properties/{c1['id']}/status", params={"status": "paused"}, headers=api.h(seller1)).status_code == 200
     seller2 = api.register(uid("dupont"), "seller", first="Paul", last="Dupont")
     api.verify_kyc(seller2)
-    c2 = client.post("/api/companies", headers=api.h(seller2), json=listing(siret=siret)).json()
+    c2 = client.post("/api/properties", headers=api.h(seller2), json=listing(siret=siret)).json()
     m = api.mandate(seller2, c2["id"])
     assert api.sign_mandate(seller2, m["contract_id"]).json()["listing_status"] == "draft"
-    doc = client.get(f"/api/companies/{c2['id']}", headers=api.h(seller2)).json()
-    assert "doublon_siren" in doc["blocking"] and doc["company_checks"]["duplicate_siren"] is True
+    doc = client.get(f"/api/properties/{c2['id']}", headers=api.h(seller2)).json()
+    assert "doublon_siren" in doc["blocking"] and doc["property_checks"]["duplicate_siren"] is True
     # Si l'admin met la seconde annonce en ligne, la première ne peut plus être remise en ligne
-    assert client.put(f"/api/companies/{c2['id']}/status", params={"status": "published"}, headers=api.h(api.admin())).status_code == 200
-    r = client.put(f"/api/companies/{c1['id']}/status", params={"status": "published"}, headers=api.h(seller1))
+    assert client.put(f"/api/properties/{c2['id']}/status", params={"status": "published"}, headers=api.h(api.admin())).status_code == 200
+    r = client.put(f"/api/properties/{c1['id']}/status", params={"status": "published"}, headers=api.h(seller1))
     assert r.status_code == 400 and r.json()["detail"]["code"] == "validation"
 
 
@@ -188,8 +188,8 @@ def test_duplicate_siren_blocked_while_first_listing_paused(api, client, emails)
 
 def test_seller_can_withdraw_legacy_pending_listing(api, client):
     seller, c = published_listing(api, client)
-    db_call(client, server.db.companies.update_one, {"id": c["id"]}, {"$set": {"status": "pending"}})
-    r = client.put(f"/api/companies/{c['id']}/status", params={"status": "withdrawn"}, headers=api.h(seller))
+    db_call(client, server.db.properties.update_one, {"id": c["id"]}, {"$set": {"status": "pending"}})
+    r = client.put(f"/api/properties/{c['id']}/status", params={"status": "withdrawn"}, headers=api.h(seller))
     assert r.status_code == 200 and r.json()["status"] == "withdrawn"
 
 

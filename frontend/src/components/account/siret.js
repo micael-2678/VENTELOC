@@ -17,10 +17,10 @@ export const isSiren = (value) => cleanSiren(value).length === 9;
 
 const text = (v) => (v == null ? '' : String(v)).trim();
 
-// Réponse de GET /estimates/company/{siret} → forme stable pour les pages (les deux variantes de nommage de l'API
+// Réponse de GET /estimates/property/{siret} → forme stable pour les pages (les deux variantes de nommage de l'API
 // sont acceptées : company_name / nom_complet, naf_code / naf, staff_label / tranche_effectif…).
 export const normalizeCompanyLookup = (data, siret) => {
-  const c = (data && data.company) || {};
+  const c = (data && data.property) || {};
   const r = (data && data.rge) || {};
   const details = Array.isArray(r.details) ? r.details : [];
   const names = Array.isArray(r.qualifications) ? r.qualifications : [];
@@ -37,7 +37,7 @@ export const normalizeCompanyLookup = (data, siret) => {
   return {
     siret: cleanSiret((data && data.siret) || siret),
     siren: cleanSiren((data && data.siren) || c.siren || siret),
-    company: {
+    property: {
       available: c.available !== false,
       found: c.found === true || (!!text(c.company_name || c.nom_complet) && c.found !== false),
       message: text(c.message),
@@ -96,16 +96,16 @@ export const useCompanyLookup = () => {
     setStatus('loading');
     setMessage('');
     try {
-      const res = await axiosInstance.get(`/estimates/company/${siret}`);
+      const res = await axiosInstance.get(`/estimates/property/${siret}`);
       if (mine !== seq.current) return null;
       const data = normalizeCompanyLookup(res.data, siret);
       setResult(data);
-      if (!data.company.available) {
+      if (!data.property.available) {
         setStatus('unavailable');
-        setMessage(data.company.message || "Vérification différée : l'annuaire des entreprises n'a pas répondu, vous pouvez continuer.");
-      } else if (!data.company.found) {
+        setMessage(data.property.message || "Vérification différée : l'annuaire des entreprises n'a pas répondu, vous pouvez continuer.");
+      } else if (!data.property.found) {
         setStatus('not_found');
-        setMessage(data.company.message || "Ce SIRET est inconnu de l'annuaire des entreprises. Vérifiez le numéro ; vous pouvez continuer sans.");
+        setMessage(data.property.message || "Ce SIRET est inconnu de l'annuaire des entreprises. Vérifiez le numéro ; vous pouvez continuer sans.");
       } else {
         setStatus('found');
       }
@@ -119,7 +119,7 @@ export const useCompanyLookup = () => {
         setResult(null);
         return null;
       }
-      const data = normalizeCompanyLookup({ company: { available: false }, rge: { available: false } }, siret);
+      const data = normalizeCompanyLookup({ property: { available: false }, rge: { available: false } }, siret);
       setResult(data);
       setStatus('unavailable');
       setMessage("Vérification différée : l'annuaire des entreprises n'a pas répondu, vous pouvez continuer.");

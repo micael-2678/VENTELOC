@@ -170,11 +170,11 @@ describe('pages légales et 404', () => {
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(textarea, 'Une annonce affiche un numéro de téléphone.');
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    act(() => setInput(r.querySelector('input[name="reference"]'), '/company/abc'));
+    act(() => setInput(r.querySelector('input[name="reference"]'), '/property/abc'));
     await act(async () => { r.querySelector('[data-testid="report-form"]').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
     await flush();
     const post = global.fetch.mock.calls.find(([url, init]) => String(url).endsWith('/api/events') && init && init.body && JSON.parse(init.body).name === 'report');
-    expect(JSON.parse(post[1].body)).toMatchObject({ name: 'report', path: '/signaler', props: { reason: 'coordonnees', reference: '/company/abc' } });
+    expect(JSON.parse(post[1].body)).toMatchObject({ name: 'report', path: '/signaler', props: { reason: 'coordonnees', reference: '/property/abc' } });
     expect(r.querySelector('[data-testid="report-success"]')).not.toBeNull();
   });
 

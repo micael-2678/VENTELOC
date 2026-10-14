@@ -533,7 +533,7 @@ async def department_from_siret(siret) -> Optional[str]:
     return company.get("departement") or None
 
 
-def company_checks_from(company: Dict[str, Any], dirigeant: Optional[Dict[str, Any]] = None,
+def property_checks_from(company: Dict[str, Any], dirigeant: Optional[Dict[str, Any]] = None,
                         in_ademe_list: Optional[bool] = None, duplicate_siren: bool = False) -> Dict[str, Any]:
     """
     Drapeaux `company_checks` d'une annonce (spécification §2.2) à partir d'un résultat de lookup_siren

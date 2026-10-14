@@ -74,7 +74,7 @@ const DESCRIPTION = 'Entreprise de plomberie et de chauffage installée depuis v
   await p.getByTestId('create-listing-form').waitFor();
   await L.sleep(800); // préremplissage open data (estimate en session)
   t = await L.text(p);
-  L.check('annonce écran 1 : SIRET et dénomination préremplis', (await p.getByTestId('siret-input').inputValue()).replace(/\s/g, '') === SIRET && /SECRET ENERGIE/.test(await p.getByTestId('company-name-input').inputValue()));
+  L.check('annonce écran 1 : SIRET et dénomination préremplis', (await p.getByTestId('siret-input').inputValue()).replace(/\s/g, '') === SIRET && /SECRET ENERGIE/.test(await p.getByTestId('property-name-input').inputValue()));
   // Métiers : s'assurer que « PAC, climatisation » est coché (principal) et pas plus de 4
   const tradeInput = (id) => p.locator(`[data-testid=trade-${id}] input`);
   if (!(await tradeInput('plomberie-chauffage').isChecked())) await p.getByTestId('trade-plomberie-chauffage').click();
@@ -87,9 +87,9 @@ const DESCRIPTION = 'Entreprise de plomberie et de chauffage installée depuis v
   await p.getByTestId('legal-structure-select').selectOption('SAS').catch(() => {});
   await p.getByTestId('next-step').click();
   await p.waitForSelector('[data-testid=ca-n-input]', { timeout: 15000 });
-  L.check('annonce écran 1 → écran 2 (brouillon POST /companies)', true);
-  const companyId = (await L.api('GET', '/companies', { token: sellerToken })).data.find((c) => c.seller_id === sellerId)?.id;
-  L.check('annonce : brouillon créé côté serveur (statut draft, non soumis)', !!companyId, JSON.stringify((await L.api('GET', '/companies', { token: sellerToken })).data).slice(0, 200));
+  L.check('annonce écran 1 → écran 2 (brouillon POST /properties)', true);
+  const propertyId = (await L.api('GET', '/properties', { token: sellerToken })).data.find((c) => c.seller_id === sellerId)?.id;
+  L.check('annonce : brouillon créé côté serveur (statut draft, non soumis)', !!propertyId, JSON.stringify((await L.api('GET', '/properties', { token: sellerToken })).data).slice(0, 200));
   L.check('annonce écran 2 : CA prérempli depuis l\'estimateur', (await p.getByTestId('ca-n-input').inputValue()) === '600000', await p.getByTestId('ca-n-input').inputValue());
   await p.getByTestId('ca-n1-input').fill('560000');
   await p.getByTestId('ca-n2-input').fill('520000');
@@ -116,7 +116,7 @@ const DESCRIPTION = 'Entreprise de plomberie et de chauffage installée depuis v
   await p.getByTestId('go-mandate').waitFor({ timeout: 15000 });
   t = await L.text(p);
   L.check('annonce : écran « Plus que deux étapes » (identité → mandat → publication)', /Plus que deux étapes/.test(t) && /Vérifiez votre identité/.test(t));
-  let comp = (await L.api('GET', `/companies/${companyId}`, { token: sellerToken })).data;
+  let comp = (await L.api('GET', `/properties/${propertyId}`, { token: sellerToken })).data;
   L.check('annonce : brouillon complet en attente d\'identité (draft)', comp.status === 'draft' && comp.asking_price === 300000 && comp.sale_object === 'titres', `${comp.status} ${comp.asking_price} ${comp.sale_object}`);
   L.check('annonce : aucun e-mail « mandat à signer » avant l\'identité', !L.findEmail(EMAIL, /mandat/i, since));
 
@@ -124,13 +124,13 @@ const DESCRIPTION = 'Entreprise de plomberie et de chauffage installée depuis v
   const kyc = await L.api('PUT', `/admin/kyc/${sellerId}/validate`, { token: s.admin.token, params: { status: 'verified' } });
   L.check('identité : validée par l\'admin (simulation Stripe)', kyc.status === 200, JSON.stringify(kyc.data));
   await L.sleep(500);
-  comp = (await L.api('GET', `/companies/${companyId}`, { token: sellerToken })).data;
+  comp = (await L.api('GET', `/properties/${propertyId}`, { token: sellerToken })).data;
   L.check('annonce : soumise à la vérification → mandat_en_attente', comp.status === 'mandat_en_attente', comp.status);
   L.check('annonce : e-mail « mandat à signer » reçu', !!L.findEmail(EMAIL, /mandat/i, since));
 
   // ---- Mandat v2
   await p.getByTestId('go-mandate').click();
-  await p.waitForURL(new RegExp(`/seller/mandat/${companyId}`));
+  await p.waitForURL(new RegExp(`/seller/mandat/${propertyId}`));
   await p.getByTestId('mandant-form').waitFor({ timeout: 15000 });
   L.check('mandat : objet repris de l\'annonce (titres)', await p.locator('[data-testid=mandate-object-titres] input').isChecked());
   await p.getByTestId('address-line1').fill('12 rue des Artisans');
@@ -158,18 +158,18 @@ const DESCRIPTION = 'Entreprise de plomberie et de chauffage installée depuis v
   await p.getByTestId('mandate-pdf').click();
   L.check('mandat : PDF téléchargé', !!(await dl));
   L.check('mandat : e-mail avec lien PDF', !!L.findEmail(EMAIL, /mandat/i, since) && /pdf/i.test((L.readEmails().reverse().find((e) => e.to === EMAIL && /sign/i.test(e.subject)) || {}).html || ''));
-  comp = (await L.api('GET', `/companies/${companyId}`)).data;
+  comp = (await L.api('GET', `/properties/${propertyId}`)).data;
   L.check('annonce : publiée (GET public 200, statut published)', comp && comp.status === 'published' && !comp.company_name, JSON.stringify(comp).slice(0, 150));
   await L.shot(p, 'mandate-signed-desktop.png');
 
   // ---- Tableau de bord vendeur
   await p.goto(L.FRONT + '/seller/dashboard', { waitUntil: 'networkidle' });
-  await p.waitForSelector(`[data-testid=listing-${companyId}]`, { timeout: 15000 });
+  await p.waitForSelector(`[data-testid=listing-${propertyId}]`, { timeout: 15000 });
   t = await L.text(p);
-  L.check('dashboard : annonce « En ligne »', /En ligne/.test(await p.getByTestId(`status-${companyId}`).first().innerText()), await p.getByTestId(`status-${companyId}`).first().innerText());
+  L.check('dashboard : annonce « En ligne »', /En ligne/.test(await p.getByTestId(`status-${propertyId}`).first().innerText()), await p.getByTestId(`status-${propertyId}`).first().innerText());
   L.check('dashboard : aucun compteur à zéro', L.zeroCounters(t).length === 0, L.zeroCounters(t).join(', '));
   L.check('dashboard : pas de 48 h / LOI / débiteur', !/48 h|\bLOI\b|commission_payer|débiteur/i.test(t));
-  await p.getByTestId(`open-${companyId}`).click().catch(() => {});
+  await p.getByTestId(`open-${propertyId}`).click().catch(() => {});
   await L.sleep(500);
   await p.getByRole('tab', { name: /Mandat/ }).click();
   await L.sleep(500);
@@ -187,11 +187,11 @@ const DESCRIPTION = 'Entreprise de plomberie et de chauffage installée depuis v
   L.check('mobile création d\'annonce : aucun débordement horizontal', o.ok, `scrollWidth=${o.width}`);
   await L.shot(m, 'create-listing-mobile.png');
   await m.goto(L.FRONT + '/seller/dashboard', { waitUntil: 'networkidle' });
-  await m.waitForSelector(`[data-testid=listing-${companyId}]`, { timeout: 15000 });
+  await m.waitForSelector(`[data-testid=listing-${propertyId}]`, { timeout: 15000 });
   o = await L.noOverflow(m, 390);
   L.check('mobile dashboard vendeur : aucun débordement horizontal', o.ok, `scrollWidth=${o.width}`);
   await L.shot(m, 'seller-dashboard-mobile.png');
-  await m.goto(L.FRONT + `/seller/mandat/${companyId}`, { waitUntil: 'networkidle' });
+  await m.goto(L.FRONT + `/seller/mandat/${propertyId}`, { waitUntil: 'networkidle' });
   await m.getByTestId('mandate-signed').waitFor({ timeout: 15000 });
   o = await L.noOverflow(m, 390);
   L.check('mobile page mandat : aucun débordement horizontal', o.ok, `scrollWidth=${o.width}`);

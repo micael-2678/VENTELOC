@@ -392,7 +392,7 @@ EMAIL_TEMPLATES = {
         "html": """
         <h2>Votre avis nous aide à améliorer {site_name}</h2>
         <p>Bonjour {name},</p>
-        <p>Il y a un mois, vous avez contacté le vendeur d'une entreprise du bâtiment ({company_label}). Où en êtes-vous ? Un seul clic suffit :</p>
+        <p>Il y a un mois, vous avez contacté le vendeur d'une entreprise du bâtiment ({property_label}). Où en êtes-vous ? Un seul clic suffit :</p>
         <p>
           <a href="{link_base}&r=en_discussion">Toujours en discussion</a><br>
           <a href="{link_base}&r=rencontre">Rencontre prévue ou faite</a><br>

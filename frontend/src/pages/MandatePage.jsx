@@ -30,7 +30,7 @@ const CAPACITIES = [
 const emptyAddress = { line1: '', line2: '', postal_code: '', city: '' };
 
 // Adresse stockée (objet ou chaîne formatée « 12 rue X, 29200 Brest ») → champs du formulaire
-const addressFromCompany = (value) => {
+const addressFromProperty = (value) => {
   if (!value) return emptyAddress;
   if (typeof value === 'object') return { ...emptyAddress, ...value, line2: value.line2 || '' };
   const m = /^(.*?)(?:,\s*)?(\d{5})\s+(.+)$/.exec(String(value).trim());
@@ -41,7 +41,7 @@ const addressFromCompany = (value) => {
 const addressToString = (a) => [a.line1, a.line2, `${a.postal_code} ${a.city}`].map((s) => String(s || '').trim()).filter(Boolean).join(', ');
 
 // Écran de fin : mandat signé (juste après la signature ou déjà signé auparavant)
-const SignedSummary = ({ mandate, company, companyId }) => {
+const SignedSummary = ({ mandate, property, propertyId }) => {
   const legacy = legacyPayerText(mandate);
   return (
     <section className="card p-5 sm:p-8" data-testid="mandate-signed">
@@ -85,7 +85,7 @@ const SignedSummary = ({ mandate, company, companyId }) => {
         </Button>
       )}
 
-      <NextStep company={company} companyId={companyId} />
+      <NextStep property={property} propertyId={propertyId} />
 
       <p className="text-sm text-gray-600 mt-6">
         Résiliable à tout moment depuis votre espace vendeur, avec un préavis de {MANDATE_NOTICE_DAYS} jours. Sans exclusivité : vous restez libre de vendre par vous-même.
@@ -94,8 +94,8 @@ const SignedSummary = ({ mandate, company, companyId }) => {
   );
 };
 
-const NextStep = ({ company, companyId }) => {
-  const status = company?.status;
+const NextStep = ({ property, propertyId }) => {
+  const status = property?.status;
   if (status === 'published') {
     return (
       <div className="flex items-start gap-3 rounded-xl border border-brand-green/40 bg-brand-green-soft p-4" data-testid="mandate-next">
@@ -104,19 +104,19 @@ const NextStep = ({ company, companyId }) => {
           <p className="font-semibold text-brand-navy">Votre annonce est publiée immédiatement</p>
           <p className="mt-1">Elle est visible dès maintenant par les repreneurs, de façon anonyme, et envoyée aux repreneurs dont les critères correspondent. Vous serez prévenu par e-mail à chaque contact, accord de confidentialité et offre.</p>
           <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
-            <Link to={`/company/${companyId}`} className="font-medium underline">Voir mon annonce</Link>
+            <Link to={`/property/${propertyId}`} className="font-medium underline">Voir mon annonce</Link>
             <Link to="/seller/dashboard" className="font-medium underline">Aller à mon espace vendeur</Link>
           </div>
         </div>
       </div>
     );
   }
-  if (status === 'draft' && (company?.blocking?.length || company?.blocked_reason)) {
+  if (status === 'draft' && (property?.blocking?.length || property?.blocked_reason)) {
     return (
       <div className="space-y-3" data-testid="mandate-next">
-        <BlockingReasons company={company} />
+        <BlockingReasons property={property} />
         <p className="text-sm text-gray-700">Dès que ces points sont réglés, votre annonce est soumise à nouveau et publiée automatiquement : rien d'autre à faire de votre côté.</p>
-        <Link to={`/seller/edit/${companyId}`} className="btn-link">Compléter mon annonce</Link>
+        <Link to={`/seller/edit/${propertyId}`} className="btn-link">Compléter mon annonce</Link>
       </div>
     );
   }
@@ -134,10 +134,10 @@ const NextStep = ({ company, companyId }) => {
 
 const MandatePage = ({ user }) => {
   usePrivateSeo('Mandat de vente');
-  const { companyId } = useParams();
+  const { propertyId } = useParams();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
-  const [company, setCompany] = useState(null);
+  const [property, setProperty] = useState(null);
   const [contract, setContract] = useState(null); // { contract_id, contract_number, content, summary, terms_date }
   const [signed, setSigned] = useState(null);
   const [address, setAddress] = useState(emptyAddress);
@@ -154,14 +154,14 @@ const MandatePage = ({ user }) => {
     setLoading(true);
     setLoadError('');
     try {
-      const [companyRes, statusRes] = await Promise.allSettled([
-        axiosInstance.get(`/companies/${companyId}`),
-        axiosInstance.get(`/seller/mandat/status/${companyId}`),
+      const [propertyRes, statusRes] = await Promise.allSettled([
+        axiosInstance.get(`/properties/${propertyId}`),
+        axiosInstance.get(`/seller/mandat/status/${propertyId}`),
       ]);
-      if (companyRes.status === 'rejected') throw companyRes.reason;
-      const c = companyRes.value.data || {};
-      setCompany(c);
-      setAddress(addressFromCompany(c.mandant_address));
+      if (propertyRes.status === 'rejected') throw propertyRes.reason;
+      const c = propertyRes.value.data || {};
+      setProperty(c);
+      setAddress(addressFromProperty(c.mandant_address));
       setCapacity(c.mandant_capacity || '');
       setSaleObject(c.sale_object || (c.sale_type === 'parts' ? 'titres' : c.sale_type === 'fonds' ? 'fonds' : ''));
       const mandat = statusRes.status === 'fulfilled' ? statusRes.value.data?.mandat : null;
@@ -171,11 +171,11 @@ const MandatePage = ({ user }) => {
     } finally {
       setLoading(false);
     }
-  }, [companyId]);
+  }, [propertyId]);
 
   useEffect(() => { load(); }, [load]);
 
-  const price = Number(company?.asking_price) || 0;
+  const price = Number(property?.asking_price) || 0;
   const estimate = price > 0 ? computeCommission(price) : null;
   const estimateText = estimate ? `${formatEuros(estimate.ht)} HT (${formatEuros(estimate.ttc)} TTC)` : '';
 
@@ -202,13 +202,13 @@ const MandatePage = ({ user }) => {
       const addr = { line1: address.line1.trim(), line2: address.line2.trim() || undefined, postal_code: address.postal_code.trim(), city: address.city.trim() };
       const body = { mandant_address: addr, mandant_capacity: capacity, sale_object: saleObject };
       try {
-        await axiosInstance.put(`/companies/${companyId}`, body);
+        await axiosInstance.put(`/properties/${propertyId}`, body);
       } catch (err) {
         if (err?.response?.status !== 422) throw err;
         // API antérieure : adresse acceptée sous forme de chaîne formatée
-        await axiosInstance.put(`/companies/${companyId}`, { ...body, mandant_address: addressToString(addr) });
+        await axiosInstance.put(`/properties/${propertyId}`, { ...body, mandant_address: addressToString(addr) });
       }
-      const res = await axiosInstance.post('/seller/mandat/generate', null, { params: { company_id: companyId } });
+      const res = await axiosInstance.post('/seller/mandat/generate', null, { params: { property_id: propertyId } });
       const data = res.data || {};
       if (data.already_signed) {
         const c = data.contract || {};
@@ -217,14 +217,14 @@ const MandatePage = ({ user }) => {
         setContract(data);
         setExpanded(false);
       }
-      const refreshed = await axiosInstance.get(`/companies/${companyId}`).catch(() => null);
-      if (refreshed?.data) setCompany(refreshed.data);
+      const refreshed = await axiosInstance.get(`/properties/${propertyId}`).catch(() => null);
+      if (refreshed?.data) setProperty(refreshed.data);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
       const code = apiErrorCode(err);
       const detail = err?.response?.data?.detail;
       if (err?.response?.status === 400 && code === 'validation' && Array.isArray(detail?.missing)) {
-        const map = { mandant_address: 'line1', sale_object: 'sale_object', company_name: 'company', siret: 'company' };
+        const map = { mandant_address: 'line1', sale_object: 'sale_object', company_name: 'property', siret: 'property' };
         const next = {};
         detail.missing.forEach((m) => { next[map[m] || m] = detail.message || 'Champ manquant'; });
         setFieldErrors(next);
@@ -258,21 +258,21 @@ const MandatePage = ({ user }) => {
     trackEvent('mandate_signed', { listing_status: data.listing_status || '' });
     toast.success(`Mandat signé. N° de registre : ${data.registry_number || '—'}`);
     try { sessionStorage.removeItem('kyc_return_to'); } catch (e) { /* stockage indisponible */ }
-    const refreshed = await axiosInstance.get(`/companies/${companyId}`).catch(() => null);
-    if (refreshed?.data) setCompany(refreshed.data);
-    else if (data.listing_status) setCompany((c) => ({ ...(c || {}), status: data.listing_status }));
+    const refreshed = await axiosInstance.get(`/properties/${propertyId}`).catch(() => null);
+    if (refreshed?.data) setProperty(refreshed.data);
+    else if (data.listing_status) setProperty((c) => ({ ...(c || {}), status: data.listing_status }));
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const listingSummary = company && (
+  const listingSummary = property && (
     <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
       <div className="min-w-0 sm:col-span-2">
         <dt className="text-gray-500">Annonce</dt>
-        <dd className="font-medium text-gray-900 break-words">{listingTitle(company)}</dd>
+        <dd className="font-medium text-gray-900 break-words">{listingTitle(property)}</dd>
       </div>
       <div className="min-w-0">
         <dt className="text-gray-500">Société</dt>
-        <dd className={`font-medium break-words ${company.company_name ? 'text-gray-900' : 'text-brand-amber'}`}>{company.company_name || 'Dénomination à renseigner sur l\'annonce'}</dd>
+        <dd className={`font-medium break-words ${property.company_name ? 'text-gray-900' : 'text-brand-amber'}`}>{property.company_name || 'Dénomination à renseigner sur l\'annonce'}</dd>
       </div>
       <div>
         <dt className="text-gray-500">Prix demandé</dt>
@@ -299,7 +299,7 @@ const MandatePage = ({ user }) => {
             </div>
           </div>
         ) : signed ? (
-          <SignedSummary mandate={signed} company={company} companyId={companyId} />
+          <SignedSummary mandate={signed} property={property} propertyId={propertyId} />
         ) : (
           <>
             <header className="mb-6">
@@ -325,9 +325,9 @@ const MandatePage = ({ user }) => {
             <section className="card p-5 sm:p-6 mb-6" aria-labelledby="mandate-listing">
               <h2 id="mandate-listing" className="font-display text-lg font-bold text-brand-navy mb-4">Votre annonce</h2>
               {listingSummary}
-              {fieldErrors.company && (
+              {fieldErrors.property && (
                 <p role="alert" className="text-sm text-red-700 mt-3">
-                  {fieldErrors.company} <Link to={`/seller/edit/${companyId}`} className="underline font-medium">Compléter mon annonce</Link>
+                  {fieldErrors.property} <Link to={`/seller/edit/${propertyId}`} className="underline font-medium">Compléter mon annonce</Link>
                 </p>
               )}
             </section>

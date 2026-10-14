@@ -56,7 +56,7 @@ CONTRACT_EMAIL_TEMPLATES = {
         "html": """
         <h2>Résiliation d'un mandat</h2>
         <p>Le mandat n° {registry_number} ({contract_number}) a été résilié le {denounced_at} par {denounced_by}.
-        Date d'effet : {effective_at}. Annonce {company_id}.</p>
+        Date d'effet : {effective_at}. Annonce {property_id}.</p>
         <p>L'annonce sera dépubliée automatiquement à la date d'effet et la liste des repreneurs présentés envoyée au mandant.</p>
         """
     },

@@ -34,10 +34,10 @@ import taxonomy
 from business_model import (DEMO_EMAIL_DOMAIN, is_demo_email, sender_email, sender_name,  # noqa: F401 (réexport)
                             test_mode_enabled)
 from migrations.purge_test_data import purge_test_data
-from server import (OTP_TTL_SECONDS, USER_SAFE_PROJECTION, BuyerProfile, CompanyCreate, CompanyUpdate, MandantAddress,
-                    MandatSignature, api_error, buyer_profile_score, create_company, db, generate_seller_mandat,
+from server import (OTP_TTL_SECONDS, USER_SAFE_PROJECTION, BuyerProfile, PropertyCreate, PropertyUpdate, MandantAddress,
+                    MandatSignature, api_error, buyer_profile_score, create_property, db, generate_seller_mandat,
                     get_current_user, hash_password_async, identity_verified_effects, issue_token, limiter, mask_email,
-                    normalize_buyer_profile, otp_hash, require_admin, sign_seller_mandat, test_panel_access, update_company,
+                    normalize_buyer_profile, otp_hash, require_admin, sign_seller_mandat, test_panel_access, update_property,
                     with_profile_score)
 
 logger = logging.getLogger("testmode")
@@ -293,29 +293,29 @@ async def _fresh(user_id: str) -> dict:
 
 async def _publish_demo_listing(spec: dict, seller_id: str, request: Request) -> tuple:
     """(annonce, créée ?) : création → adresse du mandant → mandat de test → signature → contrôles et publication"""
-    existing = await db.companies.find_one({"seller_id": seller_id, "demo_key": spec["key"]}, {"_id": 0})
+    existing = await db.properties.find_one({"seller_id": seller_id, "demo_key": spec["key"]}, {"_id": 0})
     created = existing is None
     if created:
         data = {k: spec[k] for k in DEMO_LISTING_FIELDS}
-        company = await create_company(CompanyCreate(**data), current_user=await _fresh(seller_id))
-        await db.companies.update_one({"id": company["id"]}, {"$set": {"demo_key": spec["key"], "is_test": True}})
-        company_id = company["id"]
+        property = await create_property(PropertyCreate(**data), current_user=await _fresh(seller_id))
+        await db.properties.update_one({"id": property["id"]}, {"$set": {"demo_key": spec["key"], "is_test": True}})
+        property_id = property["id"]
     else:
-        company_id = existing["id"]
+        property_id = existing["id"]
         if existing.get("status") == "published":
             return existing, False
-    company = await db.companies.find_one({"id": company_id}, {"_id": 0})
-    if not company.get("mandant_address"):
+    property = await db.properties.find_one({"id": property_id}, {"_id": 0})
+    if not property.get("mandant_address"):
         address = MandantAddress(line1="1 place de la Démonstration", postal_code=spec["postal_code"], city=spec["city"])
-        await update_company(company_id, CompanyUpdate(mandant_address=address, mandant_capacity="dirigeant"),
+        await update_property(property_id, PropertyUpdate(mandant_address=address, mandant_capacity="dirigeant"),
                              current_user=await _fresh(seller_id))
-    mandate = await generate_seller_mandat(company_id=company_id, current_user=await _fresh(seller_id))
+    mandate = await generate_seller_mandat(property_id=property_id, current_user=await _fresh(seller_id))
     if not mandate.get("already_signed"):
         await _sign_with_test_code(mandate["contract_id"], await _fresh(seller_id), request)
-    company = await db.companies.find_one({"id": company_id}, {"_id": 0})
-    if company.get("status") != "published":
-        logger.warning(f"Annonce de démonstration {spec['key']} non publiée : {company.get('status')} {company.get('blocking')}")
-        return company, created
+    property = await db.properties.find_one({"id": property_id}, {"_id": 0})
+    if property.get("status") != "published":
+        logger.warning(f"Annonce de démonstration {spec['key']} non publiée : {property.get('status')} {property.get('blocking')}")
+        return property, created
     # Dates étalées sur deux mois (tri « récentes » réaliste)
     published = _now() - timedelta(days=spec["days_ago"], hours=3)
     update = {"published_at": published.isoformat(), "created_at": (published - timedelta(days=2)).isoformat(),
@@ -327,18 +327,18 @@ async def _publish_demo_listing(spec: dict, seller_id: str, request: Request) ->
     else:
         # Contrôles réputés passés : dirigeant confirmé au registre, RGE déclaré retrouvé sur la liste ADEME (badge vert
         # « RGE vérifié ADEME » sur la carte et la fiche), annonce relue
-        update.update(_demo_checks_passed(company, spec, published))
-    await db.companies.update_one({"id": company_id}, {"$set": update})
-    return await db.companies.find_one({"id": company_id}, {"_id": 0}), created
+        update.update(_demo_checks_passed(property, spec, published))
+    await db.properties.update_one({"id": property_id}, {"$set": update})
+    return await db.properties.find_one({"id": property_id}, {"_id": 0}), created
 
 
-def _demo_checks_passed(company: dict, spec: dict, published: datetime) -> dict:
+def _demo_checks_passed(property: dict, spec: dict, published: datetime) -> dict:
     """Champs d'une annonce de démonstration dont les contrôles automatiques sont passés (open data, dirigeant, ADEME)"""
     rge = bool(spec.get("rge_types"))
-    checks = {**(company.get("company_checks") or {}), "opendata_available": True, "siren_active": True, "naf_in_building": True,
+    checks = {**(property.get("property_checks") or {}), "opendata_available": True, "siren_active": True, "naf_in_building": True,
               "naf_status": "batiment", "dirigeant_match": "match_exact", "duplicate_siren": False,
               "in_ademe_list": True if rge else None, "checked_at": published.isoformat()}
-    return {"company_checks": checks, "dirigeant_status": "match_exact", "dirigeant_verified": True,
+    return {"property_checks": checks, "dirigeant_status": "match_exact", "dirigeant_verified": True,
             "qualifications_verified_at": published.isoformat() if rge else None,
             "moderation.flags": [], "moderation.status": "ok", "moderation.reviewed_at": (published + timedelta(days=1)).isoformat(),
             "moderation.reason": "Annonce de démonstration"}
@@ -383,7 +383,7 @@ async def simulate_identity(data: Optional[IdentitySimulation] = None, current_u
     await db.users.update_one({"id": current_user["id"]}, {"$set": update})
     await identity_verified_effects(current_user["id"])
     user = await _fresh(current_user["id"])
-    listings = await db.companies.find({"seller_id": current_user["id"]}, {"_id": 0, "id": 1, "status": 1, "title": 1}).to_list(50)
+    listings = await db.properties.find({"seller_id": current_user["id"]}, {"_id": 0, "id": 1, "status": 1, "title": 1}).to_list(50)
     return {"verified": True, "kyc_provider": "test", "user": with_profile_score(user), "listings": listings}
 
 
@@ -421,12 +421,12 @@ async def seed_demo(request: Request):
     created_listings, published = 0, 0
     for spec in DEMO_LISTINGS:
         try:
-            company, created = await _publish_demo_listing(spec, seller_id, request)
+            property, created = await _publish_demo_listing(spec, seller_id, request)
         except HTTPException as e:
             logger.error(f"Annonce de démonstration {spec['key']} : {e.detail}")
             continue
         created_listings += int(created)
-        published += int(company.get("status") == "published")
+        published += int(property.get("status") == "published")
     return {"accounts": accounts, "password": password, "accounts_created": created_accounts,
             "listings_created": created_listings, "listings_published": published, "listings_total": len(DEMO_LISTINGS)}
 

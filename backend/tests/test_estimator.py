@@ -167,12 +167,12 @@ def test_open_data_en_panne_n_est_pas_bloquant(client, sources):
 
 
 def test_route_prefill_company(client, sources):
-    r = client.get(f"/api/estimates/company/{SIRET}")
+    r = client.get(f"/api/estimates/property/{SIRET}")
     assert r.status_code == 200
     body = r.json()
     assert body["siren"] == "552032534" and body["company"]["company_name"] == "SECRET ENERGIE"
     assert body["rge"]["details"][0]["date_fin"] == "2028-01-01"
-    assert client.get("/api/estimates/company/123").status_code == 400
+    assert client.get("/api/estimates/property/123").status_code == 400
 
 
 # ---------- Double opt-in ----------

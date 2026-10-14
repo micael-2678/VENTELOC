@@ -9,7 +9,7 @@ Veille BODACC mensuelle (SPEC §6.4 et §2.3), gratuite et sans clé.
 - monthly_job() (run_veille) : pour chaque SIREN sous mandat (signé, dénoncé ou expiré tant que la clause de suite court :
   `tail_ends_at` > maintenant) ou sous NDA signé (24 mois), interroge le BODACC depuis la date du mandat ou du
   NDA ; toute annonce pertinente sans vente déclarée crée un incident db.incidents
-  {type: 'bodacc', siren, company_id, event, created_at, status: 'open'} (sans doublon) et envoie un e-mail au
+  {type: 'bodacc', siren, property_id, event, created_at, status: 'open'} (sans doublon) et envoie un e-mail au
   cédant et à ADMIN_NOTIFICATION_EMAIL.
 - Routes admin : GET /admin/incidents, PUT /admin/incidents/{id} (clore / rouvrir), POST /admin/veille/run.
 """
@@ -46,7 +46,7 @@ MANDATE_STATUSES = ("signed", "denounced", "expired")
 MANDATE_STATUS_LABELS = {"signed": "signé", "denounced": "dénoncé", "expired": "expiré"}
 # Statuts d'un closing (closing.py) qui valent « vente déclarée » : plus de veille sur ce SIREN
 SALE_DECLARED_STATUSES = ("declared", "pending_confirmation", "confirmed", "invoiced", "paid", "completed")
-COMPANY_SOLD_STATUSES = ("sold", "vendue", "sold_via_platform")
+PROPERTY_SOLD_STATUSES = ("sold", "vendue", "sold_via_platform")
 
 FAMILLES = {
     "vente": "Ventes et cessions",
@@ -74,7 +74,7 @@ EMAIL_TEMPLATES.setdefault("bodacc_incident_seller", {
     "html": """
     <h2>Une publication au BODACC a été relevée</h2>
     <p>Bonjour {name},</p>
-    <p>Dans le cadre du suivi de votre mandat, nous avons relevé une publication au Bulletin officiel des annonces civiles et commerciales (BODACC) concernant la société {company_label} (SIREN {siren}) :</p>
+    <p>Dans le cadre du suivi de votre mandat, nous avons relevé une publication au Bulletin officiel des annonces civiles et commerciales (BODACC) concernant la société {property_label} (SIREN {siren}) :</p>
     <p>{events}</p>
     <p>Si la société a été cédée, merci de nous l'indiquer depuis votre espace (« Déclarer la vente ») ou en répondant à cet e-mail. Si cette publication ne correspond pas à une cession (changement d'adresse, modification statutaire…), répondez-nous simplement pour que nous clôturions l'alerte.</p>
     <p>Rappel : le mandat prévoit que la rémunération de {site_name} reste due si la cession est conclue avec un repreneur que nous vous avons présenté, pendant le mandat et dans les 18 mois qui suivent sa fin.</p>
@@ -84,10 +84,10 @@ EMAIL_TEMPLATES.setdefault("bodacc_incident_seller", {
 })
 
 EMAIL_TEMPLATES.setdefault("bodacc_incident_admin", {
-    "subject": "Incident BODACC : {company_label} ({siren})",
+    "subject": "Incident BODACC : {property_label} ({siren})",
     "html": """
     <h2>Veille BODACC : publication sans vente déclarée</h2>
-    <p>Société : {company_label} — SIREN {siren} — annonce {company_id}</p>
+    <p>Société : {property_label} — SIREN {siren} — annonce {property_id}</p>
     <p>Origine de la veille : {sources}</p>
     <p>{events}</p>
     <p>Le cédant a reçu un e-mail lui demandant de confirmer si la société a été cédée. L'incident est dans « À faire ».</p>
@@ -270,52 +270,52 @@ def mandate_tail_end(contract: Dict[str, Any]) -> Optional[datetime]:
     return _add_months(signed, MANDATE_DURATION_MONTHS + TAIL_MONTHS) if signed else None
 
 
-async def sale_declared(company: Dict[str, Any]) -> bool:
-    if str(company.get("status") or "").lower() in COMPANY_SOLD_STATUSES or company.get("sale_declared_at"):
+async def sale_declared(property: Dict[str, Any]) -> bool:
+    if str(property.get("status") or "").lower() in PROPERTY_SOLD_STATUSES or property.get("sale_declared_at"):
         return True
-    closing = await db.closings.find_one({"company_id": company["id"], "status": {"$in": list(SALE_DECLARED_STATUSES)}},
+    closing = await db.closings.find_one({"property_id": property["id"], "status": {"$in": list(SALE_DECLARED_STATUSES)}},
                                          {"_id": 0, "id": 1})
     return closing is not None
 
 
 async def collect_targets(now: Optional[datetime] = None) -> Dict[str, Dict[str, Any]]:
-    """{siren: {company_id, company_label, seller_id, since, sources: [...]}} pour les SIREN à surveiller."""
+    """{siren: {property_id, property_label, seller_id, since, sources: [...]}} pour les SIREN à surveiller."""
     now = now or datetime.now(timezone.utc)
     candidates: List[Dict[str, Any]] = []
     async for c in db.generated_contracts.find({"type": "mandat", "status": {"$in": list(MANDATE_STATUSES)}},
-                                               {"_id": 0, "id": 1, "company_id": 1, "status": 1, "signed_at": 1,
+                                               {"_id": 0, "id": 1, "property_id": 1, "status": 1, "signed_at": 1,
                                                 "created_at": 1, "ends_at": 1, "tail_ends_at": 1}):
         tail = mandate_tail_end(c)
         since = _parse_dt(c.get("signed_at") or c.get("created_at"))
         if tail and since and tail > now:
-            candidates.append({"company_id": c.get("company_id"), "since": since,
+            candidates.append({"property_id": c.get("property_id"), "since": since,
                                "source": f"mandat {MANDATE_STATUS_LABELS.get(c.get('status'), c.get('status'))} "
                                          f"(clause de suite jusqu'au {_fr_date(tail)})"})
-    async for d in db.documents.find({"doc_type": "nda"}, {"_id": 0, "company_id": 1, "signed_at": 1, "signer_id": 1}):
+    async for d in db.documents.find({"doc_type": "nda"}, {"_id": 0, "property_id": 1, "signed_at": 1, "signer_id": 1}):
         since = _parse_dt(d.get("signed_at"))
         if since and _add_months(since, NDA_DURATION_MONTHS) > now:
-            candidates.append({"company_id": d.get("company_id"), "since": since,
+            candidates.append({"property_id": d.get("property_id"), "since": since,
                                "source": f"NDA signé le {_fr_date(since)}"})
 
     targets: Dict[str, Dict[str, Any]] = {}
-    companies: Dict[str, Optional[Dict[str, Any]]] = {}
+    properties: Dict[str, Optional[Dict[str, Any]]] = {}
     for cand in candidates:
-        cid = cand.get("company_id")
+        cid = cand.get("property_id")
         if not cid:
             continue
-        if cid not in companies:
-            companies[cid] = await db.companies.find_one({"id": cid}, {"_id": 0, "id": 1, "siren": 1, "siret": 1,
+        if cid not in properties:
+            properties[cid] = await db.properties.find_one({"id": cid}, {"_id": 0, "id": 1, "siren": 1, "siret": 1,
                                                                        "seller_id": 1, "president_id": 1, "status": 1,
                                                                        "company_name": 1, "title": 1, "sale_declared_at": 1})
-        company = companies[cid]
-        if not company:
+        property = properties[cid]
+        if not property:
             continue
-        siren = _digits(company.get("siren")) or _digits(company.get("siret"))[:9]
-        if len(siren) != 9 or await sale_declared(company):
+        siren = _digits(property.get("siren")) or _digits(property.get("siret"))[:9]
+        if len(siren) != 9 or await sale_declared(property):
             continue
         target = targets.setdefault(siren, {
-            "siren": siren, "company_id": cid, "seller_id": company.get("seller_id") or company.get("president_id"),
-            "company_label": company.get("company_name") or company.get("title") or f"annonce {cid[:8]}",
+            "siren": siren, "property_id": cid, "seller_id": property.get("seller_id") or property.get("president_id"),
+            "property_label": property.get("company_name") or property.get("title") or f"annonce {cid[:8]}",
             "since": cand["since"], "sources": [],
         })
         target["since"] = min(target["since"], cand["since"])
@@ -340,10 +340,10 @@ def _events_text(events: List[Dict[str, Any]]) -> str:
 
 async def _notify(target: Dict[str, Any], events: List[Dict[str, Any]]) -> None:
     events_text = _events_text(events)
-    await email_user(target.get("seller_id"), "bodacc_incident_seller", company_label=target["company_label"],
+    await email_user(target.get("seller_id"), "bodacc_incident_seller", property_label=target["property_label"],
                      siren=target["siren"], events=events_text, link=site_url("/seller/dashboard"))
-    await email_admin("bodacc_incident_admin", company_label=target["company_label"], siren=target["siren"],
-                      company_id=target["company_id"], sources=", ".join(target.get("sources") or []),
+    await email_admin("bodacc_incident_admin", property_label=target["property_label"], siren=target["siren"],
+                      property_id=target["property_id"], sources=", ".join(target.get("sources") or []),
                       events=events_text, link=site_url("/admin"))
 
 
@@ -360,9 +360,9 @@ async def record_incidents(target: Dict[str, Any], events: List[Dict[str, Any]],
             "id": str(uuid.uuid4()),
             "type": "bodacc",
             "siren": target["siren"],
-            "company_id": target["company_id"],
+            "property_id": target["property_id"],
             "seller_id": target.get("seller_id"),
-            "company_label": target["company_label"],
+            "property_label": target["property_label"],
             "sources": list(target.get("sources") or []),
             "event": ev,
             "created_at": now.isoformat(),

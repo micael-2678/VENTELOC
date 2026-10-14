@@ -67,10 +67,10 @@ const L = require('./lib');
   L.check('état vide : « Effacer les filtres » → /', new URL(p.url()).search === '', p.url());
 
   // ---- Fiche (visiteur)
-  await p.waitForSelector(`a[href="/company/${s.company_id}"]`);
-  await p.locator(`a[href="/company/${s.company_id}"]`).first().click();
-  await p.waitForURL(new RegExp(`/company/${s.company_id}`));
-  await p.waitForSelector('[data-testid=company-header]');
+  await p.waitForSelector(`a[href="/property/${s.property_id}"]`);
+  await p.locator(`a[href="/property/${s.property_id}"]`).first().click();
+  await p.waitForURL(new RegExp(`/property/${s.property_id}`));
+  await p.waitForSelector('[data-testid=property-header]');
   t = await L.text(p);
   L.check('fiche : titre anonyme', /Entreprise de PAC/.test(t) && !/SECRET ENERGIE/.test(t), t.slice(0, 200));
   L.check('fiche : prix, CA, EBE affichés', /450\s?000/.test(t) && /800\s?000/.test(t) && /120\s?000/.test(t));
@@ -80,8 +80,8 @@ const L = require('./lib');
   await p.getByTestId('contact-seller-btn').first().click();
   await p.waitForURL(/\/(login|register)/);
   L.check('fiche : visiteur renvoyé vers connexion/inscription', /\/(login|register)/.test(p.url()), p.url());
-  await p.goto(L.FRONT + `/company/${s.company_id}`, { waitUntil: 'networkidle' });
-  await L.shot(p, 'company-desktop.png');
+  await p.goto(L.FRONT + `/property/${s.property_id}`, { waitUntil: 'networkidle' });
+  await L.shot(p, 'property-desktop.png');
 
   // ---- Anciennes URL → page des annonces (301 nginx ou redirection côté client)
   const redirects = [
@@ -136,11 +136,11 @@ const L = require('./lib');
   await p.getByTestId('mobile-filters-apply').click();
   await p.waitForURL(/metier=menuiserie/);
   L.check('mobile : filtre appliqué depuis le panneau', /metier=menuiserie/.test(p.url()), p.url());
-  await p.goto(L.FRONT + `/company/${s.company_id}`, { waitUntil: 'networkidle' });
-  await p.waitForSelector('[data-testid=company-header]');
+  await p.goto(L.FRONT + `/property/${s.property_id}`, { waitUntil: 'networkidle' });
+  await p.waitForSelector('[data-testid=property-header]');
   o = await L.noOverflow(p, 390);
   L.check('mobile fiche : aucun débordement horizontal', o.ok, `scrollWidth=${o.width}`);
-  await L.shot(p, 'company-mobile.png');
+  await L.shot(p, 'property-mobile.png');
   await p.context().close();
 
   L.check('aucune erreur JS / 5xx', errors.length === 0, errors.join(' ; '));

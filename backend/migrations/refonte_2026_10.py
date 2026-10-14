@@ -4,7 +4,7 @@ Migration de la refonte d'octobre 2026 (SPEC §7.9). Dry-run par défaut, idempo
 Ce qu'elle fait (--apply) :
 - users : `email_verified=True` sur tous les comptes existants (sinon plus de contact / signature / publication),
   purge des pièces KYC base64 (`kyc_documents`) ;
-- companies : `trades` déduits de `rge_types` (sinon « renovation-generale »), `is_rge`, `title` généré (jamais le nom),
+- properties : `trades` déduits de `rge_types` (sinon « renovation-generale »), `is_rge`, `title` généré (jamais le nom),
   `department` depuis le SIRET via l'open data (seulement avec --network, jamais en dry-run), `moderation.status='ok'`
   sur les annonces publiées, `commission_terms_version='v1'` sur les annonces dont le mandat est antérieur à la refonte ;
   annonces `pending` (ancien « en validation ») : mandat signé → `published` + relecture admin 48 h
@@ -54,13 +54,13 @@ async def _migrate_users(db, dry_run: bool, now: str, report: dict):
 
 
 async def _signed_mandate_for(db, c: dict):
-    """Mandat signé de l'annonce (par `mandate_id`, sinon par `company_id`) ; None s'il n'y en a pas"""
+    """Mandat signé de l'annonce (par `mandate_id`, sinon par `property_id`) ; None s'il n'y en a pas"""
     query = {"type": "mandat", "status": "signed"}
     if c.get("mandate_id"):
         found = await db.generated_contracts.find_one({**query, "id": c["mandate_id"]}, {"_id": 0, "id": 1})
         if found:
             return found
-    return await db.generated_contracts.find_one({**query, "company_id": c["id"]}, {"_id": 0, "id": 1})
+    return await db.generated_contracts.find_one({**query, "property_id": c["id"]}, {"_id": 0, "id": 1})
 
 
 async def _migrate_pending_listing(db, c: dict, now: str, update: dict, before: dict):
@@ -83,13 +83,13 @@ async def _migrate_pending_listing(db, c: dict, now: str, update: dict, before: 
         update["mandate_pending_since"] = now
 
 
-async def _migrate_companies(db, dry_run: bool, network: bool, now: str, report: dict):
+async def _migrate_properties(db, dry_run: bool, network: bool, now: str, report: dict):
     changed = 0
     department_lookup = None
     if network and not dry_run:
         import opendata
         department_lookup = opendata.department_from_siret
-    async for c in db.companies.find({MARKER: {"$exists": False}}, {"_id": 0}):
+    async for c in db.properties.find({MARKER: {"$exists": False}}, {"_id": 0}):
         before = {k: c.get(k) for k in ("trades", "is_rge", "title", "department", "moderation", "commission_terms_version")}
         update = {}
         if not c.get("trades"):
@@ -118,8 +118,8 @@ async def _migrate_companies(db, dry_run: bool, network: bool, now: str, report:
         changed += 1
         if not dry_run:
             update[MARKER] = _marker(before, now)
-            await db.companies.update_one({"id": c["id"]}, {"$set": update})
-    report["companies"] = changed
+            await db.properties.update_one({"id": c["id"]}, {"$set": update})
+    report["properties"] = changed
 
 
 async def _migrate_mandates(db, dry_run: bool, now: str, report: dict):
@@ -156,7 +156,7 @@ async def run_migration(db, dry_run: bool = True, network: bool = False) -> dict
     now = datetime.now(timezone.utc).isoformat()
     report = {"mode": "migration", "dry_run": dry_run}
     await _migrate_users(db, dry_run, now, report)
-    await _migrate_companies(db, dry_run, network, now, report)
+    await _migrate_properties(db, dry_run, network, now, report)
     await _migrate_mandates(db, dry_run, now, report)
     await _migrate_invoices(db, dry_run, now, report)
     await _drop_credits(db, dry_run, report)
@@ -176,9 +176,9 @@ async def run_rollback(db, dry_run: bool = True) -> dict:
                 ops["$set"] = {"email_verified": bool(before.get("email_verified"))}
             await db.users.update_one({"id": u["id"]}, ops)
     report["users"] = n
-    # companies
+    # properties
     n = 0
-    async for c in db.companies.find({MARKER: {"$exists": True}}, {"_id": 0, "id": 1, "_migrations": 1}):
+    async for c in db.properties.find({MARKER: {"$exists": True}}, {"_id": 0, "id": 1, "_migrations": 1}):
         before = (c.get("_migrations") or {}).get("refonte_2026_10", {}).get("before", {})
         n += 1
         if not dry_run:
@@ -188,8 +188,8 @@ async def run_rollback(db, dry_run: bool = True) -> dict:
             ops = {"$unset": unset}
             if restore:
                 ops["$set"] = restore
-            await db.companies.update_one({"id": c["id"]}, ops)
-    report["companies"] = n
+            await db.properties.update_one({"id": c["id"]}, ops)
+    report["properties"] = n
     # mandats et factures
     for coll, field, name in ((db.generated_contracts, "commission_terms_version", "mandates"), (db.invoices, "status", "invoices")):
         n = 0

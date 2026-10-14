@@ -21,7 +21,7 @@ PARCOURS_EMAIL_TEMPLATES = {
         "html": """
         <h2>Votre annonce est publiée</h2>
         <p>Bonjour {name},</p>
-        <p>Votre annonce anonyme « {company_title} » est maintenant visible des repreneurs. {sent_line}</p>
+        <p>Votre annonce anonyme « {property_title} » est maintenant visible des repreneurs. {sent_line}</p>
         <p>Vous serez prévenu par e-mail à chaque contact, demande de dossier, accord de confidentialité signé et offre.
         Pour aller plus vite : déposez dès maintenant vos documents dans le dossier (bilans, Kbis, contrats) depuis
         <a href="{link}">votre espace</a>.</p>
@@ -44,7 +44,7 @@ PARCOURS_EMAIL_TEMPLATES = {
         "html": """
         <h2>Votre annonce n'a pas encore reçu de contact</h2>
         <p>Bonjour {name},</p>
-        <p>Votre annonce « {company_title} » est en ligne depuis deux semaines. Voici ce qui fait la différence chez les
+        <p>Votre annonce « {property_title} » est en ligne depuis deux semaines. Voici ce qui fait la différence chez les
         annonces contactées rapidement :</p>
         <ul>
           <li><strong>Une description qui raconte l'entreprise</strong> : clientèle, contrats récurrents, équipe, matériel. Les repreneurs
@@ -61,7 +61,7 @@ PARCOURS_EMAIL_TEMPLATES = {
         "html": """
         <h2>Un point sur votre prix après un mois</h2>
         <p>Bonjour {name},</p>
-        <p>Votre annonce « {company_title} » est en ligne depuis un mois. {activity_line}</p>
+        <p>Votre annonce « {property_title} » est en ligne depuis un mois. {activity_line}</p>
         <p>Prix demandé : <strong>{asking_price}</strong>. Fourchette indicative calculée à partir de vos chiffres :
         <strong>{low} à {high}</strong> ({method}).</p>
         <p>{advice}</p>
@@ -75,7 +75,7 @@ PARCOURS_EMAIL_TEMPLATES = {
         <h2>Vous ne vous êtes pas connecté depuis {days} jours</h2>
         <p>Bonjour {name},</p>
         <p>Pour que les repreneurs ne contactent que des cédants joignables, une annonce dont le cédant ne se connecte plus
-        est mise en pause après 60 jours sans connexion. Votre annonce « {company_title} » sera mise en pause le
+        est mise en pause après 60 jours sans connexion. Votre annonce « {property_title} » sera mise en pause le
         <strong>{pause_on}</strong>.</p>
         <p>Pour la garder en ligne, il suffit de vous connecter : <a href="{link}">accéder à mon espace</a>.</p>
         <p>Cordialement,<br>L'équipe {site_name}</p>
@@ -86,7 +86,7 @@ PARCOURS_EMAIL_TEMPLATES = {
         "html": """
         <h2>Annonce mise en pause</h2>
         <p>Bonjour {name},</p>
-        <p>Sans connexion depuis 60 jours, votre annonce « {company_title} » a été mise en pause : elle n'est plus visible
+        <p>Sans connexion depuis 60 jours, votre annonce « {property_title} » a été mise en pause : elle n'est plus visible
         des repreneurs. Rien n'est supprimé et votre mandat court toujours.</p>
         <p>Pour la remettre en ligne en un clic : <a href="{link}">accéder à mon espace</a>, puis « Remettre en ligne ».</p>
         <p>Cordialement,<br>L'équipe {site_name}</p>
@@ -122,7 +122,7 @@ PARCOURS_EMAIL_TEMPLATES = {
         "subject": "[Admin] Annonce déclarée « vendue autrement » : {company_name}",
         "html": """
         <h2>Vente hors plateforme déclarée par le cédant</h2>
-        <p>Annonce {company_id} — {company_name} (SIRET {siret}). Repreneurs présentés : {buyers_list}.</p>
+        <p>Annonce {property_id} — {company_name} (SIRET {siret}). Repreneurs présentés : {buyers_list}.</p>
         <p>La société est signalée à la veille BODACC (clause de suite).</p>
         """
     },
@@ -132,7 +132,7 @@ PARCOURS_EMAIL_TEMPLATES = {
         "html": """
         <h2>Premier contact d'un repreneur</h2>
         <p>Bonjour {name},</p>
-        <p>{buyer_label} vous a écrit au sujet de votre annonce « {company_title} » :</p>
+        <p>{buyer_label} vous a écrit au sujet de votre annonce « {property_title} » :</p>
         <blockquote style="border-left:3px solid #e3e7ee;margin:0;padding:8px 12px;color:#374151">{extract}</blockquote>
         <p>Sa carte repreneur :</p>
         <ul>{card_rows}</ul>
@@ -157,7 +157,7 @@ PARCOURS_EMAIL_TEMPLATES = {
         "html": """
         <h2>Message transmis</h2>
         <p>Bonjour {name},</p>
-        <p>Votre message au cédant de l'annonce « {company_title} » lui a été transmis avec votre carte repreneur (projet,
+        <p>Votre message au cédant de l'annonce « {property_title} » lui a été transmis avec votre carte repreneur (projet,
         budget, financement, zones, horizon). Vous recevrez un e-mail dès sa réponse.</p>
         <p>Vous pouvez dès maintenant demander l'accès au dossier depuis <a href="{link}">la conversation</a>. Après acceptation,
         trois étapes ouvrent le dossier : identité vérifiée, accord de confidentialité signé, origine des fonds déclarée.</p>
@@ -188,7 +188,7 @@ PARCOURS_EMAIL_TEMPLATES = {
         "html": """
         <h2>Un repreneur demande votre dossier</h2>
         <p>Bonjour {name},</p>
-        <p>{buyer_label} demande l'accès au dossier de votre annonce « {company_title} ». Message : {message}</p>
+        <p>{buyer_label} demande l'accès au dossier de votre annonce « {property_title} ». Message : {message}</p>
         <ul>{card_rows}</ul>
         <p>Acceptez ou refusez en un geste depuis <a href="{link}">votre espace</a>. Après votre accord, le repreneur doit
         vérifier son identité, signer l'accord de confidentialité et déclarer l'origine de ses fonds avant de voir le moindre
@@ -201,7 +201,7 @@ PARCOURS_EMAIL_TEMPLATES = {
         "html": """
         <h2>Demande de dossier en attente</h2>
         <p>Bonjour {name},</p>
-        <p>{buyer_label} attend votre réponse à sa demande de dossier pour « {company_title} » depuis {days} jours. Sans réponse,
+        <p>{buyer_label} attend votre réponse à sa demande de dossier pour « {property_title} » depuis {days} jours. Sans réponse,
         la demande expirera le {expires_at} et le repreneur en sera informé.</p>
         <p>Acceptez ou refusez en un geste depuis <a href="{link}">votre espace</a>. Accepter n'engage à rien : le repreneur
         devra d'abord vérifier son identité, signer l'accord de confidentialité et déclarer l'origine de ses fonds.</p>
@@ -213,7 +213,7 @@ PARCOURS_EMAIL_TEMPLATES = {
         "html": """
         <h2>Le cédant vous ouvre son dossier</h2>
         <p>Bonjour {name},</p>
-        <p>Votre demande de dossier pour « {company_title} » est acceptée. L'accès s'ouvre automatiquement dès que ces étapes
+        <p>Votre demande de dossier pour « {property_title} » est acceptée. L'accès s'ouvre automatiquement dès que ces étapes
         sont faites, dans l'ordre :</p>
         <ol>{checklist}</ol>
         <p>Tout se fait en ligne depuis <a href="{link}">votre dossier</a>. L'identité est vérifiée en quelques minutes (pièce
@@ -236,7 +236,7 @@ PARCOURS_EMAIL_TEMPLATES = {
         "html": """
         <h2>Un repreneur qualifié accède à votre parcours de dossier</h2>
         <p>Bonjour {name},</p>
-        <p>Conformément à l'option choisie sur votre annonce « {company_title} », la demande de {buyer_label} a été acceptée
+        <p>Conformément à l'option choisie sur votre annonce « {property_title} », la demande de {buyer_label} a été acceptée
         automatiquement (profil complet à plus de 50 %). Il doit maintenant vérifier son identité, signer l'accord de
         confidentialité et déclarer l'origine de ses fonds avant de voir vos documents.</p>
         <ul>{card_rows}</ul>
@@ -260,7 +260,7 @@ PARCOURS_EMAIL_TEMPLATES = {
         "html": """
         <h2>Demande expirée après 10 jours</h2>
         <p>Bonjour {name},</p>
-        <p>Le cédant de l'annonce « {company_title} » n'a pas répondu à votre demande de dossier dans les 10 jours. Nous l'avons
+        <p>Le cédant de l'annonce « {property_title} » n'a pas répondu à votre demande de dossier dans les 10 jours. Nous l'avons
         relancé à deux reprises. Vous pouvez renouveler votre demande depuis <a href="{link}">votre dossier</a> ou poursuivre vos
         recherches : les cédants réactifs sont ceux qui vendent.</p>
         <p>Cordialement,<br>L'équipe {site_name}</p>
@@ -272,7 +272,7 @@ PARCOURS_EMAIL_TEMPLATES = {
         <h2>Le dossier est accessible</h2>
         <p>Bonjour {name},</p>
         <p>Identité vérifiée, accord de confidentialité signé, origine des fonds déclarée : vous avez maintenant accès au dossier
-        de « {company_title} » (documents consultables en ligne avec filigrane, diagnostic de transmissibilité).</p>
+        de « {property_title} » (documents consultables en ligne avec filigrane, diagnostic de transmissibilité).</p>
         <p>Quand vous êtes prêt, formulez une offre indicative depuis <a href="{link}">le dossier</a> : elle se signe par code et le
         cédant y répond en ligne.</p>
         <p>Cordialement,<br>L'équipe {site_name}</p>
@@ -295,7 +295,7 @@ PARCOURS_EMAIL_TEMPLATES = {
         "html": """
         <h2>Le cédant vous attend</h2>
         <p>Bonjour {name},</p>
-        <p>Le cédant a accepté votre demande de dossier pour « {company_title} » il y a {days} jour{plural}. La première étape est
+        <p>Le cédant a accepté votre demande de dossier pour « {property_title} » il y a {days} jour{plural}. La première étape est
         la vérification de votre identité (quelques minutes, pièce d'identité et selfie) : aucun nom d'entreprise n'est révélé avant.</p>
         <p><a href="{link}">Vérifier mon identité</a></p>
         <p>Cordialement,<br>L'équipe {site_name}</p>
@@ -307,17 +307,17 @@ PARCOURS_EMAIL_TEMPLATES = {
         <h2>Il ne reste que l'accord de confidentialité</h2>
         <p>Bonjour {name},</p>
         <p>Votre identité est vérifiée. Signez l'accord de confidentialité (code reçu par e-mail) pour que le nom de l'entreprise
-        « {company_title} » vous soit révélé, puis déclarez l'origine de vos fonds : l'accès au dossier s'ouvre aussitôt.</p>
+        « {property_title} » vous soit révélé, puis déclarez l'origine de vos fonds : l'accès au dossier s'ouvre aussitôt.</p>
         <p><a href="{link}">Signer l'accord de confidentialité</a></p>
         <p>Cordialement,<br>L'équipe {site_name}</p>
         """
     },
     "buyer_dataroom_unvisited": {
-        "subject": "Le dossier de {company_title} vous attend",
+        "subject": "Le dossier de {property_title} vous attend",
         "html": """
         <h2>Vous n'avez pas encore consulté le dossier</h2>
         <p>Bonjour {name},</p>
-        <p>Votre accès au dossier de « {company_title} » est ouvert depuis trois jours. Les documents (bilans, Kbis, contrats) et le
+        <p>Votre accès au dossier de « {property_title} » est ouvert depuis trois jours. Les documents (bilans, Kbis, contrats) et le
         diagnostic de transmissibilité sont consultables en ligne : <a href="{link}">ouvrir le dossier</a>.</p>
         <p>Si votre projet a évolué, dites-le au cédant dans la messagerie : il y est attentif.</p>
         <p>Cordialement,<br>L'équipe {site_name}</p>
@@ -384,7 +384,7 @@ PARCOURS_EMAIL_TEMPLATES = {
         "html": """
         <h2>Votre avis en un clic</h2>
         <p>Bonjour {name},</p>
-        <p>La vente de {company_label} est confirmée. Recommanderiez-vous {site_name} à un confrère ? Cliquez sur une note de 0
+        <p>La vente de {property_label} est confirmée. Recommanderiez-vous {site_name} à un confrère ? Cliquez sur une note de 0
         (pas du tout) à 10 (certainement) :</p>
         <p>{scores}</p>
         <p>Merci : vos réponses servent à améliorer la plateforme, rien d'autre.</p>

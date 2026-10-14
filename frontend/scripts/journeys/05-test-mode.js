@@ -129,8 +129,8 @@ const restartBackend = (env) => {
   await p.getByTestId('test-seed').click();
   await p.getByTestId('test-seed-done').waitFor({ timeout: 30000 });
   await L.sleep(500);
-  const seeded = (await L.api('GET', '/companies', { params: { limit: 50 } }));
-  L.check('seed : 8 annonces publiées (GET /companies)', Number(seeded.headers.get('x-total-count')) === 8, seeded.headers.get('x-total-count'));
+  const seeded = (await L.api('GET', '/properties', { params: { limit: 50 } }));
+  L.check('seed : 8 annonces publiées (GET /properties)', Number(seeded.headers.get('x-total-count')) === 8, seeded.headers.get('x-total-count'));
   L.check('seed : annonces marquées is_test', (seeded.data || []).every((c) => c.is_test === true));
   await p.goto(L.FRONT + '/', { waitUntil: 'networkidle' });
   await p.waitForSelector('[data-testid=listing-card]');
@@ -181,8 +181,8 @@ const restartBackend = (env) => {
   await p.getByTestId('create-listing-form').waitFor();
   await p.getByTestId('siret-input').fill(SIRET);
   await L.sleep(800);
-  if (!(await p.getByTestId('company-name-input').inputValue())) await p.getByTestId('company-name-input').fill('RIOU THERMIQUE (essai)');
-  L.check('SIRET fictif : aucune fiche open data préremplie', !/SECRET ENERGIE/.test(await p.getByTestId('company-name-input').inputValue()));
+  if (!(await p.getByTestId('property-name-input').inputValue())) await p.getByTestId('property-name-input').fill('RIOU THERMIQUE (essai)');
+  L.check('SIRET fictif : aucune fiche open data préremplie', !/SECRET ENERGIE/.test(await p.getByTestId('property-name-input').inputValue()));
   if (!(await p.locator('[data-testid=trade-plomberie-chauffage] input').isChecked())) await p.getByTestId('trade-plomberie-chauffage').click();
   await p.getByTestId('region-select').selectOption('Bretagne');
   await L.sleep(200);
@@ -212,9 +212,9 @@ const restartBackend = (env) => {
   await p.getByTestId('description-input').fill(DESCRIPTION);
   await p.getByTestId('next-step').click();
   await p.getByTestId('go-mandate').waitFor({ timeout: 15000 });
-  const mine = (await L.api('GET', '/companies', { token: sellerToken })).data.find((c) => c.seller_id === me.id);
-  const companyId = mine && mine.id;
-  L.check('annonce : brouillon créé avec le SIRET fictif', !!companyId, JSON.stringify(mine).slice(0, 200));
+  const mine = (await L.api('GET', '/properties', { token: sellerToken })).data.find((c) => c.seller_id === me.id);
+  const propertyId = mine && mine.id;
+  L.check('annonce : brouillon créé avec le SIRET fictif', !!propertyId, JSON.stringify(mine).slice(0, 200));
 
   // Identité simulée depuis l'écran « Plus que deux étapes »
   await p.getByRole('button', { name: /Vérifier mon identité/ }).first().click();
@@ -228,11 +228,11 @@ const restartBackend = (env) => {
   await L.sleep(2500); // rechargement complet de la page, comme au retour de Stripe
   me = (await L.api('GET', '/auth/profile', { token: sellerToken })).data;
   L.check('identité simulée : identity_verified, kyc_provider test', me.identity_verified === true && me.kyc_provider === 'test', JSON.stringify({ v: me.identity_verified, p: me.kyc_provider }));
-  let comp = (await L.api('GET', `/companies/${companyId}`, { token: sellerToken })).data;
+  let comp = (await L.api('GET', `/properties/${propertyId}`, { token: sellerToken })).data;
   L.check('annonce soumise après l\'identité → mandat_en_attente', comp.status === 'mandat_en_attente', comp.status);
 
   // Mandat signé avec le code affiché
-  await p.goto(L.FRONT + `/seller/mandat/${companyId}`, { waitUntil: 'networkidle' });
+  await p.goto(L.FRONT + `/seller/mandat/${propertyId}`, { waitUntil: 'networkidle' });
   await p.getByTestId('mandant-form').waitFor({ timeout: 15000 });
   await p.getByTestId('address-line1').fill('8 rue du Port');
   await p.getByTestId('address-postal-code').fill('56100');
@@ -272,7 +272,7 @@ const restartBackend = (env) => {
   const registry = (await p.getByTestId('mandate-registry').innerText()).trim();
   L.check('mandat signé : numéro de registre de test TEST-…', /^TEST-\d{4}$/.test(registry), registry);
   L.check('mandat signé : annonce « publiée immédiatement »', /publiée immédiatement/.test(await L.text(p)));
-  comp = (await L.api('GET', `/companies/${companyId}`)).data;
+  comp = (await L.api('GET', `/properties/${propertyId}`)).data;
   L.check('annonce publiée (publique, is_test)', comp && comp.status === 'published' && comp.is_test === true, JSON.stringify(comp).slice(0, 160));
 
   // Boîte mail de test du nouveau vendeur : l'e-mail de code apparaît
@@ -287,7 +287,7 @@ const restartBackend = (env) => {
   await p.context().close();
 
   // ---- Repreneur démo : contact → demande de dossier
-  const demoListing = (await L.api('GET', '/companies', { params: { limit: 50 } })).data.find((c) => c.id !== companyId);
+  const demoListing = (await L.api('GET', '/properties', { params: { limit: 50 } })).data.find((c) => c.id !== propertyId);
   const cid = demoListing.id;
   // Les comptes démo sont créés avec une identité simulée : on la retire ici pour rejouer l'étape « identité » du dossier
   await L.setUser('repreneur.demo@test.local', 'identity_verified', false);
@@ -298,8 +298,8 @@ const restartBackend = (env) => {
   await p.waitForURL(/\/buyer\/dashboard/, { timeout: 15000 });
   L.check('connexion rapide repreneur → espace repreneur', true);
   const buyerToken = await p.evaluate(() => localStorage.getItem('token'));
-  await p.goto(L.FRONT + `/company/${cid}`, { waitUntil: 'networkidle' });
-  await p.waitForSelector('[data-testid=company-header]');
+  await p.goto(L.FRONT + `/property/${cid}`, { waitUntil: 'networkidle' });
+  await p.waitForSelector('[data-testid=property-header]');
   L.check('fiche : badge « Annonce de test »', (await p.getByTestId('test-listing-badge').count()) === 1);
   await p.getByTestId('contact-seller-btn').first().click();
   await p.getByTestId('contact-modal').waitFor();
@@ -367,10 +367,10 @@ const restartBackend = (env) => {
   await p.getByTestId('test-purge-plan').waitFor({ timeout: 15000 });
   t = await p.getByTestId('test-purge-plan').innerText();
   L.check('purge : simulation détaillée par collection', /annonce|Annonces/i.test(t) && /\d/.test(t), t.slice(0, 200));
-  L.check('purge : simulation sans suppression', Number((await L.api('GET', '/companies', { params: { limit: 50 } })).headers.get('x-total-count')) === 9);
+  L.check('purge : simulation sans suppression', Number((await L.api('GET', '/properties', { params: { limit: 50 } })).headers.get('x-total-count')) === 9);
   await p.getByTestId('test-purge-confirm').click();
   await L.sleep(1500);
-  const after = await L.api('GET', '/companies', { params: { limit: 50 } });
+  const after = await L.api('GET', '/properties', { params: { limit: 50 } });
   L.check('purge : plus aucune annonce publique', Number(after.headers.get('x-total-count')) === 0 && (after.data || []).length === 0, after.headers.get('x-total-count'));
   L.check('purge : compte démo supprimé → déconnecté', !(await p.evaluate(() => localStorage.getItem('token'))));
   await p.goto(L.FRONT + '/', { waitUntil: 'networkidle' });

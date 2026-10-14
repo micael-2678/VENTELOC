@@ -13,7 +13,7 @@ const num = (v) => {
   return Number.isFinite(n) ? n : 0;
 };
 
-const FundsDeclarationForm = ({ companyId, defaultAmount = '', onDone }) => {
+const FundsDeclarationForm = ({ propertyId, defaultAmount = '', onDone }) => {
   const idp = useId();
   const [source, setSource] = useState('');
   const [amount, setAmount] = useState(defaultAmount ? String(defaultAmount) : '');
@@ -34,7 +34,7 @@ const FundsDeclarationForm = ({ companyId, defaultAmount = '', onDone }) => {
     setSubmitting(true);
     setServerError('');
     try {
-      const res = await axiosInstance.post(`/dataroom/${companyId}/funds-declaration`, {
+      const res = await axiosInstance.post(`/dataroom/${propertyId}/funds-declaration`, {
         source,
         amount: num(amount),
         financing_partner: partner.trim() || null,

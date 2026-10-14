@@ -6,7 +6,7 @@
 // Anciens paramètres encore acceptés (liens de l'ancienne recherche, des hubs et des e-mails) :
 //   metiers, rge_type, max_price, department, sort, q, region en toutes lettres (« Bretagne »).
 //
-// Paramètres d'API (GET /companies, API.md §2) : trades, region, department, rge, max_price, min_ca, min_staff, sort,
+// Paramètres d'API (GET /properties, API.md §2) : trades, region, department, rge, max_price, min_ca, min_staff, sort,
 // limit, page. Tous les critères sont filtrés par le serveur : X-Total-Count est exact.
 import axios from 'axios';
 import {
@@ -16,7 +16,7 @@ import {
 import { readableSpaces } from '@/components/shared/formatters';
 
 const BACKEND_URL = String(process.env.REACT_APP_BACKEND_URL || '').replace(/\/+$/, '');
-export const COMPANIES_URL = `${BACKEND_URL}/api/companies`;
+export const PROPERTIES_URL = `${BACKEND_URL}/api/properties`;
 
 export const LISTINGS_PATH = '/';
 export const PAGE_SIZE = 24;
@@ -144,7 +144,7 @@ export const activeFilterCount = (f) => (f.trades || []).length
 
 export const hasActiveFilters = (f) => activeFilterCount(f) > 0;
 
-// Filtres → paramètres de GET /companies
+// Filtres → paramètres de GET /properties
 export const apiParams = (f, { page = 1, limit = PAGE_SIZE } = {}) => {
   const sort = SORTS.find((s) => s.value === f.tri) || SORTS[0];
   return {
@@ -170,7 +170,7 @@ const listFrom = (res) => (res && Array.isArray(res.data) ? res.data : []);
 // Annonces publiques d'une page de résultats → { items, total }.
 // Requête sans jeton (axios nu) : un cédant connecté voit les annonces publiques, pas les siennes (API.md §2).
 export const fetchListings = async (f, { page = 1, limit = PAGE_SIZE, signal } = {}) => {
-  const res = await axios.get(COMPANIES_URL, { params: apiParams(f, { page, limit }), signal });
+  const res = await axios.get(PROPERTIES_URL, { params: apiParams(f, { page, limit }), signal });
   const items = listFrom(res);
   return { items, total: totalFrom(res, items.length + (page - 1) * limit) };
 };

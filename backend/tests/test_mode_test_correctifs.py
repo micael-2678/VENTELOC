@@ -29,7 +29,7 @@ def test_demo_admin_token_revoked_when_test_mode_off(api, client, test_mode, mon
     assert client.get("/api/admin/todo", headers=h(tok)).status_code == 401
     assert client.post("/api/admin/test/purge", headers=h(tok)).status_code == 401
     # Route à authentification facultative : le jeton est ignoré (visiteur anonyme)
-    assert client.get("/api/companies", headers=h(tok)).status_code == 200
+    assert client.get("/api/properties", headers=h(tok)).status_code == 200
     # Le vrai admin garde l'accès
     assert client.get("/api/admin/todo", headers=api.h(test_mode)).status_code == 200
 
@@ -55,27 +55,27 @@ def test_trial_account_token_carries_test_claim(api, client, admin, monkeypatch)
 # ---------- D2 : données réelles jamais repassées en test ni purgées ----------
 
 def test_real_listing_resigned_in_test_mode_is_never_purged(api, client, admin, monkeypatch):
-    seller, company = published_listing(api, client)
-    c = stored(client, "companies", {"id": company["id"]})
+    seller, property = published_listing(api, client)
+    c = stored(client, "properties", {"id": property["id"]})
     real_mandate = stored(client, "generated_contracts", {"id": c["mandate_id"]})
     assert not real_mandate.get("is_test") and isinstance(real_mandate["registry_number"], int)
     r = client.post(f"/api/seller/mandat/{real_mandate['id']}/denounce", headers=api.h(seller), json={})
     assert r.status_code == 200, r.text
     monkeypatch.setenv("TEST_MODE", "true")
-    m = client.post("/api/seller/mandat/generate", params={"company_id": company["id"]}, headers=api.h(seller)).json()
+    m = client.post("/api/seller/mandat/generate", params={"property_id": property["id"]}, headers=api.h(seller)).json()
     code = client.post("/api/signatures/request-code", headers=api.h(seller), json={"contract_id": m["contract_id"]}).json()["test_code"]
     r = client.post(f"/api/seller/mandat/{m['contract_id']}/sign", headers=api.h(seller), json={"otp_code": code})
     assert r.status_code == 200 and r.json()["registry_number"].startswith("TEST-"), r.text
-    after = stored(client, "companies", {"id": company["id"]})
+    after = stored(client, "properties", {"id": property["id"]})
     assert not after.get("is_test") and after["mandate_is_test"] is True
     monkeypatch.delenv("TEST_MODE")
     # Annonce réelle sous mandat de test : masquée au public hors mode test (le mandat de test ne vaut rien)
-    public = {x["id"] for x in client.get("/api/companies", params={"limit": 200}).json()}
-    assert company["id"] not in public
-    assert client.get(f"/api/companies/{company['id']}").status_code in (403, 404)
+    public = {x["id"] for x in client.get("/api/properties", params={"limit": 200}).json()}
+    assert property["id"] not in public
+    assert client.get(f"/api/properties/{property['id']}").status_code in (403, 404)
     client.post("/api/admin/test/purge", params={"dry_run": "false"}, headers=api.h(admin))
     assert stored(client, "generated_contracts", {"id": real_mandate["id"]})["registry_number"] == real_mandate["registry_number"]
-    assert stored(client, "companies", {"id": company["id"]}) and stored(client, "users", {"id": seller["id"]})
+    assert stored(client, "properties", {"id": property["id"]}) and stored(client, "users", {"id": seller["id"]})
     assert stored(client, "documents", {"contract_id": real_mandate["id"]})
     assert not stored(client, "generated_contracts", {"id": m["contract_id"]})
 
@@ -83,16 +83,16 @@ def test_real_listing_resigned_in_test_mode_is_never_purged(api, client, admin, 
 def test_purge_protects_real_registry_mandate_even_on_test_listing(api, client, admin):
     """Défense en profondeur : une annonce marquée de test qui porte un mandat du registre réel n'est pas purgée ; le
     mandat est signalé dans `protected`"""
-    seller, company = published_listing(api, client)
-    mandate_id = stored(client, "companies", {"id": company["id"]})["mandate_id"]
-    db_call(client, server.db.companies.update_one, {"id": company["id"]}, {"$set": {"is_test": True}})
-    plan, _, company_ids = client.portal.call(purge_cli.purge_plan, server.db)
-    assert company["id"] not in company_ids
+    seller, property = published_listing(api, client)
+    mandate_id = stored(client, "properties", {"id": property["id"]})["mandate_id"]
+    db_call(client, server.db.properties.update_one, {"id": property["id"]}, {"$set": {"is_test": True}})
+    plan, _, property_ids = client.portal.call(purge_cli.purge_plan, server.db)
+    assert property["id"] not in property_ids
     done = client.post("/api/admin/test/purge", params={"dry_run": "false"}, headers=api.h(admin)).json()
     assert mandate_id in [p["id"] for p in done["protected"]["generated_contracts"]]
-    assert stored(client, "generated_contracts", {"id": mandate_id}) and stored(client, "companies", {"id": company["id"]})
+    assert stored(client, "generated_contracts", {"id": mandate_id}) and stored(client, "properties", {"id": property["id"]})
     # Base partagée entre les tests : l'annonce redevient réelle (aucune donnée de test résiduelle)
-    db_call(client, server.db.companies.update_one, {"id": company["id"]}, {"$unset": {"is_test": ""}})
+    db_call(client, server.db.properties.update_one, {"id": property["id"]}, {"$unset": {"is_test": ""}})
 
 
 def test_real_closing_billed_in_test_mode_stays_real(api, client, admin, monkeypatch):
@@ -109,7 +109,7 @@ def test_real_closing_billed_in_test_mode_stays_real(api, client, admin, monkeyp
     assert done["counts"].get("invoices") == 1 and done["counts"].get("closings.invoice_id") == 1
     clo = stored(client, "closings", {"id": ctx["closing"]["id"]})
     assert clo and "invoice_id" not in clo and "invoice_number" not in clo
-    assert stored(client, "companies", {"id": ctx["company"]["id"]})
+    assert stored(client, "properties", {"id": ctx["company"]["id"]})
     # Une facture réelle peut ensuite être émise pour cette vente
     invoice = client.portal.call(closing.issue_invoice, clo)
     assert re.fullmatch(r"FAC-\d{4}-\d{5}", invoice["number"]) and not invoice.get("is_test")
@@ -122,18 +122,18 @@ def test_relaxed_checks_do_not_apply_to_real_listing(api, client, admin, monkeyp
     _, first = published_listing(api, client, siret=siret)
     seller = api.register(uid("doublon"), "seller")
     api.verify_kyc(seller)
-    c = client.post("/api/companies", headers=api.h(seller), json=listing(siret=siret)).json()
+    c = client.post("/api/properties", headers=api.h(seller), json=listing(siret=siret)).json()
     m = api.mandate(seller, c["id"])
     assert api.sign_mandate(seller, m["contract_id"]).status_code == 200
-    blocked = stored(client, "companies", {"id": c["id"]})
+    blocked = stored(client, "properties", {"id": c["id"]})
     assert blocked["status"] == "draft" and "doublon_siren" in blocked["blocking"]
     monkeypatch.setenv("TEST_MODE", "true")
-    r = client.put(f"/api/companies/{c['id']}", headers=api.h(seller), json={"description": "Description mise à jour " * 10})
+    r = client.put(f"/api/properties/{c['id']}", headers=api.h(seller), json={"description": "Description mise à jour " * 10})
     assert r.status_code == 200, r.text
-    after = stored(client, "companies", {"id": c["id"]})
+    after = stored(client, "properties", {"id": c["id"]})
     assert after["status"] == "draft" and "doublon_siren" in after["blocking"]
     monkeypatch.delenv("TEST_MODE")
-    public = {x["id"] for x in client.get("/api/companies", params={"limit": 200}).json()}
+    public = {x["id"] for x in client.get("/api/properties", params={"limit": 200}).json()}
     assert c["id"] not in public and first["id"] in public
 
 
@@ -143,12 +143,12 @@ def test_purge_removes_contact_reveal_logs(api, client, admin, monkeypatch):
     monkeypatch.setenv("TEST_MODE", "true")
     seller, c, _, _ = make_test_listing(client)
     monkeypatch.delenv("TEST_MODE")
-    real_seller, real_company = published_listing(api, client)
+    real_seller, real_property = published_listing(api, client)
     test_log, real_log = str(uuid.uuid4()), str(uuid.uuid4())
     db_call(client, server.db.contact_reveal_logs.insert_many, [
-        {"id": test_log, "who": seller["id"], "what": "identite_acquereur", "subject_id": seller["id"], "company_id": c["id"]},
+        {"id": test_log, "who": seller["id"], "what": "identite_acquereur", "subject_id": seller["id"], "property_id": c["id"]},
         {"id": real_log, "who": real_seller["id"], "what": "identite_acquereur", "subject_id": real_seller["id"],
-         "company_id": real_company["id"]}])
+         "property_id": real_property["id"]}])
     plan, _, _ = client.portal.call(purge_cli.purge_plan, server.db)
     assert "contact_reveal_logs" in {name for name, _ in plan}
     client.post("/api/admin/test/purge", params={"dry_run": "false"}, headers=api.h(admin))
@@ -264,15 +264,15 @@ def test_config_without_test_mode_has_no_panel_fields(client, monkeypatch):
 def test_demo_listings_checks_passed_except_one_to_review(api, client, test_mode):
     assert client.post("/api/test/seed").status_code == 200
     seller = stored(client, "users", {"email": DEMO_EMAILS["vendeur"]})
-    demo = db_call(client, lambda: server.db.companies.find({"seller_id": seller["id"]}, {"_id": 0}).to_list(50))
+    demo = db_call(client, lambda: server.db.properties.find({"seller_id": seller["id"]}, {"_id": 0}).to_list(50))
     assert len(demo) == 8 and all(c["status"] == "published" for c in demo)
     to_review = [c for c in demo if c["moderation"]["status"] == "pending"]
     assert [c["demo_key"] for c in to_review] == ["couverture-gironde"]
-    verified = [c for c in demo if c["company_checks"].get("in_ademe_list") is True]
+    verified = [c for c in demo if c["property_checks"].get("in_ademe_list") is True]
     assert len(verified) == 5 and all(c["rge_types"] for c in verified)
     for c in demo:
         if c["demo_key"] != "couverture-gironde":
-            assert c["moderation"]["flags"] == [] and c["company_checks"]["dirigeant_match"] == "match_exact", c["demo_key"]
+            assert c["moderation"]["flags"] == [] and c["property_checks"]["dirigeant_match"] == "match_exact", c["demo_key"]
     admin_tok = client.post("/api/test/login-as", json={"persona": "admin"}).json()
     todo = client.get("/api/admin/todo", headers=h(admin_tok)).json()
     review = next(s for s in todo["sections"] if s["key"] == "listings_review")
@@ -284,6 +284,6 @@ def test_demo_listings_checks_passed_except_one_to_review(api, client, test_mode
 
 def test_total_count_header_exposed_to_cross_origin_front(client):
     origin = server.cors_origins()[0] if server.cors_origins() else "http://localhost:3000"
-    r = client.get("/api/companies", params={"limit": 1}, headers={"Origin": origin})
+    r = client.get("/api/properties", params={"limit": 1}, headers={"Origin": origin})
     assert r.status_code == 200 and "x-total-count" in r.headers
     assert "x-total-count" in r.headers.get("access-control-expose-headers", "").lower()

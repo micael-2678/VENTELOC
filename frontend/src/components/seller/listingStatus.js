@@ -47,10 +47,10 @@ export const BLOCKING_ACTIONS = {
   prix_manquant: 'edit',
 };
 
-export const listingStatusInfo = (company) => {
-  const status = company?.status || 'draft';
+export const listingStatusInfo = (property) => {
+  const status = property?.status || 'draft';
   const base = LISTING_STATUS[status] || { label: status, tone: 'info' };
-  if (status === 'draft' && Array.isArray(company?.blocking) && company.blocking.length) {
+  if (status === 'draft' && Array.isArray(property?.blocking) && property.blocking.length) {
     return { ...base, label: 'Publication bloquée', tone: 'danger' };
   }
   return base;
@@ -66,24 +66,24 @@ export const badgeClass = (tone) => {
 };
 
 // Motifs de blocage d'une annonce → [{ code, label, action }]
-export const blockingReasons = (company) => {
-  const codes = Array.isArray(company?.blocking) && company.blocking.length
-    ? company.blocking
-    : (company?.status === 'draft' && company?.blocked_reason ? [company.blocked_reason] : []);
+export const blockingReasons = (property) => {
+  const codes = Array.isArray(property?.blocking) && property.blocking.length
+    ? property.blocking
+    : (property?.status === 'draft' && property?.blocked_reason ? [property.blocked_reason] : []);
   return codes.map((code) => ({ code, label: LISTING_BLOCKING_LABELS[code] || String(code), action: BLOCKING_ACTIONS[code] || 'edit' }));
 };
 
 // Drapeaux de post-modération (non bloquants, visibles par le cédant pour information)
-export const moderationFlags = (company) => {
-  const flags = Array.isArray(company?.moderation?.flags) ? company.moderation.flags : [];
+export const moderationFlags = (property) => {
+  const flags = Array.isArray(property?.moderation?.flags) ? property.moderation.flags : [];
   return flags.map((code) => ({ code, label: LISTING_FLAG_LABELS[code] || String(code) }));
 };
 
 // Motif de retrait posé par la modération (annonce `removed`)
-export const removalReason = (company) => (company?.status === 'removed' ? (company?.moderation?.reason_text || company?.moderation?.reason || '') : '');
+export const removalReason = (property) => (property?.status === 'removed' ? (property?.moderation?.reason_text || property?.moderation?.reason || '') : '');
 
-export const isLive = (company) => company?.status === 'published';
-export const canPause = (company) => company?.status === 'published';
-export const canResume = (company) => company?.status === 'paused';
-export const canWithdraw = (company) => ['published', 'paused'].includes(company?.status);
-export const canMarkSold = (company) => ['published', 'paused', 'withdrawn'].includes(company?.status);
+export const isLive = (property) => property?.status === 'published';
+export const canPause = (property) => property?.status === 'published';
+export const canResume = (property) => property?.status === 'paused';
+export const canWithdraw = (property) => ['published', 'paused'].includes(property?.status);
+export const canMarkSold = (property) => ['published', 'paused', 'withdrawn'].includes(property?.status);

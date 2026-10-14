@@ -152,13 +152,13 @@ export const readEstimateSession = () => {
     // Deux formes écrites par EstimatePage : {inputs:{ca,ebe,staff…}, result:{low,high,mid}} ou, à plat,
     // {ca, ebe, staff, maintenance_contracts…, low, high, mid} (HANDOFF compte-estimateur §2.3)
     const inputs = data.inputs || data.form || data;
-    const company = data.company || {};
+    const property = data.property || {};
     const result = data.result || data.estimate || data;
     const rge = data.rge || {};
     const num = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
     return {
-      siret: String(data.siret || company.siret || inputs.siret || '').replace(/\D/g, '').slice(0, 14),
-      company,
+      siret: String(data.siret || property.siret || inputs.siret || '').replace(/\D/g, '').slice(0, 14),
+      property,
       rge,
       inputs: {
         ca: num(inputs.ca ?? inputs.ca_n),
@@ -223,8 +223,8 @@ const isoDate = (v) => {
 };
 
 // Formulaire depuis une annonce existante (reprise d'un brouillon, modification)
-export const formFromCompany = (company) => {
-  const c = company || {};
+export const formFromProperty = (property) => {
+  const c = property || {};
   const form = emptyForm();
   const fc = c.fixed_charges || {};
   return {
@@ -275,7 +275,7 @@ export const applyEstimateToForm = (form, estimate) => {
 export const applyLookupToForm = (form, lookup) => {
   if (!lookup) return form;
   const next = { ...form };
-  const c = lookup.company || {};
+  const c = lookup.property || {};
   if (c.found) {
     if (c.name) next.company_name = c.name;
     if (c.department && !next.department) next.department = normalizeDepartement(c.department);
@@ -348,7 +348,7 @@ const compact = (obj) => Object.fromEntries(Object.entries(obj).filter(([, v]) =
 
 export const legacySaleType = (saleObject) => ({ titres: 'parts', fonds: 'fonds', indifferent: 'mixte' }[saleObject] || '');
 
-// Champs de l'écran 1 (PUT /companies/{id})
+// Champs de l'écran 1 (PUT /properties/{id})
 export const step1Payload = (form) => compact({
   siret: form.siret || undefined,
   company_name: form.company_name || undefined,
@@ -395,7 +395,7 @@ export const step3Payload = (form) => compact({
   description: form.description.trim() || undefined,
 });
 
-// POST /companies : création du brouillon au premier écran. Le modèle de création attend encore des montants
+// POST /properties : création du brouillon au premier écran. Le modèle de création attend encore des montants
 // (anciens champs obligatoires) : ils sont envoyés à zéro et complétés aux écrans suivants par PUT.
 export const createPayload = (form) => ({
   rge_types: rgeLabelsFromIds(form.rge_ids),

@@ -105,7 +105,7 @@ const AdminIncidents = ({ focusId, onEmailBlocked }) => {
                       <Pill tone={i.status === 'open' ? 'danger' : 'info'}>{i.status === 'open' ? 'Ouvert' : 'Clos'}</Pill>
                     </div>
                     <p className="text-sm text-gray-700 mt-1 break-words">
-                      {[i.company_label, i.siren ? `SIREN ${i.siren}` : '', ev.date ? `parution le ${fmtDate(ev.date)}` : '', ev.tribunal].filter(Boolean).join(' · ')}
+                      {[i.property_label, i.siren ? `SIREN ${i.siren}` : '', ev.date ? `parution le ${fmtDate(ev.date)}` : '', ev.tribunal].filter(Boolean).join(' · ')}
                     </p>
                     {ev.description && <p className="text-sm text-gray-700 mt-1 break-words">{String(ev.description).slice(0, 400)}</p>}
                     {i.note && <p className="text-sm text-gray-700 mt-1 break-words"><span className="text-gray-600">Note : </span>{i.note}</p>}

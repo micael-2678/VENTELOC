@@ -12,7 +12,7 @@ import { accessStatus } from './api';
 import ConfirmDialog from './ConfirmDialog';
 
 // Demande de dossier (API.md §4) : carte repreneur pseudonymisée + message, acceptation en un geste, refus motivé.
-export const AccessRequestCard = ({ request, companyId, onChanged, compact = false }) => {
+export const AccessRequestCard = ({ request, propertyId, onChanged, compact = false }) => {
   const [busy, setBusy] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
@@ -26,7 +26,7 @@ export const AccessRequestCard = ({ request, companyId, onChanged, compact = fal
   const accept = async () => {
     setBusy(true);
     try {
-      await axiosInstance.put(`/dataroom/${companyId}/access/${request.id}/validate`);
+      await axiosInstance.put(`/dataroom/${propertyId}/access/${request.id}/validate`);
       toast.success('Demande acceptée. Le repreneur vérifie son identité, signe l\'accord de confidentialité et déclare l\'origine de ses fonds ; l\'accès s\'ouvre ensuite automatiquement.', { duration: 8000 });
       onChanged?.();
     } catch (e) {
@@ -38,7 +38,7 @@ export const AccessRequestCard = ({ request, companyId, onChanged, compact = fal
 
   const reject = async () => {
     try {
-      await axiosInstance.put(`/dataroom/${companyId}/access/${request.id}/reject`, { reason: reason.trim() || undefined }, { params: reason.trim() ? { reason: reason.trim() } : undefined });
+      await axiosInstance.put(`/dataroom/${propertyId}/access/${request.id}/reject`, { reason: reason.trim() || undefined }, { params: reason.trim() ? { reason: reason.trim() } : undefined });
       toast.success('Demande refusée.');
       setReason('');
       onChanged?.();
@@ -68,9 +68,9 @@ export const AccessRequestCard = ({ request, companyId, onChanged, compact = fal
         </div>
       ) : (
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-          {request.status === 'granted' && <Link to={`/dataroom/${companyId}`} className="btn-link">Voir le dossier partagé</Link>}
+          {request.status === 'granted' && <Link to={`/dataroom/${propertyId}`} className="btn-link">Voir le dossier partagé</Link>}
           {['accepted', 'granted', 'validated', 'loi_pending'].includes(request.status) && (
-            <Link to={`/messages?conversation=${encodeURIComponent(request.conversation_id || companyId)}`} className="btn-link">Écrire au repreneur</Link>
+            <Link to={`/messages?conversation=${encodeURIComponent(request.conversation_id || propertyId)}`} className="btn-link">Écrire au repreneur</Link>
           )}
         </div>
       )}
@@ -100,7 +100,7 @@ export const AccessRequestCard = ({ request, companyId, onChanged, compact = fal
 };
 
 // Liste des demandes d'une annonce, demandes à traiter en premier
-const AccessRequests = ({ requests, companyId, onChanged }) => {
+const AccessRequests = ({ requests, propertyId, onChanged }) => {
   const list = Array.isArray(requests) ? requests : [];
   if (!list.length) {
     return (
@@ -113,7 +113,7 @@ const AccessRequests = ({ requests, companyId, onChanged }) => {
   const sorted = [...list].sort((a, b) => (order[a.status] ?? 5) - (order[b.status] ?? 5) || new Date(b.created_at || b.requested_at || 0) - new Date(a.created_at || a.requested_at || 0));
   return (
     <div className="space-y-4">
-      {sorted.map((r) => <AccessRequestCard key={r.id} request={r} companyId={companyId} onChanged={onChanged} compact />)}
+      {sorted.map((r) => <AccessRequestCard key={r.id} request={r} propertyId={propertyId} onChanged={onChanged} compact />)}
     </div>
   );
 };

@@ -54,11 +54,11 @@ const ClosingPage = ({ user, setUser }) => {
       user={user}
       setUser={setUser}
       title="Étape de vente"
-      eyebrow={closing.company_title || closing.company_label || undefined}
+      eyebrow={closing.property_title || closing.property_label || undefined}
       backTo={home}
       backLabel={backLabel}
       wide
-      actions={closing.company_id ? <Link to={`/company/${closing.company_id}`} className="btn-secondary px-4 py-2 text-sm">Voir l&apos;annonce</Link> : null}
+      actions={closing.property_id ? <Link to={`/property/${closing.property_id}`} className="btn-secondary px-4 py-2 text-sm">Voir l&apos;annonce</Link> : null}
     >
       <ClosingPanel closing={closing} user={user} onChange={onChange} />
     </ConnectedShell>

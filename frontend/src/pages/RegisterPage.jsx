@@ -88,7 +88,7 @@ const RegisterPage = ({ setUser }) => {
     email: searchParams.get('email') || '',
     password: '',
     phone: '',
-    company_name: estimate?.company?.name || '',
+    company_name: estimate?.property?.name || '',
     siret: cleanSiret(estimate?.siret || ''),
     source: '',
   });
@@ -129,7 +129,7 @@ const RegisterPage = ({ setUser }) => {
 
   // Préremplissage du nom de l'entreprise depuis l'open data (le cédant garde la main)
   useEffect(() => {
-    const name = lookup.result?.company?.found ? lookup.result.company.name : '';
+    const name = lookup.result?.property?.found ? lookup.result.property.name : '';
     if (name) setForm((f) => (f.company_name ? f : { ...f, company_name: name }));
   }, [lookup.result]);
 
@@ -292,8 +292,8 @@ const RegisterPage = ({ setUser }) => {
             </section>
 
             {role === 'seller' && (
-              <section aria-labelledby="register-company-title" className="space-y-4">
-                <h2 id="register-company-title" className="font-display text-lg font-bold text-brand-navy">Votre entreprise</h2>
+              <section aria-labelledby="register-property-title" className="space-y-4">
+                <h2 id="register-property-title" className="font-display text-lg font-bold text-brand-navy">Votre entreprise</h2>
                 <SiretField
                   value={form.siret}
                   onChange={(v) => setField('siret', v)}
@@ -306,7 +306,7 @@ const RegisterPage = ({ setUser }) => {
                   <CompanyPrefillCard result={lookup.result} />
                 )}
                 <Field id="company_name" label="Nom de l'entreprise" icon={Building2} hint="Jamais publié : l'annonce est anonyme.">
-                  <input id="company_name" data-testid="register-company-input" autoComplete="organization" value={form.company_name} onChange={(e) => setField('company_name', e.target.value)} className={inputClass} />
+                  <input id="company_name" data-testid="register-property-input" autoComplete="organization" value={form.company_name} onChange={(e) => setField('company_name', e.target.value)} className={inputClass} />
                 </Field>
                 {estimate && (estimate.low || estimate.high) && (
                   <p className="text-sm text-gray-700 rounded-xl bg-brand-surface border border-brand-line p-3">

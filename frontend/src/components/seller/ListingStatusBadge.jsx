@@ -2,15 +2,15 @@ import { AlertTriangle, Flag } from 'lucide-react';
 import { listingStatusInfo, badgeClass, blockingReasons, moderationFlags, removalReason } from './listingStatus';
 
 // Badge de statut lisible d'une annonce + motifs de blocage (publication impossible) + drapeaux de relecture
-export const StatusBadge = ({ company, className = '' }) => {
-  const info = listingStatusInfo(company);
-  return <span className={`${badgeClass(info.tone)} shrink-0 whitespace-nowrap ${className}`} data-testid={`status-${company?.id || 'x'}`}>{info.label}</span>;
+export const StatusBadge = ({ property, className = '' }) => {
+  const info = listingStatusInfo(property);
+  return <span className={`${badgeClass(info.tone)} shrink-0 whitespace-nowrap ${className}`} data-testid={`status-${property?.id || 'x'}`}>{info.label}</span>;
 };
 
 // Liste des motifs qui empêchent la publication, avec le libellé serveur (plus de « validation sous 48 h »)
-export const BlockingReasons = ({ company, onAction, compact = false }) => {
-  const reasons = blockingReasons(company);
-  const removed = removalReason(company);
+export const BlockingReasons = ({ property, onAction, compact = false }) => {
+  const reasons = blockingReasons(property);
+  const removed = removalReason(property);
   if (!reasons.length && !removed) return null;
   return (
     <div className={`rounded-xl border border-red-200 bg-red-50 ${compact ? 'p-3' : 'p-4'} min-w-0`} data-testid="blocking-reasons">
@@ -41,9 +41,9 @@ export const BlockingReasons = ({ company, onAction, compact = false }) => {
 };
 
 // Drapeaux de post-modération : l'annonce est en ligne, relue sous 48 h par la plateforme
-export const ModerationFlags = ({ company }) => {
-  const flags = moderationFlags(company);
-  if (!flags.length || company?.moderation?.status === 'ok') return null;
+export const ModerationFlags = ({ property }) => {
+  const flags = moderationFlags(property);
+  if (!flags.length || property?.moderation?.status === 'ok') return null;
   return (
     <p className="flex items-start gap-2 text-sm text-gray-600 min-w-0" data-testid="moderation-flags">
       <Flag className="w-4 h-4 mt-0.5 shrink-0 text-brand-amber" aria-hidden="true" />

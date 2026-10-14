@@ -24,7 +24,7 @@ import { SALE_OBJECT_LABELS, SALE_REASON_LABELS, isProfileIncomplete } from '@/c
 
 // Fiche d'annonce anonyme (SPEC §4.3 point 3, API.md §2) : tout ce que le cédant a saisi, jamais son nom ni ses
 // coordonnées ; badges vérifié / déclaré ; encart « Comment ça se passe » ; CTA « Présenter mon projet au cédant »
-// (POST /companies/{id}/contact {message} → messagerie) ; favori visiteur → inscription ; alerte sans compte.
+// (POST /properties/{id}/contact {message} → messagerie) ; favori visiteur → inscription ; alerte sans compte.
 
 const FIXED_CHARGE_LABELS = { salaries: 'Salaires chargés', rent: 'Loyers', insurance: 'Assurances', equipment: 'Matériel et véhicules' };
 const REASSURANCE = [
@@ -85,10 +85,10 @@ const Section = ({ id, title, icon: Icon, children }) => (
   </section>
 );
 
-const CompanyDetail = ({ user }) => {
+const PropertyDetail = ({ user }) => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [company, setCompany] = useState(null);
+  const [property, setProperty] = useState(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
@@ -99,16 +99,16 @@ const CompanyDetail = ({ user }) => {
   const [contactError, setContactError] = useState(null); // { kind: 'profile'|'email'|'text', text }
 
   const isBuyer = user?.role === 'buyer';
-  const isOwner = Boolean(user && company && (user.role === 'admin' || (company.seller_id && company.seller_id === user.id)));
+  const isOwner = Boolean(user && property && (user.role === 'admin' || (property.seller_id && property.seller_id === user.id)));
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await axiosInstance.get(`/companies/${id}`);
-      setCompany(res.data);
+      const res = await axiosInstance.get(`/properties/${id}`);
+      setProperty(res.data);
       setNotFound(false);
     } catch (error) {
-      setCompany(null);
+      setProperty(null);
       setNotFound(true);
     } finally {
       setLoading(false);
@@ -122,33 +122,33 @@ const CompanyDetail = ({ user }) => {
     axiosInstance.get(`/favorites/check/${id}`).then((r) => setIsFavorite(Boolean(r.data?.favorited))).catch(() => {});
   }, [id, isBuyer]);
 
-  const title = company ? listingTitle(company) : '';
-  const badge = company ? qualificationBadge(company) : null;
-  const trades = useMemo(() => (Array.isArray(company?.trades) ? company.trades : []), [company]);
-  const rgeTypes = Array.isArray(company?.rge_types) ? company.rge_types : [];
-  const others = Array.isArray(company?.other_qualifications) ? company.other_qualifications : [];
+  const title = property ? listingTitle(property) : '';
+  const badge = property ? qualificationBadge(property) : null;
+  const trades = useMemo(() => (Array.isArray(property?.trades) ? property.trades : []), [property]);
+  const rgeTypes = Array.isArray(property?.rge_types) ? property.rge_types : [];
+  const others = Array.isArray(property?.other_qualifications) ? property.other_qualifications : [];
   const firstTrade = trades[0] || null;
-  const dep = company?.department ? departementLabel(company.department) : '';
-  const location = [company?.region, dep].filter(Boolean).join(' · ');
+  const dep = property?.department ? departementLabel(property.department) : '';
+  const location = [property?.region, dep].filter(Boolean).join(' · ');
   const seoCrumbs = [
     { name: 'Annonces', path: LISTINGS_PATH },
-    { name: 'Annonce', path: `/company/${id}` },
+    { name: 'Annonce', path: `/property/${id}` },
   ];
-  // /company/:id est une route commune (en-tête et og:site_name CessionBâtiment) : marque principale dans le
+  // /property/:id est une route commune (en-tête et og:site_name CessionBâtiment) : marque principale dans le
   // titre, y compris pour une annonce RGE (BRAND.verticalName est réservé aux pages /…-rge).
   useSeo(
-    company ? `${title} | ${BRAND.name}` : notFound ? `Annonce introuvable | ${BRAND.name}` : `Entreprise à vendre | ${BRAND.name}`,
-    company
-      ? `Annonce anonyme : ${title}${company.region ? ` ${inRegion(company.region)}` : ''}${hasValue(company.asking_price) ? `, prix demandé ${formatPrice(company.asking_price)}` : ''}. ${OFFER.metaMatching}`
+    property ? `${title} | ${BRAND.name}` : notFound ? `Annonce introuvable | ${BRAND.name}` : `Entreprise à vendre | ${BRAND.name}`,
+    property
+      ? `Annonce anonyme : ${title}${property.region ? ` ${inRegion(property.region)}` : ''}${hasValue(property.asking_price) ? `, prix demandé ${formatPrice(property.asking_price)}` : ''}. ${OFFER.metaMatching}`
       : `Annonce anonyme de cession d'entreprise du bâtiment. ${OFFER.metaMatching}`,
     // Annonce fictive du mode test : jamais indexée
-    notFound || company?.is_test === true ? { robots: NOINDEX }
-      : company ? { path: `/company/${id}`, jsonLd: breadcrumbLd(SITE_URL, seoCrumbs) } : {},
+    notFound || property?.is_test === true ? { robots: NOINDEX }
+      : property ? { path: `/property/${id}`, jsonLd: breadcrumbLd(SITE_URL, seoCrumbs) } : {},
   );
 
   const toggleFavorite = async () => {
     if (!user) {
-      navigate(`/register?role=buyer&redirect=${encodeURIComponent(`/company/${id}`)}`);
+      navigate(`/register?role=buyer&redirect=${encodeURIComponent(`/property/${id}`)}`);
       return;
     }
     if (!isBuyer || favoriteLoading) return;
@@ -159,7 +159,7 @@ const CompanyDetail = ({ user }) => {
         setIsFavorite(false);
         toast.success('Retirée de vos favoris');
       } else {
-        await axiosInstance.post('/favorites', { company_id: id });
+        await axiosInstance.post('/favorites', { property_id: id });
         setIsFavorite(true);
         toast.success('Ajoutée à vos favoris');
       }
@@ -171,7 +171,7 @@ const CompanyDetail = ({ user }) => {
   };
 
   const share = async () => {
-    const url = `${SITE_URL}/company/${id}`;
+    const url = `${SITE_URL}/property/${id}`;
     try {
       if (navigator.share) {
         await navigator.share({ title, text: `${title} — annonce anonyme sur ${BRAND.name}`, url });
@@ -186,7 +186,7 @@ const CompanyDetail = ({ user }) => {
 
   const openContact = () => {
     if (!user) {
-      navigate(`/login?redirect=${encodeURIComponent(`/company/${id}`)}`);
+      navigate(`/login?redirect=${encodeURIComponent(`/property/${id}`)}`);
       return;
     }
     if (!isBuyer) return;
@@ -204,7 +204,7 @@ const CompanyDetail = ({ user }) => {
     setContactLoading(true);
     setContactError(null);
     try {
-      const res = await axiosInstance.post(`/companies/${id}/contact`, { message: text });
+      const res = await axiosInstance.post(`/properties/${id}/contact`, { message: text });
       const data = res.data || {};
       if (data.already_contacted) toast.info('Vous avez déjà présenté votre projet au cédant : retrouvez la conversation dans votre messagerie.');
       else {
@@ -229,19 +229,19 @@ const CompanyDetail = ({ user }) => {
       </div>
     );
   }
-  if (!company) return notFound ? <NotFound user={user} /> : null;
+  if (!property) return notFound ? <NotFound user={user} /> : null;
 
-  const c = company;
+  const c = property;
   const legacyPayer = legacyBuyerPays({ commission_payer: c.commission_info?.payer, terms_version: c.commission_info?.terms_version || c.commission_terms_version });
   const multiple = hasValue(c.asking_price) && Number(c.ebitda) > 0 ? Math.round((Number(c.asking_price) / Number(c.ebitda)) * 10) / 10 : null;
   const fixedCharges = c.fixed_charges && typeof c.fixed_charges === 'object' ? Object.keys(FIXED_CHARGE_LABELS).filter((k) => Number(c.fixed_charges[k]) > 0).map((k) => ({ key: k, label: FIXED_CHARGE_LABELS[k], value: Number(c.fixed_charges[k]) })) : [];
   const fixedTotal = fixedCharges.reduce((s, x) => s + x.value, 0) || (typeof c.fixed_charges === 'number' ? c.fixed_charges : 0);
   const reassurance = REASSURANCE.filter((r) => c[r.key] === true || c[r.key] === false);
   const saleObject = SALE_OBJECT_LABELS[c.sale_object] || (c.sale_type === 'parts' ? SALE_OBJECT_LABELS.titres : c.sale_type === 'fonds' ? SALE_OBJECT_LABELS.fonds : '');
-  const dirigeantVerified = c.company_checks?.dirigeant_match === 'match_exact';
+  const dirigeantVerified = c.property_checks?.dirigeant_match === 'match_exact';
   const rgeDeadline = c.rge_validity || null;
   const verifiedAt = c.qualifications_verified_at || null;
-  const inAdeme = c.company_checks?.in_ademe_list;
+  const inAdeme = c.property_checks?.in_ademe_list;
   const hasFinancials = ['ca_n', 'ca_n1', 'ca_n2', 'ebitda', 'margin', 'debt', 'pipeline'].some((k) => hasValue(c[k])) || fixedTotal > 0;
   const revealedName = c.company_name && !isOwner ? c.company_name : null;
 
@@ -262,7 +262,7 @@ const CompanyDetail = ({ user }) => {
         <div className="grid lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-6 min-w-0">
           <div className="space-y-6 min-w-0">
             {/* En-tête */}
-            <header className="card p-5 sm:p-6 min-w-0" data-testid="company-header">
+            <header className="card p-5 sm:p-6 min-w-0" data-testid="property-header">
               <div className="flex flex-wrap items-center gap-2 mb-3">
                 {badge && (
                   <span className={`badge ${badge.kind === 'verified' ? 'badge-verified' : 'badge-declared'}`} data-testid="qualification-badge">
@@ -306,7 +306,7 @@ const CompanyDetail = ({ user }) => {
                 </div>
               )}
 
-              <div className="mt-5 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap pt-4 border-t border-brand-line" data-testid="company-actions">
+              <div className="mt-5 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap pt-4 border-t border-brand-line" data-testid="property-actions">
                 {!isOwner && user?.role !== 'seller' && (
                   <button type="button" onClick={openContact} className="btn-primary col-span-2 sm:col-auto px-5 py-3 text-sm" data-testid="contact-seller-btn">
                     <MessageSquare className="w-4 h-4" aria-hidden="true" />
@@ -546,4 +546,4 @@ const CompanyDetail = ({ user }) => {
   );
 };
 
-export default CompanyDetail;
+export default PropertyDetail;

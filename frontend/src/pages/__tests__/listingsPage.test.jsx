@@ -71,16 +71,16 @@ const change = async (el, value) => {
   await flush();
   await flush();
 };
-const companiesCalls = () => axios.get.mock.calls.filter(([url]) => String(url).endsWith('/api/companies'));
-const lastParams = () => companiesCalls().slice(-1)[0][1].params;
+const propertiesCalls = () => axios.get.mock.calls.filter(([url]) => String(url).endsWith('/api/properties'));
+const lastParams = () => propertiesCalls().slice(-1)[0][1].params;
 
 const listing = (id, extra = {}) => ({
   id, title: `Entreprise ${id}`, trades: ['pac-clim-cvc'], region: 'Bretagne', department: '29', staff_count: 6, ca_n: 780000,
-  asking_price: 290000, published_at: '2026-10-01T10:00:00Z', is_rge: true, company_checks: { in_ademe_list: true }, ...extra,
+  asking_price: 290000, published_at: '2026-10-01T10:00:00Z', is_rge: true, property_checks: { in_ademe_list: true }, ...extra,
 });
 
-const mockCompanies = (list = [], total) => {
-  axios.get.mockImplementation((url) => (String(url).endsWith('/api/companies')
+const mockProperties = (list = [], total) => {
+  axios.get.mockImplementation((url) => (String(url).endsWith('/api/properties')
     ? Promise.resolve({ data: list, headers: { 'x-total-count': String(total ?? list.length) } })
     : Promise.resolve({ data: {} })));
 };
@@ -91,7 +91,7 @@ beforeEach(() => {
   axiosInstance.get.mockResolvedValue({ data: { favorites: [] } });
   axiosInstance.post.mockResolvedValue({ data: { favorited: true } });
   axiosInstance.delete.mockResolvedValue({ data: {} });
-  mockCompanies([]);
+  mockProperties([]);
 });
 afterEach(() => {
   mounted.splice(0).forEach(({ root, container }) => { act(() => root.unmount()); container.remove(); });
@@ -179,11 +179,11 @@ describe('anciennes pages → page des annonces (mêmes correspondances que ngin
 
 // ------------------------------------------------------------------------------------------------
 describe('page des annonces', () => {
-  test('filtres de l\'URL → GET /companies sans jeton, cartes, compteur, puces, pagination, JSON-LD ItemList', async () => {
-    mockCompanies([listing('c1'), listing('c2')], 30);
+  test('filtres de l\'URL → GET /properties sans jeton, cartes, compteur, puces, pagination, JSON-LD ItemList', async () => {
+    mockProperties([listing('c1'), listing('c2')], 30);
     const c = await render(<ListingsPage user={null} />, '/?metier=pac-clim-cvc,isolation&region=bretagne&departement=29&rge=1&prix_max=500000&tri=prix_desc');
-    const [url, cfg] = companiesCalls()[0];
-    expect(url).toMatch(/\/api\/companies$/);
+    const [url, cfg] = propertiesCalls()[0];
+    expect(url).toMatch(/\/api\/properties$/);
     expect(cfg.headers).toBeUndefined();
     expect(cfg.params).toEqual({ trades: 'pac-clim-cvc,isolation', region: 'Bretagne', department: '29', rge: 'true', max_price: 500000, sort: 'price_desc', limit: 24, page: 1 });
     expect(c.querySelector('h1').textContent).toBe('Entreprises du bâtiment à vendre');
@@ -200,14 +200,14 @@ describe('page des annonces', () => {
     expect(pages).toContain('/?metier=pac-clim-cvc,isolation&region=bretagne&departement=29&rge=1&prix_max=500000&tri=prix_desc&page=2');
     const ld = Array.from(document.head.querySelectorAll('script[type="application/ld+json"]')).map((s) => JSON.parse(s.textContent));
     const list = ld.find((o) => o['@type'] === 'ItemList');
-    expect(list.itemListElement.map((i) => i.url)).toEqual([expect.stringMatching(/\/company\/c1$/), expect.stringMatching(/\/company\/c2$/)]);
+    expect(list.itemListElement.map((i) => i.url)).toEqual([expect.stringMatching(/\/property\/c1$/), expect.stringMatching(/\/property\/c2$/)]);
     expect(ld.find((o) => o['@type'] === 'Organization')).toBeTruthy();
     expect(document.head.querySelector('link[rel="canonical"]').getAttribute('href')).toMatch(/\/$/);
     expect(c.textContent).not.toMatch(NO_ZERO);
   });
 
   test('modifier un filtre met l\'URL à jour (page 1) et relance la recherche', async () => {
-    mockCompanies([listing('c1')], 1);
+    mockProperties([listing('c1')], 1);
     const c = await render(<ListingsPage user={null} />, '/?region=bretagne&page=3');
     await click(c.querySelector('#filtres-metier-electricite'));
     expect(where(c)).toBe('/?metier=electricite&region=bretagne');
@@ -224,7 +224,7 @@ describe('page des annonces', () => {
   });
 
   test('aucun résultat : jamais « 0 », titre de l\'état vide, « Effacer les filtres », alerte préremplie', async () => {
-    mockCompanies([], 0);
+    mockProperties([], 0);
     const c = await render(<ListingsPage user={null} />, '/?metier=isolation&region=corse&prix_max=300000');
     const empty = c.querySelector('[data-testid="listings-empty"]');
     expect(empty.querySelector('h2').textContent).toBe('Aucune annonce ne correspond pour l\'instant');
@@ -240,31 +240,31 @@ describe('page des annonces', () => {
   });
 
   test('sans filtre : nombre d\'annonces affiché seulement à partir de 3', async () => {
-    mockCompanies([listing('c1'), listing('c2')], 2);
+    mockProperties([listing('c1'), listing('c2')], 2);
     const few = await render(<ListingsPage user={null} />);
     expect(few.querySelector('[data-testid="listings-total"]')).toBeNull();
     expect(few.querySelector('[data-testid="results-count"]').textContent).toBe('');
     expect(few.querySelector('[data-testid="listings-empty"]')).toBeNull();
     expect(few.querySelector('[data-testid="empty-reset"]')).toBeNull();
-    mockCompanies([listing('c1'), listing('c2'), listing('c3')], 3);
+    mockProperties([listing('c1'), listing('c2'), listing('c3')], 3);
     const many = await render(<ListingsPage user={null} />);
     expect(many.querySelector('[data-testid="listings-total"]').textContent).toBe('3 annonces en ligne');
   });
 
   test('anciens paramètres : URL canonique sans entrée d\'historique, une seule recherche', async () => {
-    mockCompanies([listing('c1')], 1);
+    mockProperties([listing('c1')], 1);
     const c = await render(<ListingsPage user={null} />, '/?metiers=isolation&region=Bretagne&max_price=300000&utm_source=wp');
     expect(where(c)).toBe('/?metier=isolation&region=bretagne&prix_max=300000&utm_source=wp');
-    expect(companiesCalls()).toHaveLength(1);
+    expect(propertiesCalls()).toHaveLength(1);
     expect(lastParams()).toMatchObject({ trades: 'isolation', region: 'Bretagne', max_price: 300000 });
   });
 
   test('chiffre d\'affaires et effectif minimum : filtrés par le serveur (min_ca, min_staff), une seule requête', async () => {
-    mockCompanies([listing('a', { ca_n: 1200000, staff_count: 12 })], 1);
+    mockProperties([listing('a', { ca_n: 1200000, staff_count: 12 })], 1);
     const c = await render(<ListingsPage user={null} />, '/?ca_min=1000000&effectif_min=10');
-    expect(companiesCalls()).toHaveLength(1);
+    expect(propertiesCalls()).toHaveLength(1);
     expect(lastParams()).toMatchObject({ min_ca: 1000000, min_staff: 10, limit: 24, page: 1 });
-    expect(Array.from(c.querySelectorAll('[data-testid="listing-card-link"]')).map((a) => a.getAttribute('href'))).toEqual(['/company/a']);
+    expect(Array.from(c.querySelectorAll('[data-testid="listing-card-link"]')).map((a) => a.getAttribute('href'))).toEqual(['/property/a']);
     expect(c.querySelector('[data-testid="results-count"]').textContent).toBe('1 annonce');
   });
 
@@ -272,13 +272,13 @@ describe('page des annonces', () => {
     axios.get.mockRejectedValue(new Error('réseau'));
     const c = await render(<ListingsPage user={null} />);
     expect(c.querySelector('[data-testid="listings-error"]').textContent).toContain('Réessayer');
-    mockCompanies([listing('c1')], 1);
+    mockProperties([listing('c1')], 1);
     await click(c.querySelector('[data-testid="listings-error"] button'));
     expect(c.querySelectorAll('[data-testid="listing-card"]')).toHaveLength(1);
   });
 
   test('mobile : bouton « Filtres (n) », panneau plein écran, application au clic', async () => {
-    mockCompanies([listing('c1')], 1);
+    mockProperties([listing('c1')], 1);
     const c = await render(<ListingsPage user={null} />, '/?region=bretagne');
     await click(c.querySelector('[data-testid="mobile-filters-btn"]'));
     const panel = c.querySelector('[data-testid="mobile-filters"]');
@@ -294,12 +294,12 @@ describe('page des annonces', () => {
   });
 
   test('favoris : visiteur → inscription repreneur ; repreneur → POST /favorites ; cédant : pas de cœur', async () => {
-    mockCompanies([listing('c1')], 1);
+    mockProperties([listing('c1')], 1);
     const visitor = await render(<ListingsPage user={null} />, '/?metier=isolation');
     await click(visitor.querySelector('[data-testid="favorite-toggle"]'));
     expect(where(visitor)).toBe(`/register?role=buyer&redirect=${encodeURIComponent('/?metier=isolation')}`);
 
-    axiosInstance.get.mockResolvedValue({ data: { favorites: [{ company_id: 'c1' }] } });
+    axiosInstance.get.mockResolvedValue({ data: { favorites: [{ property_id: 'c1' }] } });
     const buyer = await render(<ListingsPage user={{ id: 'b1', role: 'buyer' }} />);
     expect(axiosInstance.get).toHaveBeenCalledWith('/favorites', { skipAuthRedirect: true });
     const heart = buyer.querySelector('[data-testid="favorite-toggle"]');
@@ -308,7 +308,7 @@ describe('page des annonces', () => {
     expect(axiosInstance.delete).toHaveBeenCalledWith('/favorites/c1');
     expect(heart.getAttribute('aria-pressed')).toBe('false');
     await click(heart);
-    expect(axiosInstance.post).toHaveBeenCalledWith('/favorites', { company_id: 'c1' });
+    expect(axiosInstance.post).toHaveBeenCalledWith('/favorites', { property_id: 'c1' });
 
     const seller = await render(<ListingsPage user={{ id: 's1', role: 'seller' }} />);
     expect(seller.querySelector('[data-testid="favorite-toggle"]')).toBeNull();
@@ -317,7 +317,7 @@ describe('page des annonces', () => {
   });
 
   test('historique : un réglage de filtre ou de tri remplace l\'adresse, la validation du panneau mobile en ajoute une', async () => {
-    mockCompanies([listing('c1')], 1);
+    mockProperties([listing('c1')], 1);
     const c = await render(<ListingsPage user={null} />, '/?region=bretagne');
     await click(c.querySelector('#filtres-metier-electricite'));
     expect(navType(c)).toBe('REPLACE');
@@ -337,13 +337,13 @@ describe('page des annonces', () => {
     expect(showResultsLabel(0)).toBe('Aucune annonce : créer une alerte');
     expect(showResultsLabel(1)).toBe('Afficher 1 annonce');
     expect(showResultsLabel(3)).toBe('Afficher 3 annonces');
-    mockCompanies([listing('c1')], 3);
+    mockProperties([listing('c1')], 3);
     const c = await render(<ListingsPage user={null} />, '/?region=bretagne');
     await click(c.querySelector('[data-testid="mobile-filters-btn"]'));
     await wait(350);
     expect(lastParams()).toMatchObject({ region: 'Bretagne', limit: 1 });
     expect(c.querySelector('[data-testid="mobile-filters-apply"]').textContent).toBe('Afficher 3 annonces');
-    mockCompanies([], 0);
+    mockProperties([], 0);
     await click(c.querySelector('#mobile-metier-isolation'));
     await wait(350);
     expect(lastParams()).toMatchObject({ trades: 'isolation', region: 'Bretagne', limit: 1 });
@@ -357,7 +357,7 @@ describe('page des annonces', () => {
     expect(searchHeading({ trades: [], region: 'Pays de la Loire' })).toBe('Entreprises du bâtiment à vendre dans les Pays de la Loire');
     expect(searchHeading({ trades: ['isolation', 'electricite'], region: 'Bretagne' })).toBeNull();
     expect(searchHeading({ trades: [], region: '' })).toBeNull();
-    mockCompanies([listing('c1'), listing('c2'), listing('c3')], 3);
+    mockProperties([listing('c1'), listing('c2'), listing('c3')], 3);
     const c = await render(<ListingsPage user={null} />, '/?metier=pac-clim-cvc&region=bretagne&prix_max=500000');
     expect(c.querySelector('h1').textContent).toBe('Entreprises de PAC, climatisation à vendre en Bretagne');
     expect(document.title).toMatch(/^Entreprises de PAC, climatisation à vendre en Bretagne \| /);
@@ -366,21 +366,21 @@ describe('page des annonces', () => {
   });
 
   test('JSON-LD ItemList : jamais d\'annonce de test', async () => {
-    mockCompanies([listing('reelle'), listing('fictive', { is_test: true })], 2);
+    mockProperties([listing('reelle'), listing('fictive', { is_test: true })], 2);
     await render(<ListingsPage user={null} />);
     const ld = Array.from(document.head.querySelectorAll('script[type="application/ld+json"]')).map((x) => JSON.parse(x.textContent));
     const list = ld.find((o) => o['@type'] === 'ItemList');
-    expect(list.itemListElement.map((i) => i.url)).toEqual([expect.stringMatching(/\/company\/reelle$/)]);
+    expect(list.itemListElement.map((i) => i.url)).toEqual([expect.stringMatching(/\/property\/reelle$/)]);
   });
 
   test('repreneur connecté : pas d\'encart « Vous vendez ? »', async () => {
-    mockCompanies([listing('c1')], 1);
+    mockProperties([listing('c1')], 1);
     const c = await render(<ListingsPage user={{ id: 'b1', role: 'buyer' }} />);
     expect(c.querySelector('[data-testid="seller-callout"]')).toBeNull();
   });
 
   test('encart cédant pour un visiteur : inscription cédant, événement hero_cta_seller', async () => {
-    mockCompanies([listing('c1')], 1);
+    mockProperties([listing('c1')], 1);
     const c = await render(<ListingsPage user={null} />);
     const link = c.querySelector('[data-testid="seller-callout"] a');
     expect(link.getAttribute('href')).toBe('/register?role=seller');
@@ -405,7 +405,7 @@ describe('module intégrable /embed/annonces', () => {
     const parentDescriptor = Object.getOwnPropertyDescriptor(window, 'parent');
     Object.defineProperty(window, 'parent', { configurable: true, get: () => ({ postMessage }) });
     try {
-      mockCompanies([listing('c1'), listing('c2'), listing('c3')], 9);
+      mockProperties([listing('c1'), listing('c2'), listing('c3')], 9);
       const c = await render(<EmbedListingsPage />, '/embed/annonces?metier=isolation&rge=1&limit=3', '/embed/annonces');
       expect(lastParams()).toEqual({ trades: 'isolation', rge: 'true', sort: 'recent', limit: 3, page: 1 });
       expect(c.querySelectorAll('[data-testid="listing-card"]')).toHaveLength(3);
@@ -413,7 +413,7 @@ describe('module intégrable /embed/annonces', () => {
       const all = c.querySelector('[data-testid="embed-all"]');
       // Liens marqués : visites venues du site WordPress attribuables (utm), campagne reprise de ?campagne=
       expect(all.getAttribute('href')).toBe('/?metier=isolation&rge=1&utm_source=wordpress&utm_medium=embed');
-      expect(c.querySelector('[data-testid="listing-card-link"]').getAttribute('href')).toBe('/company/c1?utm_source=wordpress&utm_medium=embed');
+      expect(c.querySelector('[data-testid="listing-card-link"]').getAttribute('href')).toBe('/property/c1?utm_source=wordpress&utm_medium=embed');
       expect(all.getAttribute('target')).toBe('_top');
       expect(c.querySelector('[data-testid="app-header"]')).toBeNull();
       expect(c.querySelector('[data-testid="app-footer"]')).toBeNull();
@@ -425,7 +425,7 @@ describe('module intégrable /embed/annonces', () => {
   });
 
   test('aucune annonce : phrase sans « 0 » et lien vers toutes les annonces', async () => {
-    mockCompanies([], 0);
+    mockProperties([], 0);
     const c = await render(<EmbedListingsPage />, '/embed/annonces?region=corse', '/embed/annonces');
     expect(c.querySelector('[data-testid="embed-empty"]').textContent).toBe('Aucune annonce ne correspond pour l\'instant.');
     expect(c.textContent).not.toMatch(NO_ZERO);
@@ -435,7 +435,7 @@ describe('module intégrable /embed/annonces', () => {
   test('marqueurs de campagne : utm_source, utm_medium, utm_campaign repris de ?campagne=', async () => {
     expect(embedTracking('')).toBe('utm_source=wordpress&utm_medium=embed');
     expect(embedTracking('campagne=page-pac')).toBe('utm_source=wordpress&utm_medium=embed&utm_campaign=page-pac');
-    mockCompanies([listing('c1')], 1);
+    mockProperties([listing('c1')], 1);
     const c = await render(<EmbedListingsPage />, '/embed/annonces?campagne=accueil', '/embed/annonces');
     expect(c.querySelector('[data-testid="embed-all"]').getAttribute('href')).toBe('/?utm_source=wordpress&utm_medium=embed&utm_campaign=accueil');
   });

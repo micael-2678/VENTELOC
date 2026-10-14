@@ -29,8 +29,8 @@ const StageTrack = ({ stage }) => {
 
 const rowLink = (row) => {
   if (row.closing?.id) return `/vente/${row.closing.id}`;
-  if (row.stage === 'offer' || row.stage === 'dataroom' || row.stage === 'nda' || row.stage === 'requested') return `/dataroom/${row.companyId}`;
-  return `/messages?conversation=${encodeURIComponent(row.conversationId || row.companyId)}`;
+  if (row.stage === 'offer' || row.stage === 'dataroom' || row.stage === 'nda' || row.stage === 'requested') return `/dataroom/${row.propertyId}`;
+  return `/messages?conversation=${encodeURIComponent(row.conversationId || row.propertyId)}`;
 };
 
 const PipelineList = ({ rows }) => {
@@ -48,11 +48,11 @@ const PipelineList = ({ rows }) => {
     <ul className="space-y-2" data-testid="pipeline-list">
       {list.map((row) => {
         const stage = PIPELINE_STAGES[STAGE_INDEX[row.stage] ?? 0];
-        const title = row.title || (row.company ? listingTitle(row.company) : 'Annonce');
-        const price = row.company?.asking_price;
+        const title = row.title || (row.property ? listingTitle(row.property) : 'Annonce');
+        const price = row.property?.asking_price;
         return (
-          <li key={row.companyId} className="min-w-0">
-            <Link to={rowLink(row)} className="card card-hover card-link p-4 flex items-center gap-3 min-w-0" data-testid={`pipeline-${row.companyId}`}>
+          <li key={row.propertyId} className="min-w-0">
+            <Link to={rowLink(row)} className="card card-hover card-link p-4 flex items-center gap-3 min-w-0" data-testid={`pipeline-${row.propertyId}`}>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2 min-w-0">
                   <p className="font-display font-bold text-brand-navy leading-snug break-words">{title}</p>

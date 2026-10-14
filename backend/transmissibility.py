@@ -5,10 +5,10 @@ Règles françaises de transfert des qualifications RGE (Qualibat, Qualit'EnR �
 Qualisol —, Qualifelec, Certibat, RGE Études), référent technique, assurance décennale, chantiers aidés en cours
 et réforme 2026-2027, sous forme de constantes en français rendues par le front.
 
-- build_diagnostic(company_or_qualifications, with_financials=False) : diagnostic à partir d'une liste de
-  qualifications (ADEME) ou d'une annonce (`company`, avec ses réponses « ce qui rassure un repreneur »).
-- GET /rge/company/{siret}/transmissibility : version courte publique (ADEME, sans données financières).
-- GET /companies/{company_id}/transmissibility : version complète pour le cédant, l'admin et les repreneurs
+- build_diagnostic(property_or_qualifications, with_financials=False) : diagnostic à partir d'une liste de
+  qualifications (ADEME) ou d'une annonce (`property`, avec ses réponses « ce qui rassure un repreneur »).
+- GET /rge/property/{siret}/transmissibility : version courte publique (ADEME, sans données financières).
+- GET /properties/{property_id}/transmissibility : version complète pour le cédant, l'admin et les repreneurs
   dont l'accès à la data room est accordé.
 
 Sources : règlement général Qualibat (vente / changement de majorité, retour du certificat), Qualit'EnR
@@ -28,7 +28,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 import server
 from events import SlidingWindowLimiter, check_rate_limit
-from server import db, get_current_user, is_company_owner
+from server import db, get_current_user, is_property_owner
 
 logger = logging.getLogger("transmissibility")
 router = APIRouter()
@@ -328,7 +328,7 @@ def normalize_qualification(entry: Any, source: str = "ademe") -> Dict[str, Any]
 
 
 def normalize_ademe(raw: Any) -> Dict[str, Any]:
-    """Résultat de server.get_company_qualifications → {available, found, company, qualifications, organismes,
+    """Résultat de server.get_property_qualifications → {available, found, property, qualifications, organismes,
     domaines, verified_at, message}. Les dates viennent de `details` quand la route les fournit."""
     raw = raw if isinstance(raw, dict) else {}
     if raw.get("error"):
@@ -363,12 +363,12 @@ def normalize_ademe(raw: Any) -> Dict[str, Any]:
             if (q["name"], q["organisme"]) not in seen:
                 seen.add((q["name"], q["organisme"]))
                 qualifications.append(q)
-    company = raw.get("company") or {}
+    property = raw.get("company") or {}
     return {
         "available": True,
         "found": True,
-        "company": {"siret": company.get("siret"), "nom_entreprise": company.get("nom_entreprise", ""),
-                    "code_postal": company.get("code_postal"), "commune": company.get("commune")},
+        "company": {"siret": property.get("siret"), "nom_entreprise": property.get("nom_entreprise", ""),
+                    "code_postal": property.get("code_postal"), "commune": property.get("commune")},
         "qualifications": qualifications,
         "organismes": sorted({q["organisme_label"] for q in qualifications} | set(raw.get("organismes") or [])),
         "domaines": sorted(set(raw.get("domaines") or []) | {q["domaine"] for q in qualifications if q["domaine"]}),
@@ -379,9 +379,9 @@ def normalize_ademe(raw: Any) -> Dict[str, Any]:
 
 async def fetch_ademe_qualifications(siret: str) -> Dict[str, Any]:
     """Qualifications RGE d'un SIRET d'après la liste ADEME, via la route existante de server.py
-    (GET /rge/company/{siret}/qualifications). Jamais bloquant : `available: False` en cas de panne."""
+    (GET /rge/property/{siret}/qualifications). Jamais bloquant : `available: False` en cas de panne."""
     try:
-        raw = await server.get_company_qualifications(siret)
+        raw = await server.get_property_qualifications(siret)
     except Exception as e:  # réseau, délai, réponse inattendue
         logger.warning("ADEME indisponible pour %s : %s", siret, e)
         return normalize_ademe({"found": False, "error": str(e)})
@@ -392,18 +392,18 @@ async def fetch_ademe_qualifications(siret: str) -> Dict[str, Any]:
 # Diagnostic
 
 
-def _qualifications_from_company(company: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _qualifications_from_property(property: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Qualifications d'une annonce : ADEME si disponibles (`ademe_qualifications`), sinon déclaratives."""
-    ademe = company.get("ademe_qualifications")
+    ademe = property.get("ademe_qualifications")
     if isinstance(ademe, list) and ademe:
         return [normalize_qualification(q, "ademe") for q in ademe]
     out: List[Dict[str, Any]] = []
-    for label in company.get("rge_types") or []:
+    for label in property.get("rge_types") or []:
         q = normalize_qualification({"name": label, "organisme_key": "autre", "organisme": "",
-                                     "date_fin": company.get("rge_validity")}, "declaration")
+                                     "date_fin": property.get("rge_validity")}, "declaration")
         q["organisme_label"] = "Organisme non précisé"
         out.append(q)
-    for ident in company.get("other_qualifications") or []:
+    for ident in property.get("other_qualifications") or []:
         key = _DECLARED_ORGANISME.get(str(ident).strip().lower())
         if key:
             out.append(normalize_qualification({"name": ORGANISMES[key]["label"], "organisme_key": key,
@@ -445,7 +445,7 @@ def _transfer_block(organismes: List[Dict[str, Any]], sale_object: Optional[str]
     }
 
 
-def _level(qualifications: List[Dict[str, Any]], statuses: List[Dict[str, Any]], company: Optional[Dict[str, Any]],
+def _level(qualifications: List[Dict[str, Any]], statuses: List[Dict[str, Any]], property: Optional[Dict[str, Any]],
            with_financials: bool) -> Dict[str, Any]:
     reasons: List[str] = []
     if not qualifications:
@@ -461,14 +461,14 @@ def _level(qualifications: List[Dict[str, Any]], statuses: List[Dict[str, Any]],
     elif soon:
         score = min(score, 1)
         reasons.append("Qualification à renouveler dans les six mois : " + ", ".join(soon) + ".")
-    if not company or not with_financials:
+    if not property or not with_financials:
         if score == 2:
             reasons.append("Qualifications en cours de validité d'après la liste ADEME.")
         reasons.append("Référent technique, assurance décennale et chantiers aidés : informations non renseignées par le cédant.")
         return {"value": "a-completer" if score == 2 else ("moyenne" if score == 1 else "fragile"),
                 "label": LEVELS["a-completer" if score == 2 else ("moyenne" if score == 1 else "fragile")],
                 "reasons": reasons}
-    referent = company.get("technical_referent_stays")
+    referent = property.get("technical_referent_stays")
     if referent is False:
         score = min(score, 1)
         reasons.append("Le référent technique ne reste pas : un remplaçant formé doit être déclaré sous six mois.")
@@ -477,25 +477,25 @@ def _level(qualifications: List[Dict[str, Any]], statuses: List[Dict[str, Any]],
         reasons.append("Référent technique : situation non renseignée.")
     else:
         reasons.append("Le référent technique reste dans l'entreprise.")
-    if company.get("decennale_ok") is False:
+    if property.get("decennale_ok") is False:
         score = 0
         reasons.append("Assurance décennale non à jour.")
-    elif company.get("decennale_ok") is None:
+    elif property.get("decennale_ok") is None:
         reasons.append("Assurance décennale : à vérifier (attestation et relevé de sinistralité).")
-    sale_object = str(company.get("sale_object") or "").lower()
+    sale_object = str(property.get("sale_object") or "").lower()
     if sale_object == "fonds":
         score = min(score, 1)
         reasons.append("Cession de fonds envisagée : les qualifications ne se transmettent pas, nouvelle demande du repreneur.")
     elif sale_object == "titres":
         reasons.append("Cession de titres envisagée : les qualifications suivent la société.")
-    handover = company.get("handover_months")
+    handover = property.get("handover_months")
     if isinstance(handover, (int, float)) and handover >= 3:
         reasons.append(f"Accompagnement prévu : {int(handover)} mois, utile pour la transition du référent.")
     value = {2: "elevee", 1: "moyenne", 0: "fragile"}[score]
     return {"value": value, "label": LEVELS[value], "reasons": reasons}
 
 
-def _checklist(company: Dict[str, Any], qualifications: List[Dict[str, Any]], statuses: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _checklist(property: Dict[str, Any], qualifications: List[Dict[str, Any]], statuses: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     def tri(value: Any, ok_text: str, ko_text: str, unknown_text: str) -> Dict[str, Any]:
         if value is True:
             return {"status": "ok", "detail": ok_text}
@@ -523,61 +523,61 @@ def _checklist(company: Dict[str, Any], qualifications: List[Dict[str, Any]], st
                                      "attention": "Au moins une qualification est expirée ou arrive à échéance dans les six mois.",
                                      "inconnu": "Dates de validité non disponibles (qualifications déclarées, non vérifiées)."}[worst]})
     items.append({"key": "referent", "label": "Référent technique conservé",
-                  **tri(company.get("technical_referent_stays"),
+                  **tri(property.get("technical_referent_stays"),
                         "Le référent technique reste après la cession.",
                         "Le référent part : prévoir un remplaçant formé (délai de six mois).",
                         "À renseigner par le cédant.")})
     items.append({"key": "decennale", "label": "Assurance décennale à jour",
-                  **tri(company.get("decennale_ok"), "Attestation à jour déclarée.",
+                  **tri(property.get("decennale_ok"), "Attestation à jour déclarée.",
                         "Décennale non à jour : à régulariser avant la cession.", "À vérifier avec l'attestation.")})
     items.append({"key": "sale_object", "label": "Forme de cession",
                   **{"titres": {"status": "ok", "detail": "Cession de titres : les qualifications suivent la société."},
                      "fonds": {"status": "attention", "detail": "Cession de fonds : nouvelles demandes du repreneur."},
                      "indifferent": {"status": "ok", "detail": "Au choix des parties : la cession de titres conserve les qualifications."}
-                     }.get(str(company.get("sale_object") or "").lower(),
+                     }.get(str(property.get("sale_object") or "").lower(),
                            {"status": "inconnu", "detail": "Forme de cession non renseignée."})})
     items.append({"key": "key_staff", "label": "Équipe clé conservée",
-                  **tri(company.get("key_staff_stays"), "Les salariés clés restent.",
+                  **tri(property.get("key_staff_stays"), "Les salariés clés restent.",
                         "Des salariés clés pourraient partir : à sécuriser.", "À renseigner par le cédant.")})
     items.append({"key": "handover", "label": "Accompagnement du cédant",
-                  **({"status": "ok", "detail": f"{int(company['handover_months'])} mois d'accompagnement prévus."}
-                     if isinstance(company.get("handover_months"), (int, float)) and company["handover_months"] >= 3
+                  **({"status": "ok", "detail": f"{int(property['handover_months'])} mois d'accompagnement prévus."}
+                     if isinstance(property.get("handover_months"), (int, float)) and property["handover_months"] >= 3
                      else {"status": "attention", "detail": "Accompagnement court ou non prévu : la transition du référent est à organiser."}
-                     if isinstance(company.get("handover_months"), (int, float))
+                     if isinstance(property.get("handover_months"), (int, float))
                      else {"status": "inconnu", "detail": "Durée d'accompagnement non renseignée."})})
     return items
 
 
-def build_diagnostic(company_or_qualifications: Union[Dict[str, Any], List[Any], None],
+def build_diagnostic(property_or_qualifications: Union[Dict[str, Any], List[Any], None],
                      with_financials: bool = False, now: Optional[datetime] = None) -> Dict[str, Any]:
     """
     Diagnostic de transmissibilité.
     - liste : qualifications ADEME (dicts normalisés ou libellés) → version courte (sans données financières) ;
-    - dict : annonce (`company`), éventuellement enrichie de `ademe_qualifications` → avec `with_financials`,
+    - dict : annonce (`property`), éventuellement enrichie de `ademe_qualifications` → avec `with_financials`,
       ajoute la checklist, le niveau détaillé et les réponses « ce qui rassure un repreneur ».
     """
     now = now or datetime.now(timezone.utc)
-    company: Optional[Dict[str, Any]] = None
-    if isinstance(company_or_qualifications, dict):
-        company = company_or_qualifications
-        qualifications = _qualifications_from_company(company)
+    property: Optional[Dict[str, Any]] = None
+    if isinstance(property_or_qualifications, dict):
+        property = property_or_qualifications
+        qualifications = _qualifications_from_property(property)
     else:
-        qualifications = [normalize_qualification(q) for q in (company_or_qualifications or []) if q]
+        qualifications = [normalize_qualification(q) for q in (property_or_qualifications or []) if q]
     statuses = [qualification_status(q.get("date_fin"), now) for q in qualifications]
     for q, s in zip(qualifications, statuses):
         q.update(s)
     organismes = _organismes_block(qualifications)
-    sale_object = company.get("sale_object") if company else None
-    referent_stays = company.get("technical_referent_stays") if (company and with_financials) else None
-    decennale_ok = company.get("decennale_ok") if (company and with_financials) else None
+    sale_object = property.get("sale_object") if property else None
+    referent_stays = property.get("technical_referent_stays") if (property and with_financials) else None
+    decennale_ok = property.get("decennale_ok") if (property and with_financials) else None
     source = ("ademe" if any(q["source"] == "ademe" for q in qualifications)
               else "declaration" if qualifications else "aucune")
     diagnostic: Dict[str, Any] = {
         "generated_at": now.isoformat(),
-        "scope": "complet" if (company and with_financials) else "public",
+        "scope": "complet" if (property and with_financials) else "public",
         "is_rge": bool(qualifications),
         "source": source,
-        "verified_at": (company or {}).get("qualifications_verified_at") if company else None,
+        "verified_at": (property or {}).get("qualifications_verified_at") if property else None,
         "qualifications": qualifications,
         "organismes": organismes,
         "transfer": _transfer_block(organismes, sale_object),
@@ -585,23 +585,23 @@ def build_diagnostic(company_or_qualifications: Union[Dict[str, Any], List[Any],
         "decennale": {**DECENNALE, "ok": decennale_ok},
         "aides": dict(AIDES),
         "reforme": [dict(r) for r in REFORME],
-        "level": _level(qualifications, statuses, company, with_financials),
+        "level": _level(qualifications, statuses, property, with_financials),
         "disclaimer": DISCLAIMER,
     }
-    if company and with_financials:
-        diagnostic["checklist"] = _checklist(company, qualifications, statuses)
+    if property and with_financials:
+        diagnostic["checklist"] = _checklist(property, qualifications, statuses)
         diagnostic["financials"] = {
             "sale_object": sale_object,
-            "handover_months": company.get("handover_months"),
-            "has_maintenance_contracts": company.get("has_maintenance_contracts"),
+            "handover_months": property.get("handover_months"),
+            "has_maintenance_contracts": property.get("has_maintenance_contracts"),
             "technical_referent_stays": referent_stays,
-            "key_staff_stays": company.get("key_staff_stays"),
+            "key_staff_stays": property.get("key_staff_stays"),
             "decennale_ok": decennale_ok,
-            "staff_count": company.get("staff_count"),
-            "ca_n": company.get("ca_n"),
-            "ebitda": company.get("ebitda"),
-            "asking_price": company.get("asking_price"),
-            "rge_validity": company.get("rge_validity"),
+            "staff_count": property.get("staff_count"),
+            "ca_n": property.get("ca_n"),
+            "ebitda": property.get("ebitda"),
+            "asking_price": property.get("asking_price"),
+            "rge_validity": property.get("rge_validity"),
         }
     return diagnostic
 
@@ -617,7 +617,7 @@ def _clean_siret(siret: str) -> str:
     return digits
 
 
-@router.get("/rge/company/{siret}/transmissibility")
+@router.get("/rge/property/{siret}/transmissibility")
 async def public_transmissibility(siret: str, request: Request):
     """Version courte publique : qualifications ADEME du SIRET + règles de transfert, sans données financières."""
     check_rate_limit(request, public_limiter, "transmissibility")
@@ -638,35 +638,35 @@ async def public_transmissibility(siret: str, request: Request):
     }
 
 
-async def has_dataroom_access(company: Dict[str, Any], user: Dict[str, Any]) -> bool:
+async def has_dataroom_access(property: Dict[str, Any], user: Dict[str, Any]) -> bool:
     """Vendeur de l'annonce, admin, ou repreneur dont l'accès à la data room est accordé."""
     if not user:
         return False
-    if user.get("role") == "admin" or is_company_owner(company, user):
+    if user.get("role") == "admin" or is_property_owner(property, user):
         return True
-    access = await db.dataroom_access.find_one({"company_id": company["id"], "buyer_id": user["id"]},
+    access = await db.dataroom_access.find_one({"property_id": property["id"], "buyer_id": user["id"]},
                                                {"_id": 0, "status": 1})
     return bool(access and access.get("status") in NDA_ACCESS_STATUSES)
 
 
-@router.get("/companies/{company_id}/transmissibility")
-async def company_transmissibility(company_id: str, current_user: dict = Depends(get_current_user)):
+@router.get("/properties/{property_id}/transmissibility")
+async def property_transmissibility(property_id: str, current_user: dict = Depends(get_current_user)):
     """Version complète : qualifications (ADEME si le SIRET est connu, sinon déclarées), référent, décennale, checklist."""
-    company = await db.companies.find_one({"id": company_id}, {"_id": 0})
-    if not company:
+    property = await db.properties.find_one({"id": property_id}, {"_id": 0})
+    if not property:
         raise HTTPException(status_code=404, detail="Annonce introuvable")
-    if not await has_dataroom_access(company, current_user):
+    if not await has_dataroom_access(property, current_user):
         raise HTTPException(status_code=403, detail="Diagnostic réservé au cédant et aux repreneurs ayant accès à la data room")
-    siret = re.sub(r"\D", "", company.get("siret") or "")
+    siret = re.sub(r"\D", "", property.get("siret") or "")
     ademe: Dict[str, Any] = {"available": False, "found": False, "qualifications": [], "message": ""}
-    if len(siret) == 14 and (company.get("rge_types") or company.get("is_rge")):
+    if len(siret) == 14 and (property.get("rge_types") or property.get("is_rge")):
         ademe = await fetch_ademe_qualifications(siret)
         if ademe["found"]:
-            company["ademe_qualifications"] = ademe["qualifications"]
-            company["qualifications_verified_at"] = ademe.get("verified_at")
-    diagnostic = build_diagnostic(company, with_financials=True)
+            property["ademe_qualifications"] = ademe["qualifications"]
+            property["qualifications_verified_at"] = ademe.get("verified_at")
+    diagnostic = build_diagnostic(property, with_financials=True)
     return {
-        "company_id": company_id,
+        "property_id": property_id,
         "ademe": {"available": ademe.get("available", False), "found": ademe.get("found", False),
                   "message": ademe.get("message") or ""},
         "diagnostic": diagnostic,

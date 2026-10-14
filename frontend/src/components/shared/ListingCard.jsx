@@ -7,10 +7,10 @@ import { PILL } from './buttonStyles';
 import { formatPrice, formatCompactEuros, formatDateFr, relativeDateFr, plural, deActivity } from './formatters';
 
 // Carte d'annonce unique (page des annonces, module WordPress, favoris, aperçu du cédant) — MODE-TEST-ET-APP.md §A.3.
-// `company` est l'objet renvoyé par l'API : title, trades, rge_types, other_qualifications, region, department,
-// staff_count, ca_n, ebitda, asking_price, published_at / created_at, is_rge, company_checks, commission_payer (héritage).
+// `property` est l'objet renvoyé par l'API : title, trades, rge_types, other_qualifications, region, department,
+// staff_count, ca_n, ebitda, asking_price, published_at / created_at, is_rge, property_checks, commission_payer (héritage).
 // Jamais de nom ni de coordonnées : seulement ce que l'annonce anonyme montre.
-// Toute la carte mène à /company/:id (lien étiré sur le titre) ; le cœur reste un bouton distinct, au-dessus du lien.
+// Toute la carte mène à /property/:id (lien étiré sur le titre) ; le cœur reste un bouton distinct, au-dessus du lien.
 
 const safe = (fn, fallback = '') => {
   try {
@@ -33,26 +33,26 @@ const hasNumber = (v) => v !== null && v !== undefined && v !== '' && Number.isF
 const hasStaff = (c) => c && hasNumber(c.staff_count);
 
 // Titre affiché : celui généré par le serveur, sinon « Entreprise de {métier} · {région} · {n} salariés »
-export const listingTitle = (company) => {
-  if (company?.title) return String(company.title);
-  const trades = Array.isArray(company?.trades) ? company.trades : [];
-  const rge = Array.isArray(company?.rge_types) ? company.rge_types : [];
+export const listingTitle = (property) => {
+  if (property?.title) return String(property.title);
+  const trades = Array.isArray(property?.trades) ? property.trades : [];
+  const rge = Array.isArray(property?.rge_types) ? property.rge_types : [];
   const activity = (trades.length ? tradeShort(trades[0]) : '') || (rge.length ? rgeShort(rge[0]) : '') || 'bâtiment';
   const parts = [`Entreprise ${deActivity(activity)}`];
-  if (company?.region) parts.push(String(company.region));
-  if (hasStaff(company)) parts.push(plural(Number(company.staff_count), 'salarié'));
+  if (property?.region) parts.push(String(property.region));
+  if (hasStaff(property)) parts.push(plural(Number(property.staff_count), 'salarié'));
   return parts.join(' · ');
 };
 
 // Badge de qualification, trois cas distincts : « RGE vérifié ADEME » (vert, RGE retrouvé sur la base ADEME :
-// company_checks.in_ademe_list), « RGE déclaré » (gris, domaines RGE déclarés par le cédant, non confirmés), ou les
+// property_checks.in_ademe_list), « RGE déclaré » (gris, domaines RGE déclarés par le cédant, non confirmés), ou les
 // autres qualifications déclarées nommées (« Qualibat déclaré », « Qualifelec, IRVE déclarés »)
-export const qualificationBadge = (company) => {
-  const rge = Array.isArray(company?.rge_types) ? company.rge_types : [];
-  const isRge = company?.is_rge === true || rge.length > 0;
-  if (isRge && company?.company_checks?.in_ademe_list === true) return { kind: 'verified', label: 'RGE vérifié ADEME' };
+export const qualificationBadge = (property) => {
+  const rge = Array.isArray(property?.rge_types) ? property.rge_types : [];
+  const isRge = property?.is_rge === true || rge.length > 0;
+  if (isRge && property?.property_checks?.in_ademe_list === true) return { kind: 'verified', label: 'RGE vérifié ADEME' };
   if (isRge) return { kind: 'declared', label: 'RGE déclaré' };
-  const others = (Array.isArray(company?.other_qualifications) ? company.other_qualifications : [])
+  const others = (Array.isArray(property?.other_qualifications) ? property.other_qualifications : [])
     .map(qualificationName).filter(Boolean).filter((v, i, all) => all.indexOf(v) === i);
   if (!others.length) return null;
   const names = others.slice(0, 2).join(', ') + (others.length > 2 ? ` +${others.length - 2}` : '');
@@ -60,26 +60,26 @@ export const qualificationBadge = (company) => {
 };
 
 // Multiple prix demandé / EBE (« 2,8 × »), comme sur la fiche ; '' si l'un des deux manque
-export const priceToEbitda = (company) => {
-  const price = Number(company?.asking_price);
-  const ebitda = Number(company?.ebitda);
+export const priceToEbitda = (property) => {
+  const price = Number(property?.asking_price);
+  const ebitda = Number(property?.ebitda);
   if (!(price > 0) || !(ebitda > 0)) return '';
   return `${(price / ebitda).toFixed(1).replace('.', ',')}\u00a0×`;
 };
 
 // Ligne de localisation : le département (« Rhône (69) »), la région figurant déjà dans le titre généré ; la région
 // seule quand le département manque et que le titre ne la cite pas
-export const listingLocation = (company, title = listingTitle(company)) => {
-  const dep = company?.department ? departement(company.department) : '';
+export const listingLocation = (property, title = listingTitle(property)) => {
+  const dep = property?.department ? departement(property.department) : '';
   if (dep) return dep;
-  const region = company?.region ? String(company.region) : '';
+  const region = property?.region ? String(property.region) : '';
   return region && !String(title).includes(region) ? region : '';
 };
 
 // Pastilles d'activité : métiers (+ « +n »), sinon domaines RGE pour les anciennes annonces
-const activityChips = (company, max) => {
-  const trades = Array.isArray(company?.trades) ? company.trades.map(tradeShort).filter(Boolean) : [];
-  const source = trades.length ? trades : (Array.isArray(company?.rge_types) ? company.rge_types.map(rgeShort).filter(Boolean) : []);
+const activityChips = (property, max) => {
+  const trades = Array.isArray(property?.trades) ? property.trades.map(tradeShort).filter(Boolean) : [];
+  const source = trades.length ? trades : (Array.isArray(property?.rge_types) ? property.rge_types.map(rgeShort).filter(Boolean) : []);
   const unique = source.filter((v, i) => source.indexOf(v) === i);
   return { shown: unique.slice(0, max), more: Math.max(0, unique.length - max) };
 };
@@ -92,7 +92,7 @@ const Metric = ({ label, title, children }) => (
 );
 
 const ListingCard = ({
-  company,
+  property,
   compact = false,
   source = 'list',
   headingLevel = 'h3',
@@ -104,24 +104,24 @@ const ListingCard = ({
   onToggleFavorite,
   now,
 }) => {
-  if (!company || !company.id) return null;
+  if (!property || !property.id) return null;
   const Heading = headingLevel;
-  const title = listingTitle(company);
-  const badge = qualificationBadge(company);
-  const chips = activityChips(company, compact ? 2 : 3);
-  const dateIso = company.published_at || company.created_at || '';
+  const title = listingTitle(property);
+  const badge = qualificationBadge(property);
+  const chips = activityChips(property, compact ? 2 : 3);
+  const dateIso = property.published_at || property.created_at || '';
   const relative = relativeDateFr(dateIso, now || new Date());
-  const location = listingLocation(company, title);
-  const legacyBuyerPays = company.commission_payer === 'repreneur';
-  const showEbitda = hasNumber(company.ebitda) && Number(company.ebitda) !== 0;
+  const location = listingLocation(property, title);
+  const legacyBuyerPays = property.commission_payer === 'repreneur';
+  const showEbitda = hasNumber(property.ebitda) && Number(property.ebitda) !== 0;
   // Troisième mesure : multiple prix/EBE (comparable d'une carte à l'autre) ; l'effectif, déjà dans le titre, sinon
-  const multiple = priceToEbitda(company);
-  const href = `/company/${company.id}${linkQuery ? `?${String(linkQuery).replace(/^\?/, '')}` : ''}`;
+  const multiple = priceToEbitda(property);
+  const href = `/property/${property.id}${linkQuery ? `?${String(linkQuery).replace(/^\?/, '')}` : ''}`;
   const canFavorite = typeof onToggleFavorite === 'function';
 
   const handleClick = (e) => {
-    trackEvent('listing_card_click', { listing: String(company.id), source });
-    if (typeof onClick === 'function') onClick(e, company);
+    trackEvent('listing_card_click', { listing: String(property.id), source });
+    if (typeof onClick === 'function') onClick(e, property);
   };
 
   return (
@@ -143,12 +143,12 @@ const ListingCard = ({
             </span>
           )}
           {/* Mode test (MODE-TEST-ET-APP.md §B.2.7) : annonce fictive, signalée comme telle */}
-          {company?.is_test === true && <span className={cn(PILL, 'badge-warning')} data-testid="listing-card-test">Annonce de test</span>}
+          {property?.is_test === true && <span className={cn(PILL, 'badge-warning')} data-testid="listing-card-test">Annonce de test</span>}
         </div>
         {canFavorite && (
           <button
             type="button"
-            onClick={() => onToggleFavorite(company)}
+            onClick={() => onToggleFavorite(property)}
             aria-pressed={favorite}
             aria-label={favorite ? `Retirer des favoris : ${title}` : `Ajouter aux favoris : ${title}`}
             className={cn(
@@ -195,18 +195,18 @@ const ListingCard = ({
       )}
 
       <dl className={cn('mt-auto pt-3 border-t border-brand-line grid gap-3 min-w-0', showEbitda ? 'grid-cols-3' : 'grid-cols-2')}>
-        <Metric label="CA" title="Chiffre d'affaires">{hasNumber(company.ca_n) && Number(company.ca_n) > 0 ? formatCompactEuros(company.ca_n) : '—'}</Metric>
-        {showEbitda && <Metric label="EBE" title="Excédent brut d'exploitation">{formatCompactEuros(company.ebitda)}</Metric>}
+        <Metric label="CA" title="Chiffre d'affaires">{hasNumber(property.ca_n) && Number(property.ca_n) > 0 ? formatCompactEuros(property.ca_n) : '—'}</Metric>
+        {showEbitda && <Metric label="EBE" title="Excédent brut d'exploitation">{formatCompactEuros(property.ebitda)}</Metric>}
         {multiple
           ? <Metric label="Prix/EBE" title="Prix demandé rapporté à l'excédent brut d'exploitation">{multiple}</Metric>
-          : <Metric label="Effectif">{hasStaff(company) ? plural(Number(company.staff_count), 'salarié') : '—'}</Metric>}
+          : <Metric label="Effectif">{hasStaff(property) ? plural(Number(property.staff_count), 'salarié') : '—'}</Metric>}
       </dl>
 
       <div className="flex items-end justify-between gap-3 min-w-0">
         <div className="min-w-0">
           <p className="text-xs text-gray-500">Prix demandé</p>
           <p className={cn('font-display font-extrabold text-brand-navy tabular', compact ? 'text-lg' : 'text-xl')} data-testid="listing-card-price">
-            {formatPrice(company.asking_price)}
+            {formatPrice(property.asking_price)}
           </p>
         </div>
         {relative && (

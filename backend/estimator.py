@@ -1,10 +1,10 @@
 """
 Estimateur public de valeur (SPEC §4.2 point 1), sans compte et gratuit.
 
-- GET  /estimates/company/{siret} : préremplissage depuis l'open data (nom, NAF, création, effectif, département)
+- GET  /estimates/property/{siret} : préremplissage depuis l'open data (nom, NAF, création, effectif, département)
   et la liste ADEME (qualifications RGE) ; jamais bloquant (« vérification différée »).
 - POST /estimates {siret?, ca, ebe, staff, maintenance_contracts, team_stays, owner_dispensable, email?}
-  → {low, high, mid, method, drivers: [{label, effect}], pedagogy: [...], company, rge}.
+  → {low, high, mid, method, drivers: [{label, effect}], pedagogy: [...], property, rge}.
   Base : 0,3-0,6 × CA et 2,5-4 × EBE combinés (pondération 40 % CA / 60 % EBE), ajustements ±15 % selon les trois
   cases (±5 % chacune), minimum 10 000 €, arrondi à 5 000 €.
   Avec `email` : enregistrement dans db.estimates avec consentement + e-mail de confirmation (double opt-in).
@@ -201,35 +201,35 @@ def compute_estimate(ca: Optional[float], ebe: Optional[float], staff: Optional[
 DEFERRED_MESSAGE = "Vérification différée : l'annuaire des entreprises n'a pas répondu, vous pouvez continuer."
 
 
-def company_prefill(company: Dict[str, Any]) -> Dict[str, Any]:
+def company_prefill(property: Dict[str, Any]) -> Dict[str, Any]:
     """Champs d'annonce préremplis depuis opendata.lookup_siren (voir HANDOFF taxonomie-opendata §3)."""
-    if not company.get("available"):
-        return {"available": False, "found": False, "message": company.get("message") or DEFERRED_MESSAGE}
-    if not company.get("found"):
+    if not property.get("available"):
+        return {"available": False, "found": False, "message": property.get("message") or DEFERRED_MESSAGE}
+    if not property.get("found"):
         return {"available": True, "found": False,
-                "message": company.get("message") or "SIRET inconnu de l'annuaire des entreprises."}
-    trade = company.get("trade_suggestion")
+                "message": property.get("message") or "SIRET inconnu de l'annuaire des entreprises."}
+    trade = property.get("trade_suggestion")
     return {
         "available": True,
         "found": True,
         "message": "",
-        "siren": company.get("siren"),
-        "siret": company.get("siret"),
-        "company_name": company.get("nom_complet") or "",
-        "naf_code": company.get("naf") or "",
-        "naf_label": company.get("naf_libelle") or "",
-        "naf_in_building": company.get("naf_in_building"),
-        "creation_date": company.get("date_creation") or "",
-        "staff_count": company.get("effectif_estime"),
-        "staff_label": company.get("tranche_effectif_libelle") or "",
-        "department": company.get("departement") or "",
-        "department_label": company.get("departement_libelle") or "",
-        "region": company.get("region") or "",
-        "legal_structure": company.get("legal_structure") or "",
-        "forme_juridique": company.get("forme_juridique") or "",
+        "siren": property.get("siren"),
+        "siret": property.get("siret"),
+        "company_name": property.get("nom_complet") or "",
+        "naf_code": property.get("naf") or "",
+        "naf_label": property.get("naf_libelle") or "",
+        "naf_in_building": property.get("naf_in_building"),
+        "creation_date": property.get("date_creation") or "",
+        "staff_count": property.get("effectif_estime"),
+        "staff_label": property.get("tranche_effectif_libelle") or "",
+        "department": property.get("departement") or "",
+        "department_label": property.get("departement_libelle") or "",
+        "region": property.get("region") or "",
+        "legal_structure": property.get("legal_structure") or "",
+        "forme_juridique": property.get("forme_juridique") or "",
         "trades": [trade] if trade else [],
-        "etat": company.get("etat"),
-        "siren_active": company.get("siren_active"),
+        "etat": property.get("etat"),
+        "siren_active": property.get("siren_active"),
     }
 
 
@@ -264,14 +264,14 @@ def _clean_siret(value: Optional[str]) -> Optional[str]:
     return siret
 
 
-@router.get("/estimates/company/{siret}")
-async def estimate_company(siret: str, request: Request):
+@router.get("/estimates/property/{siret}")
+async def estimate_property(siret: str, request: Request):
     """Préremplissage de l'estimateur et de l'annonce : open data + qualifications RGE (ADEME)."""
     check_rate_limit(request, limiter, "estimates")
     siret_clean = _clean_siret(siret)
-    company = await lookup_company(siret_clean)
+    property = await lookup_company(siret_clean)
     rge = rge_summary(await transmissibility.fetch_ademe_qualifications(siret_clean))
-    return {"siret": siret_clean, "siren": siret_clean[:9], "company": company, "rge": rge}
+    return {"siret": siret_clean, "siren": siret_clean[:9], "company": property, "rge": rge}
 
 
 # ----------------------------------------------------------------------------------------------
@@ -301,7 +301,7 @@ def confirmation_link(token: str) -> str:
 
 
 async def _store_and_send_confirmation(email: str, payload: EstimateIn, result: Dict[str, Any], siret: Optional[str],
-                                       company: Dict[str, Any], rge: Dict[str, Any], request: Request) -> Dict[str, Any]:
+                                       property: Dict[str, Any], rge: Dict[str, Any], request: Request) -> Dict[str, Any]:
     now = datetime.now(timezone.utc)
     recent = await db.estimates.find_one({"email": email, "status": "pending_confirmation",
                                           "created_at": {"$gte": (now - RESEND_DELAY).isoformat()}}, {"_id": 0, "id": 1})
@@ -320,7 +320,7 @@ async def _store_and_send_confirmation(email: str, payload: EstimateIn, result: 
                    "maintenance_contracts": payload.maintenance_contracts, "team_stays": payload.team_stays,
                    "owner_dispensable": payload.owner_dispensable},
         "result": {k: result[k] for k in ("low", "high", "mid", "method", "method_code", "adjustment_percent")},
-        "company": {k: company.get(k) for k in COMPANY_STORED_FIELDS if company.get("found")},
+        "company": {k: property.get(k) for k in COMPANY_STORED_FIELDS if property.get("found")},
         "rge": {"found": rge.get("found"), "qualifications": rge.get("qualifications") or []},
         # Consentement : l'adresse est utilisée pour envoyer l'estimation ; confirmé par le lien (double opt-in)
         "consent": {"purpose": "estimation", "requested_at": now.isoformat(), "confirmed_at": None,
@@ -343,17 +343,17 @@ async def create_estimate(payload: EstimateIn, request: Request):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     siret = _clean_siret(payload.siret)
-    company: Dict[str, Any] = {"available": None, "found": False, "message": ""}
+    property: Dict[str, Any] = {"available": None, "found": False, "message": ""}
     rge: Dict[str, Any] = {"available": None, "found": False, "message": "", "qualifications": []}
     if siret:
-        company = await lookup_company(siret)
+        property = await lookup_company(siret)
         rge = rge_summary(await transmissibility.fetch_ademe_qualifications(siret))
-    response = {**result, "siret": siret, "company": company, "rge": rge,
+    response = {**result, "siret": siret, "company": property, "rge": rge,
                 "disclaimer": "Estimation indicative, gratuite et sans engagement : le prix final dépend des négociations et "
                               "de l'audit du repreneur."}
     if payload.email:
         response["email"] = await _store_and_send_confirmation(
-            str(payload.email).lower(), payload, result, siret, company, rge, request)
+            str(payload.email).lower(), payload, result, siret, property, rge, request)
     return response
 
 

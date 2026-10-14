@@ -18,9 +18,9 @@ const financingText = (financing) => {
   return Object.keys(FINANCING_LABELS).filter((k) => Number(f[k]) > 0).map((k) => `${FINANCING_LABELS[k]} ${formatPrice(f[k])}`).join(' · ');
 };
 
-const counterText = (offer, companyTitle) => [
+const counterText = (offer, propertyTitle) => [
   'ACCEPTATION DE LA CONTRE-PROPOSITION DU CÉDANT',
-  companyTitle ? `Entreprise : ${companyTitle}` : '',
+  propertyTitle ? `Entreprise : ${propertyTitle}` : '',
   `Offre initiale : ${formatPrice(offer.initial_amount || offer.amount)}`,
   `Contre-proposition du cédant : ${formatPrice(offer.counter_amount)}`,
   offer.counter_message ? `Message du cédant :\n${offer.counter_message}` : '',
@@ -32,7 +32,7 @@ export const OfferRow = ({ offer, onChanged }) => {
   const [signing, setSigning] = useState(false);
   const [acceptingCounter, setAcceptingCounter] = useState(false);
   const st = offerStatus(offer);
-  const title = offer.company?.title || offer.company_title || 'Annonce';
+  const title = offer.property?.title || offer.property_title || 'Annonce';
   const expiresIn = daysUntil(offer.expires_at);
   const conditions = Array.isArray(offer.conditions) ? offer.conditions.filter(Boolean) : [];
   const financing = financingText(offer.financing);
@@ -52,7 +52,7 @@ export const OfferRow = ({ offer, onChanged }) => {
       <div className="flex flex-wrap items-start justify-between gap-2 min-w-0">
         <div className="min-w-0">
           <p className="font-display font-bold text-brand-navy leading-snug break-words">
-            <Link to={`/company/${offer.company_id}`} className="hover:underline underline-offset-2">{title}</Link>
+            <Link to={`/property/${offer.property_id}`} className="hover:underline underline-offset-2">{title}</Link>
           </p>
           <p className="text-sm text-gray-600 mt-0.5">
             {SALE_OBJECT_LABELS[offer.sale_object] || ''}{offer.created_at ? ` · déposée le ${formatDateFr(offer.created_at)}` : ''}
@@ -119,7 +119,7 @@ export const OfferRow = ({ offer, onChanged }) => {
           </button>
         )}
         {offer.status === 'countered' && (
-          <Link to={`/messages?conversation=${encodeURIComponent(offer.conversation_id || offer.company_id)}`} className="btn-secondary px-4 py-2 text-sm">
+          <Link to={`/messages?conversation=${encodeURIComponent(offer.conversation_id || offer.property_id)}`} className="btn-secondary px-4 py-2 text-sm">
             Répondre au cédant
           </Link>
         )}
@@ -140,7 +140,7 @@ export const OfferRow = ({ offer, onChanged }) => {
           onClose={() => setSigning(false)}
           offer={offer}
           contractId={offer.contract_id}
-          companyTitle={title}
+          propertyTitle={title}
           onSigned={async (data) => { setSigning(false); if (typeof onChanged === 'function') await onChanged(data); }}
         />
       )}

@@ -55,12 +55,12 @@ const ConversationItem = ({ conversation, active, onSelect, isSeller }) => (
       data-testid={`conversation-${conversation.id}`}
     >
       <div className="flex items-start justify-between gap-2 min-w-0">
-        <span className="font-semibold text-sm text-brand-navy truncate">{isSeller ? conversation.other_party_label || 'Repreneur' : conversation.company_title || 'Annonce'}</span>
+        <span className="font-semibold text-sm text-brand-navy truncate">{isSeller ? conversation.other_party_label || 'Repreneur' : conversation.property_title || 'Annonce'}</span>
         {conversation.unread_count > 0 && (
           <span className="shrink-0 inline-flex items-center justify-center min-w-5 h-5 px-1 rounded-full bg-brand-amber text-white text-xs font-bold tabular" aria-label={`${conversation.unread_count} non lus`}>{conversation.unread_count}</span>
         )}
       </div>
-      {isSeller && conversation.company_title && <p className="text-xs text-gray-500 truncate">{conversation.company_title}</p>}
+      {isSeller && conversation.property_title && <p className="text-xs text-gray-500 truncate">{conversation.property_title}</p>}
       {!isSeller && conversation.other_party_label && <p className="text-xs text-gray-500 truncate">{conversation.other_party_label}</p>}
       <p className="text-sm text-gray-600 truncate mt-1">{conversation.last_message || '—'}</p>
       {conversation.last_at && <p className="text-xs text-gray-500 mt-0.5">{formatDateTimeFr(conversation.last_at)}</p>}
@@ -97,7 +97,7 @@ const MessagesPage = ({ user }) => {
   useEffect(() => {
     loadList().then((list) => {
       const wanted = searchParams.get('conversation');
-      const found = (wanted && list.find((c) => c.id === wanted || c.company_id === wanted)) || null;
+      const found = (wanted && list.find((c) => c.id === wanted || c.property_id === wanted)) || null;
       if (found) {
         setCurrent(found);
         setMobileView('thread');
@@ -149,7 +149,7 @@ const MessagesPage = ({ user }) => {
     setSending(true);
     try {
       const body = current.legacy
-        ? { receiver_id: current.receiver_id, company_id: current.company_id, content }
+        ? { receiver_id: current.receiver_id, property_id: current.property_id, content }
         : { conversation_id: current.id, content };
       const res = await axiosInstance.post('/messages', body);
       const sent = res.data || {};
@@ -172,7 +172,7 @@ const MessagesPage = ({ user }) => {
 
   const access = current ? accessStatus({ status: current.access_status }) : null;
   const revealed = !!current?.identity_revealed;
-  const dashboardLink = current ? `/seller/dashboard?annonce=${encodeURIComponent(current.company_id)}&onglet=buyers` : '/seller/dashboard';
+  const dashboardLink = current ? `/seller/dashboard?annonce=${encodeURIComponent(current.property_id)}&onglet=buyers` : '/seller/dashboard';
 
   return (
     <div className="min-h-screen bg-brand-surface flex flex-col">
@@ -211,18 +211,18 @@ const MessagesPage = ({ user }) => {
                         <ArrowLeft className="w-5 h-5" aria-hidden="true" />
                       </button>
                       <div className="min-w-0 flex-1">
-                        <p className="font-semibold text-brand-navy break-words">{isSeller ? current.other_party_label || 'Repreneur' : current.company_title || 'Annonce'}</p>
+                        <p className="font-semibold text-brand-navy break-words">{isSeller ? current.other_party_label || 'Repreneur' : current.property_title || 'Annonce'}</p>
                         <p className="text-sm text-gray-600 break-words flex items-center gap-1">
                           <Building2 className="w-4 h-4 shrink-0" aria-hidden="true" />
-                          {isSeller ? (current.company_title || 'Votre annonce') : (current.other_party_label || 'Vendeur')}
+                          {isSeller ? (current.property_title || 'Votre annonce') : (current.other_party_label || 'Vendeur')}
                         </p>
                       </div>
                       <div className="flex flex-wrap gap-2 justify-end shrink-0">
-                        <Link to={`/company/${current.company_id}`} className="btn-link text-sm">Annonce</Link>
+                        <Link to={`/property/${current.property_id}`} className="btn-link text-sm">Annonce</Link>
                         {isSeller ? (
                           <Link to={dashboardLink} className="btn-link text-sm"><FolderOpen className="w-4 h-4" aria-hidden="true" />Demande de dossier</Link>
                         ) : (
-                          <Link to={`/dataroom/${current.company_id}`} className="btn-link text-sm"><FolderOpen className="w-4 h-4" aria-hidden="true" />Dossier</Link>
+                          <Link to={`/dataroom/${current.property_id}`} className="btn-link text-sm"><FolderOpen className="w-4 h-4" aria-hidden="true" />Dossier</Link>
                         )}
                       </div>
                     </div>

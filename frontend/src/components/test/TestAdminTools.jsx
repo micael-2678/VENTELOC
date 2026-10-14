@@ -14,8 +14,8 @@ import TestPanelSection from '@/components/test/TestPanelSection';
 
 const COLLECTION_LABELS = {
   users: 'Comptes',
-  companies: 'Annonces',
-  company_photos: 'Photos d\'annonce',
+  properties: 'Annonces',
+  property_photos: 'Photos d\'annonce',
   conversations: 'Conversations',
   messages: 'Messages',
   dataroom: 'Documents de data room',
@@ -40,7 +40,7 @@ const COLLECTION_LABELS = {
   todos: 'Tâches admin',
   audit_logs: 'Journal d\'audit',
   contact_reveal_logs: 'Journaux d\'identité révélée',
-  'companies.presented_buyers': 'Repreneurs de test retirés des listes de présentation',
+  'properties.presented_buyers': 'Repreneurs de test retirés des listes de présentation',
   'closings.invoice_id': 'Ventes réelles détachées de leur facture de test',
 };
 

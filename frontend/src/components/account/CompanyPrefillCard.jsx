@@ -28,29 +28,29 @@ export const RgeQualificationList = ({ qualifications, compact = false }) => (
 
 const CompanyPrefillCard = ({ result, className = '', showRge = true, title = 'Votre entreprise d\'après les bases publiques' }) => {
   if (!result) return null;
-  const { company, rge } = result;
-  const etatLabel = company.etat ? (company.sirenActive === false || /cess|ferm/i.test(company.etat) ? 'Cessée' : 'En activité') : '';
+  const { property, rge } = result;
+  const etatLabel = property.etat ? (property.sirenActive === false || /cess|ferm/i.test(property.etat) ? 'Cessée' : 'En activité') : '';
 
   return (
-    <section className={cn('rounded-2xl border border-brand-line bg-brand-surface p-4 sm:p-5 min-w-0', className)} aria-label={title} data-testid="company-prefill">
+    <section className={cn('rounded-2xl border border-brand-line bg-brand-surface p-4 sm:p-5 min-w-0', className)} aria-label={title} data-testid="property-prefill">
       <div className="flex items-start gap-3 min-w-0">
         <span className="shrink-0 inline-flex items-center justify-center w-10 h-10 rounded-full bg-white border border-brand-line text-brand-navy" aria-hidden="true">
           <Building2 className="w-5 h-5" />
         </span>
         <div className="min-w-0 flex-1">
           <p className="eyebrow">{title}</p>
-          {company.found ? (
+          {property.found ? (
             <>
-              <p className="font-display text-lg font-bold text-brand-navy leading-snug break-words mt-0.5">{company.name}</p>
+              <p className="font-display text-lg font-bold text-brand-navy leading-snug break-words mt-0.5">{property.name}</p>
               <dl className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
-                {company.nafLabel && <Row icon={Building2} label={`Activité${company.naf ? ` (NAF ${company.naf})` : ''}`}>{company.nafLabel}</Row>}
-                {company.creationDate && <Row icon={CalendarDays} label="Création">{formatDateFr(company.creationDate) || company.creationDate}</Row>}
-                {(company.staffLabel || company.staffCount !== null) && (
-                  <Row icon={Users} label="Effectif">{company.staffLabel || `${company.staffCount} salarié${company.staffCount > 1 ? 's' : ''}`}</Row>
+                {property.nafLabel && <Row icon={Building2} label={`Activité${property.naf ? ` (NAF ${property.naf})` : ''}`}>{property.nafLabel}</Row>}
+                {property.creationDate && <Row icon={CalendarDays} label="Création">{formatDateFr(property.creationDate) || property.creationDate}</Row>}
+                {(property.staffLabel || property.staffCount !== null) && (
+                  <Row icon={Users} label="Effectif">{property.staffLabel || `${property.staffCount} salarié${property.staffCount > 1 ? 's' : ''}`}</Row>
                 )}
-                {(company.departmentLabel || company.department || company.region) && (
+                {(property.departmentLabel || property.department || property.region) && (
                   <Row icon={MapPin} label="Localisation">
-                    {[company.departmentLabel ? `${company.departmentLabel}${company.department ? ` (${company.department})` : ''}` : company.department, company.region].filter(Boolean).join(' · ')}
+                    {[property.departmentLabel ? `${property.departmentLabel}${property.department ? ` (${property.department})` : ''}` : property.department, property.region].filter(Boolean).join(' · ')}
                   </Row>
                 )}
               </dl>
@@ -62,7 +62,7 @@ const CompanyPrefillCard = ({ result, className = '', showRge = true, title = 'V
             </>
           ) : (
             <p className="text-sm text-gray-700 mt-1 leading-relaxed">
-              {company.available
+              {property.available
                 ? "Ce SIRET n'apparaît pas dans l'annuaire des entreprises. Vous pouvez continuer : les informations seront saisies à la main."
                 : "L'annuaire des entreprises n'a pas répondu : vérification différée, vous pouvez continuer sans attendre."}
             </p>
@@ -71,7 +71,7 @@ const CompanyPrefillCard = ({ result, className = '', showRge = true, title = 'V
       </div>
 
       {showRge && (
-        <div className="mt-4 pt-4 border-t border-brand-line min-w-0" data-testid="company-prefill-rge">
+        <div className="mt-4 pt-4 border-t border-brand-line min-w-0" data-testid="property-prefill-rge">
           {rge.found && rge.qualifications.length > 0 ? (
             <>
               <p className="flex flex-wrap items-center gap-2 mb-2">

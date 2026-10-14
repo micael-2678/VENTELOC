@@ -19,7 +19,7 @@ import { useCompanyLookup, cleanSiret } from '@/components/account/siret';
 // Même définition de l'effectif que le formulaire d'annonce, que l'estimateur préremplit (SPEC §4.2)
 import { HELP } from '@/components/seller/listingForm';
 
-// /estimer (SPEC §4.2 point 1, API.md §8) : SIRET → GET /estimates/company/{siret} (préremplissage, jamais
+// /estimer (SPEC §4.2 point 1, API.md §8) : SIRET → GET /estimates/property/{siret} (préremplissage, jamais
 // bloquant) → 3 chiffres + 3 cases → POST /estimates → fourchette, méthode, leviers, pédagogie ; e-mail
 // facultatif (double opt-in) ; « Déposer mon annonce anonyme » (sessionStorage 'estimate' lu par CreateListing).
 
@@ -101,7 +101,7 @@ const EstimatePage = ({ user }) => {
 
   // Effectif prérempli depuis l'open data (modifiable)
   useEffect(() => {
-    const n = lookup.result?.company?.staffCount;
+    const n = lookup.result?.property?.staffCount;
     if (lookup.status === 'found' && Number.isFinite(Number(n)) && n !== null) {
       setFigures((f) => (f.staff === '' ? { ...f, staff: String(n) } : f));
     }
@@ -175,11 +175,11 @@ const EstimatePage = ({ user }) => {
   };
 
   // « Déposer mon annonce anonyme » : CreateListing lit sessionStorage 'estimate'
-  // {siret, company, rge, ca, ebe, staff, low, high}
+  // {siret, property, rge, ca, ebe, staff, low, high}
   const depositListing = () => {
     const payload = {
       siret: siretReady ? cleanSiret(siret) : '',
-      company: lookup.result?.company || null,
+      property: lookup.result?.property || null,
       rge: lookup.result?.rge || null,
       ca: toNumber(figures.ca),
       ebe: toNumber(figures.ebe),
@@ -270,9 +270,9 @@ const EstimatePage = ({ user }) => {
                   <h2 className="font-display text-xl font-bold text-brand-navy">Trois chiffres</h2>
                   <p className="text-sm text-gray-600 mt-1 leading-relaxed">Ordres de grandeur suffisants : prenez votre dernière liasse ou demandez-les à votre comptable.</p>
                 </div>
-                {lookup.result?.company?.found && (
+                {lookup.result?.property?.found && (
                   <p className="text-sm text-gray-700 rounded-xl bg-brand-surface border border-brand-line px-4 py-3 break-words">
-                    Estimation pour <span className="font-semibold text-brand-navy">{lookup.result.company.name}</span>
+                    Estimation pour <span className="font-semibold text-brand-navy">{lookup.result.property.name}</span>
                     {rgeFound && <span className="badge badge-verified ml-2"><ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />RGE vérifié ADEME</span>}
                     {' '}<button type="button" onClick={() => setStep(1)} className="btn-link text-sm">Modifier</button>
                   </p>
@@ -329,7 +329,7 @@ const EstimatePage = ({ user }) => {
                   </h2>
                   <p className="text-gray-700 mt-2">
                     Valeur centrale : <span className="font-semibold text-brand-navy tabular">{formatPrice(result.mid)}</span>
-                    {lookup.result?.company?.found && <> pour <span className="font-semibold text-brand-navy">{lookup.result.company.name}</span></>}.
+                    {lookup.result?.property?.found && <> pour <span className="font-semibold text-brand-navy">{lookup.result.property.name}</span></>}.
                   </p>
                   <p className="text-sm text-gray-600 mt-3 leading-relaxed">{result.method}</p>
                   {result.disclaimer && <p className="text-xs text-gray-500 mt-2 leading-relaxed">{result.disclaimer}</p>}

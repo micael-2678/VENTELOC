@@ -12,17 +12,17 @@ import { canPause, canResume, canWithdraw, canMarkSold } from './listingStatus';
 
 // Actions sur une annonce (SPEC §4.2.4) : Mettre en pause / Reprendre / Retirer / Vendue via la plateforme /
 // Vendue autrement. Chaque action explique ses conséquences avant confirmation.
-const ListingActions = ({ company, presentedBuyers, closings, mandat, onChanged }) => {
+const ListingActions = ({ property, presentedBuyers, closings, mandat, onChanged }) => {
   const navigate = useNavigate();
   const [dialog, setDialog] = useState(null); // 'pause' | 'resume' | 'withdraw' | 'sold_platform' | 'sold_elsewhere'
   const [buyerId, setBuyerId] = useState('');
-  const openClosing = (closings || []).find((c) => c.company_id === company.id && ['in_progress', 'declared'].includes(c.status));
+  const openClosing = (closings || []).find((c) => c.property_id === property.id && ['in_progress', 'declared'].includes(c.status));
   const buyers = Array.isArray(presentedBuyers) ? presentedBuyers : [];
   const close = () => setDialog(null);
 
   const setStatus = async (status, successMessage) => {
     try {
-      await axiosInstance.put(`/companies/${company.id}/status`, null, { params: { status } });
+      await axiosInstance.put(`/properties/${property.id}/status`, null, { params: { status } });
       toast.success(successMessage);
       onChanged?.();
     } catch (e) {
@@ -41,7 +41,7 @@ const ListingActions = ({ company, presentedBuyers, closings, mandat, onChanged 
       throw new Error('buyer');
     }
     try {
-      const res = await axiosInstance.post('/closing/direct', { company_id: company.id, buyer_id: buyerId });
+      const res = await axiosInstance.post('/closing/direct', { property_id: property.id, buyer_id: buyerId });
       toast.success('Étape de vente ouverte : déclarez la vente dès l\'acte signé.');
       onChanged?.();
       if (res.data?.id) navigate(`/vente/${res.data.id}`);
@@ -52,21 +52,21 @@ const ListingActions = ({ company, presentedBuyers, closings, mandat, onChanged 
   };
 
   const items = [];
-  items.push({ key: 'edit', label: 'Modifier l\'annonce', icon: Pencil, onSelect: () => navigate(`/seller/edit/${company.id}`) });
-  if (company.status === 'published') items.push({ key: 'view', label: 'Voir l\'annonce publique', icon: Eye, onSelect: () => navigate(`/company/${company.id}`) });
-  if (canPause(company)) items.push({ key: 'pause', label: 'Mettre en pause', icon: Pause, onSelect: () => setDialog('pause') });
-  if (canResume(company)) items.push({ key: 'resume', label: 'Reprendre la diffusion', icon: Play, onSelect: () => setDialog('resume') });
-  if (canWithdraw(company)) items.push({ key: 'withdraw', label: 'Retirer l\'annonce', icon: Archive, onSelect: () => setDialog('withdraw') });
-  if (canMarkSold(company) || openClosing) {
+  items.push({ key: 'edit', label: 'Modifier l\'annonce', icon: Pencil, onSelect: () => navigate(`/seller/edit/${property.id}`) });
+  if (property.status === 'published') items.push({ key: 'view', label: 'Voir l\'annonce publique', icon: Eye, onSelect: () => navigate(`/property/${property.id}`) });
+  if (canPause(property)) items.push({ key: 'pause', label: 'Mettre en pause', icon: Pause, onSelect: () => setDialog('pause') });
+  if (canResume(property)) items.push({ key: 'resume', label: 'Reprendre la diffusion', icon: Play, onSelect: () => setDialog('resume') });
+  if (canWithdraw(property)) items.push({ key: 'withdraw', label: 'Retirer l\'annonce', icon: Archive, onSelect: () => setDialog('withdraw') });
+  if (canMarkSold(property) || openClosing) {
     items.push({ key: 'sold_platform', label: openClosing ? 'Étape de vente en cours' : 'Vendue via la plateforme', icon: Handshake, onSelect: () => (openClosing ? navigate(`/vente/${openClosing.id}`) : setDialog('sold_platform')) });
   }
-  if (canMarkSold(company)) items.push({ key: 'sold_elsewhere', label: 'Vendue autrement', icon: ExternalLink, onSelect: () => setDialog('sold_elsewhere') });
+  if (canMarkSold(property)) items.push({ key: 'sold_elsewhere', label: 'Vendue autrement', icon: ExternalLink, onSelect: () => setDialog('sold_elsewhere') });
 
   return (
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button type="button" variant="outline" className="rounded-xl" data-testid={`actions-${company.id}`}>
+          <Button type="button" variant="outline" className="rounded-xl" data-testid={`actions-${property.id}`}>
             <MoreHorizontal className="w-4 h-4 mr-2" aria-hidden="true" />
             Actions
           </Button>
@@ -75,7 +75,7 @@ const ListingActions = ({ company, presentedBuyers, closings, mandat, onChanged 
           {items.map((it, i) => (
             <div key={it.key}>
               {(it.key === 'pause' || it.key === 'resume') && i > 0 && <DropdownMenuSeparator />}
-              <DropdownMenuItem onSelect={it.onSelect} className="rounded-lg cursor-pointer text-sm" data-testid={`action-${it.key}-${company.id}`}>
+              <DropdownMenuItem onSelect={it.onSelect} className="rounded-lg cursor-pointer text-sm" data-testid={`action-${it.key}-${property.id}`}>
                 <it.icon className="w-4 h-4 mr-2 text-gray-500" aria-hidden="true" />
                 {it.label}
               </DropdownMenuItem>

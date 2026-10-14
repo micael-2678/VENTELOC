@@ -9,7 +9,7 @@ import { LISTING_FLAG_LABELS, LISTING_STATUS } from '@/components/seller/listing
 import { apiErrorMessage, isEmailNotVerifiedError } from '@/components/account/errors';
 import { ActionButton, ActionDialog, EmptyState, ExtLink, FilterSelect, Loading, Pill, RemovalDialog, displayName, fmtDate, fmtEur, removeListing } from './shared';
 
-// Onglet « Annonces » : GET /admin/companies, drapeaux company_checks / moderation libellés, retrait motivé,
+// Onglet « Annonces » : GET /admin/properties, drapeaux property_checks / moderation libellés, retrait motivé,
 // validation de la relecture, lien vers la fiche publique. Aucun compteur à zéro, aucune donnée brute.
 
 const STATUS_FILTERS = [
@@ -33,7 +33,7 @@ const statusInfo = (c) => {
   return base;
 };
 
-// Drapeaux de contrôle (company_checks) → pastilles libellées ; les valeurs absentes ne sont pas affichées
+// Drapeaux de contrôle (property_checks) → pastilles libellées ; les valeurs absentes ne sont pas affichées
 export const checkChips = (checks) => {
   const ch = checks || {};
   const chips = [];
@@ -80,18 +80,18 @@ const inFilter = (c, filter) => {
   }
 };
 
-const AdminCompanies = ({ companies, loading, onReload, focusId, onEmailBlocked }) => {
+const AdminProperties = ({ properties, loading, onReload, focusId, onEmailBlocked }) => {
   const [filter, setFilter] = useState('all');
   const [query, setQuery] = useState('');
-  const [dialog, setDialog] = useState(null); // {kind: 'remove'|'publish', company}
+  const [dialog, setDialog] = useState(null); // {kind: 'remove'|'publish', property}
   const [busy, setBusy] = useState('');
 
-  const rows = useMemo(() => (companies || []).filter((c) => inFilter(c, filter) && matches(c, query)), [companies, filter, query]);
+  const rows = useMemo(() => (properties || []).filter((c) => inFilter(c, filter) && matches(c, query)), [properties, filter, query]);
 
-  const setStatus = async (company, status) => {
-    setBusy(company.id);
+  const setStatus = async (property, status) => {
+    setBusy(property.id);
     try {
-      await axiosInstance.put(`/companies/${company.id}/status`, null, { params: { status } });
+      await axiosInstance.put(`/properties/${property.id}/status`, null, { params: { status } });
       toast.success(status === 'published' ? 'Annonce en ligne, relecture close.' : 'Statut mis à jour.');
       onReload?.();
     } catch (err) {
@@ -103,10 +103,10 @@ const AdminCompanies = ({ companies, loading, onReload, focusId, onEmailBlocked 
     }
   };
 
-  const remove = async (company, reason, reasonText) => {
-    setBusy(company.id);
+  const remove = async (property, reason, reasonText) => {
+    setBusy(property.id);
     try {
-      await removeListing(company.id, reason, reasonText);
+      await removeListing(property.id, reason, reasonText);
       toast.success('Annonce retirée : le cédant est informé du motif.');
       onReload?.();
     } catch (err) {
@@ -118,27 +118,27 @@ const AdminCompanies = ({ companies, loading, onReload, focusId, onEmailBlocked 
     }
   };
 
-  if (loading && !companies) return <Loading label="Chargement des annonces…" />;
+  if (loading && !properties) return <Loading label="Chargement des annonces…" />;
 
   return (
-    <div className="space-y-4" data-testid="admin-companies">
+    <div className="space-y-4" data-testid="admin-properties">
       <div className="flex flex-col sm:flex-row sm:items-center gap-3">
         <h2 className="font-display text-xl sm:text-2xl font-bold text-brand-navy mr-auto">Annonces</h2>
-        <FilterSelect id="companies-filter" label="Afficher" value={filter} onChange={setFilter} options={STATUS_FILTERS} testId="companies-filter" />
-        <label htmlFor="companies-search" className="relative block sm:w-72">
+        <FilterSelect id="properties-filter" label="Afficher" value={filter} onChange={setFilter} options={STATUS_FILTERS} testId="properties-filter" />
+        <label htmlFor="properties-search" className="relative block sm:w-72">
           <span className="sr-only">Rechercher une annonce</span>
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" aria-hidden="true" />
-          <Input id="companies-search" type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Titre, société, SIRET, cédant…" className="pl-9 rounded-xl" data-testid="companies-search" />
+          <Input id="properties-search" type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Titre, société, SIRET, cédant…" className="pl-9 rounded-xl" data-testid="properties-search" />
         </label>
       </div>
 
       {rows.length === 0 ? (
-        <EmptyState icon={Building2}>{companies?.length ? 'Aucune annonce ne correspond à ce filtre.' : 'Aucune annonce pour le moment.'}</EmptyState>
+        <EmptyState icon={Building2}>{properties?.length ? 'Aucune annonce ne correspond à ce filtre.' : 'Aucune annonce pour le moment.'}</EmptyState>
       ) : (
         <ul className="space-y-3">
           {rows.map((c) => {
             const info = statusInfo(c);
-            const chips = checkChips(c.company_checks);
+            const chips = checkChips(c.property_checks);
             const flags = moderationFlagLabels(c.moderation?.flags, chips);
             const stats = [];
             if (c.views > 0) stats.push(`${c.views} vue${c.views > 1 ? 's' : ''}`);
@@ -149,12 +149,12 @@ const AdminCompanies = ({ companies, loading, onReload, focusId, onEmailBlocked 
             const canRemove = ['published', 'paused', 'pending'].includes(c.status);
             const seller = c.seller;
             return (
-              <li key={c.id} className={`rounded-2xl bg-white border p-4 sm:p-5 min-w-0 ${focusId === c.id ? 'border-brand-blue ring-2 ring-brand-blue' : 'border-brand-line'}`} data-testid={`company-${c.id}`}>
+              <li key={c.id} className={`rounded-2xl bg-white border p-4 sm:p-5 min-w-0 ${focusId === c.id ? 'border-brand-blue ring-2 ring-brand-blue' : 'border-brand-line'}`} data-testid={`property-${c.id}`}>
                 <div className="flex flex-col sm:flex-row sm:items-start gap-3 min-w-0">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="font-semibold text-brand-navy break-words">{listingTitle(c)}</h3>
-                      <Pill tone={TONE_BY_STATUS[info.tone] || 'info'} testId={`company-status-${c.id}`}>{info.label}</Pill>
+                      <Pill tone={TONE_BY_STATUS[info.tone] || 'info'} testId={`property-status-${c.id}`}>{info.label}</Pill>
                     </div>
                     <p className="text-sm text-gray-700 mt-1 break-words">
                       {[c.company_name, c.siret ? `SIRET ${c.siret}` : '', c.region, c.department ? departementLabel(c.department) : ''].filter(Boolean).join(' · ') || 'Société non renseignée'}
@@ -181,10 +181,10 @@ const AdminCompanies = ({ companies, loading, onReload, focusId, onEmailBlocked 
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2 sm:flex-col sm:items-end shrink-0">
-                    <ExtLink href={`/company/${c.id}`} testId={`company-link-${c.id}`}>Fiche publique</ExtLink>
-                    {canValidate && <ActionButton tone="primary" busy={busy === c.id} onClick={() => setStatus(c, 'published').catch(() => {})} testId={`company-validate-${c.id}`}>Valider</ActionButton>}
-                    {canRepublish && <ActionButton busy={busy === c.id} onClick={() => setDialog({ kind: 'publish', company: c })} testId={`company-publish-${c.id}`}>Remettre en ligne</ActionButton>}
-                    {canRemove && <ActionButton tone="danger" busy={busy === c.id} onClick={() => setDialog({ kind: 'remove', company: c })} testId={`company-remove-${c.id}`}>Retirer avec motif</ActionButton>}
+                    <ExtLink href={`/property/${c.id}`} testId={`property-link-${c.id}`}>Fiche publique</ExtLink>
+                    {canValidate && <ActionButton tone="primary" busy={busy === c.id} onClick={() => setStatus(c, 'published').catch(() => {})} testId={`property-validate-${c.id}`}>Valider</ActionButton>}
+                    {canRepublish && <ActionButton busy={busy === c.id} onClick={() => setDialog({ kind: 'publish', property: c })} testId={`property-publish-${c.id}`}>Remettre en ligne</ActionButton>}
+                    {canRemove && <ActionButton tone="danger" busy={busy === c.id} onClick={() => setDialog({ kind: 'remove', property: c })} testId={`property-remove-${c.id}`}>Retirer avec motif</ActionButton>}
                   </div>
                 </div>
               </li>
@@ -196,8 +196,8 @@ const AdminCompanies = ({ companies, loading, onReload, focusId, onEmailBlocked 
       <RemovalDialog
         open={dialog?.kind === 'remove'}
         onClose={() => setDialog(null)}
-        listingLabel={dialog ? listingTitle(dialog.company) : ''}
-        onConfirm={(reason, text) => remove(dialog.company, reason, text)}
+        listingLabel={dialog ? listingTitle(dialog.property) : ''}
+        onConfirm={(reason, text) => remove(dialog.property, reason, text)}
       />
       <ActionDialog
         open={dialog?.kind === 'publish'}
@@ -205,11 +205,11 @@ const AdminCompanies = ({ companies, loading, onReload, focusId, onEmailBlocked 
         title="Remettre l'annonce en ligne"
         description="L'annonce repasse en ligne immédiatement. Un mandat signé est nécessaire ; sinon la plateforme refuse la mise en ligne et le cédant doit signer un nouveau mandat."
         confirmLabel="Mettre en ligne"
-        onConfirm={() => setStatus(dialog.company, 'published')}
+        onConfirm={() => setStatus(dialog.property, 'published')}
         testId="publish-dialog"
       />
     </div>
   );
 };
 
-export default AdminCompanies;
+export default AdminProperties;

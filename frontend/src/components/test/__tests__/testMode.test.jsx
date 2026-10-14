@@ -274,9 +274,9 @@ describe('TestModePage', () => {
     axiosInstance.get.mockResolvedValue({ data: [], headers: {} });
     axiosInstance.post.mockImplementation((url, body, config) => {
       if (url === '/admin/test/purge' && config?.params?.dry_run === true) {
-        return Promise.resolve({ data: { dry_run: true, counts: { users: 3, companies: 8, offers: 0 }, total: 11, files: 0 } });
+        return Promise.resolve({ data: { dry_run: true, counts: { users: 3, properties: 8, offers: 0 }, total: 11, files: 0 } });
       }
-      return Promise.resolve({ data: { dry_run: false, counts: { users: 3, companies: 8 }, total: 11, files: 0 } });
+      return Promise.resolve({ data: { dry_run: false, counts: { users: 3, properties: 8 }, total: 11, files: 0 } });
     });
     const c = await render(<TestModePage user={admin} setUser={jest.fn()} />, '/test', '/test');
     await click(c.querySelector('[data-testid="test-purge-dry-run"]'));

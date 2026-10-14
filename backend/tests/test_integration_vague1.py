@@ -26,7 +26,7 @@ def db_call(client, fn, *args, **kwargs):
 def _published(api, client, prefix, siret, first="Paul", last="Dupont"):
     seller = api.register(uid(prefix), "seller", first=first, last=last)
     api.verify_kyc(seller)
-    c = client.post("/api/companies", headers=api.h(seller), json=listing(siret=siret)).json()
+    c = client.post("/api/properties", headers=api.h(seller), json=listing(siret=siret)).json()
     api.publish(seller, c["id"])
     return seller, c
 
@@ -34,22 +34,22 @@ def _published(api, client, prefix, siret, first="Paul", last="Dupont"):
 # ---------- Open data : dirigeants et vérification ----------
 
 def test_dirigeants_route_lit_le_registre_national(api, client):
-    r = client.get("/api/company/123456789/dirigeants")
+    r = client.get("/api/property/123456789/dirigeants")
     assert r.status_code == 200, r.text
     data = r.json()
     assert data["found"] is True and data["source"] == "API_GOUV_ENTREPRISES"
     assert data["company"]["siren"] == "123456789" and data["company"]["departement"] == "29"
     assert data["president"]["nom_complet"] == "Paul DUPONT" and data["president"]["prenom"] == "Paul"
-    assert client.get("/api/company/12/dirigeants").status_code == 400
+    assert client.get("/api/property/12/dirigeants").status_code == 400
 
 
 def test_verify_dirigeant_statuts_et_motif(api, client, db):
     jean = api.register(uid("jean"), "seller", first="Jean", last="Test")
-    r = client.post("/api/company/111222333/verify-dirigeant", headers=api.h(jean)).json()
+    r = client.post("/api/property/111222333/verify-dirigeant", headers=api.h(jean)).json()
     assert r["verified"] is False and r["status"] == "no_match" and r["reason"] == "name_mismatch"
     assert r["can_invite_president"] is True and r["president"]["nom_complet"] == "Paul DUPONT"
     paul = api.register(uid("paul"), "seller", first="Paul", last="Dupont")
-    r = client.post("/api/company/111222333/verify-dirigeant", headers=api.h(paul)).json()
+    r = client.post("/api/property/111222333/verify-dirigeant", headers=api.h(paul)).json()
     assert r["verified"] is True and r["status"] == "match_exact" and r["matched_as"] == "Président"
     stored = db_call(client, server.db.dirigeant_verifications.find_one, {"user_id": paul["id"], "siren": "111222333"})
     assert stored["status"] == "match_exact" and stored["reason"] is None and stored["identity_source"] == "declared"
@@ -66,11 +66,11 @@ def test_open_data_indisponible_ne_bloque_pas(api, client, monkeypatch):
     try:
         seller = api.register(uid("panne"), "seller", first="Paul", last="Dupont")
         api.verify_kyc(seller)
-        c = client.post("/api/companies", headers=api.h(seller), json=listing(siret="99988866600011")).json()
+        c = client.post("/api/properties", headers=api.h(seller), json=listing(siret="99988866600011")).json()
         m = api.mandate(seller, c["id"])
         assert api.sign_mandate(seller, m["contract_id"]).json()["listing_status"] == "published"
-        doc = client.get(f"/api/companies/{c['id']}", headers=api.h(seller)).json()
-        assert doc["company_checks"]["opendata_available"] is False and doc["company_checks"]["siren_active"] is None
+        doc = client.get(f"/api/properties/{c['id']}", headers=api.h(seller)).json()
+        assert doc["property_checks"]["opendata_available"] is False and doc["property_checks"]["siren_active"] is None
         assert "open_data_indisponible" in doc["moderation"]["flags"]
     finally:
         opendata.clear_cache()
@@ -81,40 +81,40 @@ def test_open_data_indisponible_ne_bloque_pas(api, client, monkeypatch):
 def test_annonce_bloquee_puis_corrigee(api, client, emails):
     seller = api.register(uid("bloque"), "seller", first="Paul", last="Dupont")
     api.verify_kyc(seller)
-    c = client.post("/api/companies", headers=api.h(seller), json=listing(siret="55566688800011", asking_price=0)).json()
+    c = client.post("/api/properties", headers=api.h(seller), json=listing(siret="55566688800011", asking_price=0)).json()
     assert c["status"] == "mandat_en_attente"
     m = api.mandate(seller, c["id"])
     r = api.sign_mandate(seller, m["contract_id"]).json()
     assert r["listing_status"] == "draft"
-    doc = client.get(f"/api/companies/{c['id']}", headers=api.h(seller)).json()
+    doc = client.get(f"/api/properties/{c['id']}", headers=api.h(seller)).json()
     assert doc["blocking"] == ["prix_manquant"] and doc["blocked_reason"] == "prix_manquant"
     e = last_email(seller["email"], "Votre annonce n'est pas encore publiable")
     assert e and "prix demandé" in e["html"]
     # Correction depuis l'espace : re-soumission automatique, publication immédiate
-    r = client.put(f"/api/companies/{c['id']}", headers=api.h(seller), json={"asking_price": 420000})
+    r = client.put(f"/api/properties/{c['id']}", headers=api.h(seller), json={"asking_price": 420000})
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "published" and r.json()["blocking"] == []
-    assert client.get(f"/api/companies/{c['id']}").status_code == 200
+    assert client.get(f"/api/properties/{c['id']}").status_code == 200
 
 
 def test_doublon_siren_bloquant(api, client):
     seller1, c1 = _published(api, client, "dbl1", "44455577700011")
     seller2 = api.register(uid("dbl2"), "seller", first="Paul", last="Dupont")
     api.verify_kyc(seller2)
-    c2 = client.post("/api/companies", headers=api.h(seller2), json=listing(siret="44455577700022")).json()
+    c2 = client.post("/api/properties", headers=api.h(seller2), json=listing(siret="44455577700022")).json()
     m = api.mandate(seller2, c2["id"])
     assert api.sign_mandate(seller2, m["contract_id"]).json()["listing_status"] == "draft"
-    doc = client.get(f"/api/companies/{c2['id']}", headers=api.h(seller2)).json()
-    assert "doublon_siren" in doc["blocking"] and doc["company_checks"]["duplicate_siren"] is True
+    doc = client.get(f"/api/properties/{c2['id']}", headers=api.h(seller2)).json()
+    assert "doublon_siren" in doc["blocking"] and doc["property_checks"]["duplicate_siren"] is True
 
 
 def test_validation_des_referentiels(api, client):
     seller = api.register(uid("ref"), "seller")
-    r = client.post("/api/companies", headers=api.h(seller), json=listing(siret="33344499900011", trades=["plomberie"]))
+    r = client.post("/api/properties", headers=api.h(seller), json=listing(siret="33344499900011", trades=["plomberie"]))
     assert r.status_code == 400 and "plomberie" in r.json()["detail"]
-    r = client.post("/api/companies", headers=api.h(seller), json=listing(siret="33344499900011", department="Nulle-part"))
+    r = client.post("/api/properties", headers=api.h(seller), json=listing(siret="33344499900011", department="Nulle-part"))
     assert r.status_code == 400 and "Département" in r.json()["detail"]
-    r = client.post("/api/companies", headers=api.h(seller),
+    r = client.post("/api/properties", headers=api.h(seller),
                     json=listing(siret="33344499900011", trades=["isolation", "pac-clim-cvc"], department="Finistère",
                                  other_qualifications=["qualibat"], sale_object="fonds", sale_reason="retraite", handover_months=6))
     assert r.status_code == 200, r.text
@@ -122,9 +122,9 @@ def test_validation_des_referentiels(api, client):
     assert c["trades"] == ["isolation", "pac-clim-cvc"] and c["department"] == "29" and c["is_rge"] is True
     assert c["other_qualifications"] == ["qualibat"] and c["commission_terms_version"] == "v2"
     # Sans métier : déduit des domaines RGE
-    c2 = client.post("/api/companies", headers=api.h(seller), json=listing(siret="33344499900022")).json()
+    c2 = client.post("/api/properties", headers=api.h(seller), json=listing(siret="33344499900022")).json()
     assert c2["trades"] == ["pac-clim-cvc"]
-    r = client.put(f"/api/companies/{c2['id']}", headers=api.h(seller), json={"description": "trop court"})
+    r = client.put(f"/api/properties/{c2['id']}", headers=api.h(seller), json={"description": "trop court"})
     assert r.status_code == 400
 
 
@@ -133,7 +133,7 @@ def test_validation_des_referentiels(api, client):
 def test_acceptation_offre_cree_etape_de_vente(api, client, emails):
     seller, c = _published(api, client, "clo", "22233355500011")
     buyer = api.register(uid("clo-rep"), "buyer", first="Marie", last="Martin")
-    offer = {"id": str(uuid.uuid4()), "company_id": c["id"], "buyer_id": buyer["id"], "buyer_email": buyer["email"],
+    offer = {"id": str(uuid.uuid4()), "property_id": c["id"], "buyer_id": buyer["id"], "buyer_email": buyer["email"],
              "seller_id": seller["id"], "amount": 450000, "status": "pending", "created_at": NOW.isoformat()}
     db_call(client, server.db.offers.insert_one, offer)
     r = client.put(f"/api/offers/{offer['id']}/respond", headers=api.h(seller), json={"action": "accept"})
@@ -155,18 +155,18 @@ def test_admin_todo_et_digest(api, client, emails):
     buyer = api.register(uid("todo-rep"), "buyer")
     # Demande de dossier sans réponse depuis 9 jours
     db_call(client, server.db.dataroom_access.insert_one,
-            {"id": str(uuid.uuid4()), "company_id": c["id"], "buyer_id": buyer["id"], "buyer_email": buyer["email"],
+            {"id": str(uuid.uuid4()), "property_id": c["id"], "buyer_id": buyer["id"], "buyer_email": buyer["email"],
              "status": "pending", "requested_at": (NOW - timedelta(days=9)).isoformat()})
     db_call(client, server.db.job_failures.insert_one, {"job": "test_job", "error": "boom", "at": NOW.isoformat()})
     db_call(client, server.db.incidents.insert_one,
-            {"id": "inc-todo", "type": "bodacc", "siren": "111222333", "company_id": c["id"], "status": "open",
+            {"id": "inc-todo", "type": "bodacc", "siren": "111222333", "property_id": c["id"], "status": "open",
              "created_at": NOW.isoformat(), "event": {"famille": "vente", "famille_label": "Vente et cession", "description": "cession"}})
     assert client.get("/api/admin/todo", headers=api.h(seller)).status_code == 403
     todo = client.get("/api/admin/todo", headers=api.h(api.admin())).json()
     keys = {s["key"]: s for s in todo["sections"]}
     assert {"listings_review", "dataroom_unanswered", "closings_declared", "closings_stale", "todos", "mandates_expiring",
             "incidents", "job_failures", "kyc_manual"} <= set(keys)
-    assert any(r["ref"].get("company_id") == c["id"] for r in keys["dataroom_unanswered"]["rows"])
+    assert any(r["ref"].get("property_id") == c["id"] for r in keys["dataroom_unanswered"]["rows"])
     assert any(r["id"] == "inc-todo" for r in keys["incidents"]["rows"])
     assert any("test_job" in r["title"] for r in keys["job_failures"]["rows"])
     assert todo["total"] >= 3

@@ -45,13 +45,13 @@ def test_identite_ouverte_au_mandat_et_apres_acceptation_du_dossier(api, client,
     calls = []
     _fake_session(monkeypatch, calls)
     seller = api.register(uid("kyc-s2"), "seller")
-    assert client.post("/api/companies", headers=api.h(seller), json=listing()).status_code == 200
+    assert client.post("/api/properties", headers=api.h(seller), json=listing()).status_code == 200
     r = client.post("/api/kyc/create-verification-session", headers=api.h(seller))
     assert r.status_code == 200 and r.json()["url"], r.text
 
     buyer = api.register(uid("kyc-b2"), "buyer")
     db_call(client, server.db.dataroom_access.insert_one, {"id": str(uuid.uuid4()), "buyer_id": buyer["id"],
-                                                            "company_id": "c-x", "status": "accepted"})
+                                                            "property_id": "c-x", "status": "accepted"})
     r = client.post("/api/kyc/create-verification-session", headers=api.h(buyer))
     assert r.status_code == 200, r.text
     assert len(calls) == 2
@@ -134,7 +134,7 @@ def test_echec_d_envoi_journalise_et_visible_dans_a_faire(client, monkeypatch):
 def test_digest_hebdomadaire_reessaye_apres_un_echec(api, client, monkeypatch):
     now = datetime.now(timezone.utc)
     cid = str(uuid.uuid4())
-    db_call(client, server.db.companies.insert_one, {"id": cid, "status": "published", "published_at": now.isoformat(),
+    db_call(client, server.db.properties.insert_one, {"id": cid, "status": "published", "published_at": now.isoformat(),
                                                      "title": "Plomberie", "region": "Bretagne", "asking_price": 200000})
     alert_id = str(uuid.uuid4())
     db_call(client, server.db.public_alerts.insert_one, {"id": alert_id, "email": uid("digest"), "status": "active", "criteria": {}})
@@ -151,7 +151,7 @@ def test_digest_hebdomadaire_reessaye_apres_un_echec(api, client, monkeypatch):
         assert db_call(client, server.job_alerts_weekly_digest, now) >= 1
         assert db_call(client, server.db.job_marks.find_one, {"kind": "alert_digest", "key": f"{alert_id}:{week}"})
     finally:
-        db_call(client, server.db.companies.delete_one, {"id": cid})
+        db_call(client, server.db.properties.delete_one, {"id": cid})
         db_call(client, server.db.public_alerts.delete_one, {"id": alert_id})
 
 
@@ -222,12 +222,12 @@ def test_purge_des_documents_trois_ans_apres_la_fin_de_l_annonce(client):
     now = datetime.now(timezone.utc)
     old = (now - timedelta(days=3 * 365 + 5)).isoformat()
     ended, active = str(uuid.uuid4()), str(uuid.uuid4())
-    db_call(client, server.db.companies.insert_many, [
+    db_call(client, server.db.properties.insert_many, [
         {"id": ended, "status": "withdrawn", "updated_at": old, "withdrawn_at": old},
         {"id": active, "status": "published", "updated_at": old}])
     db_call(client, server.db.dataroom.insert_many, [
-        {"id": f"d-{ended}", "company_id": ended, "content": "eA==", "created_at": old},
-        {"id": f"d-{active}", "company_id": active, "content": "eA==", "created_at": old}])
+        {"id": f"d-{ended}", "property_id": ended, "content": "eA==", "created_at": old},
+        {"id": f"d-{active}", "property_id": active, "content": "eA==", "created_at": old}])
     db_call(client, server.job_rgpd_purge, now)
     assert db_call(client, server.db.dataroom.find_one, {"id": f"d-{ended}"}) is None
     assert db_call(client, server.db.dataroom.find_one, {"id": f"d-{active}"}) is not None

@@ -23,7 +23,7 @@ def test_visitor_hash_sans_ip_et_sel_quotidien():
 
 
 def test_normalize_path_retire_identifiants_et_parametres():
-    assert events.normalize_path("/company/0b2f6c1e-7d2a-4c0e-9b1e-2f1a3c4d5e6f?utm=x#frag") == "/company/:id"
+    assert events.normalize_path("/property/0b2f6c1e-7d2a-4c0e-9b1e-2f1a3c4d5e6f?utm=x#frag") == "/property/:id"
     assert events.normalize_path("/confirmer-email/" + secrets.token_urlsafe(32)) == "/confirmer-email/:id"
     assert events.normalize_path("/guides/la-qualification-rge-est-elle-transmissible") == "/guides/la-qualification-rge-est-elle-transmissible"
     assert events.normalize_path("/verifier-entreprise-rge/12345678900011") == "/verifier-entreprise-rge/:id"
@@ -56,12 +56,12 @@ def test_limiteur_fenetre_glissante():
 # ---------- Route POST /events ----------
 
 def test_evenement_enregistre_sans_cookie_ni_ip(client, proxied_client):
-    r = proxied_client.post("/api/events", json={"name": "listing_card_click", "path": "/company/abcd1234-abcd-1234-abcd-1234abcd1234?x=1",
+    r = proxied_client.post("/api/events", json={"name": "listing_card_click", "path": "/property/abcd1234-abcd-1234-abcd-1234abcd1234?x=1",
                                          "props": {"position": 2, "nested": {"a": 1}}},
                     headers={"user-agent": "pytest-agent", "x-forwarded-for": "198.51.100.7"})
     assert r.status_code == 200 and r.json() == {"ok": True}
     assert "set-cookie" not in {k.lower() for k in r.headers}
-    doc = db_call(client, server.db.events.find_one, {"name": "listing_card_click", "path": "/company/:id"})
+    doc = db_call(client, server.db.events.find_one, {"name": "listing_card_click", "path": "/property/:id"})
     assert doc and doc["props"] == {"position": 2}
     assert "198.51.100.7" not in str(doc) and "ip" not in doc
     assert doc["visitor_hash"] == events.visitor_hash("198.51.100.7", "pytest-agent", datetime.now(timezone.utc).date())

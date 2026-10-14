@@ -65,7 +65,7 @@ def test_texte_du_bareme():
 def seller_with_mandate(api, client, asking_price=500000):
     seller = api.register(uid("cedant"), "seller")
     api.verify_kyc(seller)
-    c = client.post("/api/companies", headers=api.h(seller), json=listing(asking_price=asking_price)).json()
+    c = client.post("/api/properties", headers=api.h(seller), json=listing(asking_price=asking_price)).json()
     m = api.mandate(seller, c["id"])
     return seller, c, m
 
@@ -101,17 +101,17 @@ def test_registre_sequentiel(api, client):
 def test_fiche_et_nda_sans_commission_acquereur(api, client):
     seller, c, m = seller_with_mandate(api, client, asking_price=500000)
     api.sign_mandate(seller, m['contract_id'])
-    client.put(f"/api/companies/{c['id']}/status", params={"status": "published"}, headers=api.h(api.admin()))
-    info = client.get(f"/api/companies/{c['id']}").json()["commission_info"]
+    client.put(f"/api/properties/{c['id']}/status", params={"status": "published"}, headers=api.h(api.admin()))
+    info = client.get(f"/api/properties/{c['id']}").json()["commission_info"]
     assert info["payer"] == "cedant" and info["rate_percent_ht"] == "6 %" and info["minimum_ht"] == 4000
     assert info["estimate_ht"] == 30000.0 and info["estimate_ttc"] == 36000.0 and info["terms_version"] == "v2"
-    listed = [x for x in client.post("/api/companies/search", json={}).json() if x["id"] == c["id"]][0]
+    listed = [x for x in client.post("/api/properties/search", json={}).json() if x["id"] == c["id"]][0]
     assert listed["commission_info"]["payer"] == "cedant"
 
     buyer = api.register(uid("repreneur"), "buyer")
     api.verify_kyc(buyer)
     api.accept_dataroom(seller, buyer, c["id"])
-    nda = client.post("/api/contracts/generate-for-signature", headers=api.h(buyer), json={"company_id": c["id"], "doc_type": "nda"}).json()
+    nda = client.post("/api/contracts/generate-for-signature", headers=api.h(buyer), json={"property_id": c["id"], "doc_type": "nda"}).json()
     assert "Commission à la charge de l'Acheteur" not in nda["content"] and "charge de l'acquéreur" not in nda["content"].lower()
 
 
@@ -119,8 +119,8 @@ def test_ancienne_annonce_repreneur_debiteur_garde_son_bandeau(api, client):
     """Héritage : un mandat v1 signé avec le repreneur débiteur reste affiché tel quel ; impossible pour une nouvelle annonce"""
     seller = api.register(uid("ancien"), "seller")
     legacy_id = str(uuid.uuid4())
-    db_call(client, server.db.companies.insert_one, {**listing(), "id": legacy_id, "seller_id": seller["id"],
+    db_call(client, server.db.properties.insert_one, {**listing(), "id": legacy_id, "seller_id": seller["id"],
                                                      "status": "published", "commission_payer": "repreneur",
                                                      "created_at": datetime.now(timezone.utc).isoformat()})
-    info = client.get(f"/api/companies/{legacy_id}").json()["commission_info"]
+    info = client.get(f"/api/properties/{legacy_id}").json()["commission_info"]
     assert info["payer"] == "repreneur" and info["terms_version"] == "v1" and info["estimate_ht"] == 30000.0

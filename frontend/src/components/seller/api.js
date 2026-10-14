@@ -10,32 +10,32 @@ export const asList = (data, key) => {
 
 const settled = (p) => p.then((r) => r.data).catch(() => null);
 
-export const fetchSellerCompanies = () => settled(axiosInstance.get('/companies')).then((d) => asList(d, 'companies'));
-export const fetchMandateStatus = (companyId) => settled(axiosInstance.get(`/seller/mandat/status/${companyId}`));
-export const fetchAccessRequests = (companyId) => settled(axiosInstance.get(`/dataroom/${companyId}/access-requests`)).then((d) => asList(d, 'requests'));
-export const fetchOffers = (companyId) => settled(axiosInstance.get(`/offers/company/${companyId}`)).then((d) => asList(d, 'offers'));
-export const fetchStats = (companyId) => settled(axiosInstance.get(`/companies/${companyId}/stats`));
+export const fetchSellerProperties = () => settled(axiosInstance.get('/properties')).then((d) => asList(d, 'properties'));
+export const fetchMandateStatus = (propertyId) => settled(axiosInstance.get(`/seller/mandat/status/${propertyId}`));
+export const fetchAccessRequests = (propertyId) => settled(axiosInstance.get(`/dataroom/${propertyId}/access-requests`)).then((d) => asList(d, 'requests'));
+export const fetchOffers = (propertyId) => settled(axiosInstance.get(`/offers/property/${propertyId}`)).then((d) => asList(d, 'offers'));
+export const fetchStats = (propertyId) => settled(axiosInstance.get(`/properties/${propertyId}/stats`));
 export const fetchClosings = () => settled(axiosInstance.get('/closing/my')).then((d) => asList(d, 'closings'));
 export const fetchKyc = () => settled(axiosInstance.get('/kyc/status'));
-export const fetchDocuments = (companyId) => settled(axiosInstance.get(`/dataroom/${companyId}/documents`)).then((d) => asList(d, 'documents'));
-export const fetchAccessLog = (companyId) => settled(axiosInstance.get(`/dataroom/${companyId}/access-log`)).then((d) => asList(d, 'logs'));
-export const fetchPhotos = (companyId) => settled(axiosInstance.get(`/companies/${companyId}/photos`)).then((d) => asList(d, 'photos'));
+export const fetchDocuments = (propertyId) => settled(axiosInstance.get(`/dataroom/${propertyId}/documents`)).then((d) => asList(d, 'documents'));
+export const fetchAccessLog = (propertyId) => settled(axiosInstance.get(`/dataroom/${propertyId}/access-log`)).then((d) => asList(d, 'logs'));
+export const fetchPhotos = (propertyId) => settled(axiosInstance.get(`/properties/${propertyId}/photos`)).then((d) => asList(d, 'photos'));
 
-// Conversations (API.md §3) : tableau [{id, company_id, unread_count, …}] ; forme historique tolérée ({company_id: [messages]})
+// Conversations (API.md §3) : tableau [{id, property_id, unread_count, …}] ; forme historique tolérée ({property_id: [messages]})
 export const normalizeConversations = (data, userId) => {
   if (Array.isArray(data)) {
     return data.map((c) => ({ ...c, unread_count: Number(c.unread_count) || 0, legacy: false }));
   }
   if (data && typeof data === 'object') {
-    return Object.keys(data).map((companyId) => {
-      const msgs = Array.isArray(data[companyId]) ? data[companyId] : [];
+    return Object.keys(data).map((propertyId) => {
+      const msgs = Array.isArray(data[propertyId]) ? data[propertyId] : [];
       const sorted = [...msgs].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
       const last = sorted[sorted.length - 1] || {};
       const other = sorted.find((m) => m.sender_id && m.sender_id !== userId && m.sender_id !== 'system');
       return {
-        id: companyId,
-        company_id: companyId,
-        company_title: '',
+        id: propertyId,
+        property_id: propertyId,
+        property_title: '',
         buyer_id: other?.sender_id || null,
         other_party_label: other?.sender_label || 'Repreneur',
         last_message: last.content || '',

@@ -20,32 +20,32 @@ const Row = ({ icon: Icon, tone = 'navy', title, text, action, testId }) => (
   </li>
 );
 
-const TodoBlock = ({ user, kyc, companies, requestsByCompany, offersByCompany, conversations, closings, mandatesByCompany, onSelect, onChanged }) => {
+const TodoBlock = ({ user, kyc, properties, requestsByProperty, offersByProperty, conversations, closings, mandatesByProperty, onSelect, onChanged }) => {
   const verified = !!(kyc?.verified || user?.identity_verified || user?.kyc_status === 'verified');
   const rows = [];
-  const unpublished = companies.filter((c) => ['draft', 'mandat_en_attente'].includes(c.status));
+  const unpublished = properties.filter((c) => ['draft', 'mandat_en_attente'].includes(c.status));
 
   if (!verified && unpublished.length > 0) {
     rows.push(<Row key="identity" icon={ShieldCheck} tone="amber" title="Vérifiez votre identité" text="Indispensable pour signer le mandat et publier : pièce d'identité et selfie, environ 2 minutes, dans cet onglet." action={<KYCVerificationButton user={user} className="rounded-xl bg-brand-navy hover:bg-brand-navy-light text-white" />} testId="todo-identity" />);
   }
 
-  companies.filter((c) => c.status === 'mandat_en_attente').forEach((c) => {
+  properties.filter((c) => c.status === 'mandat_en_attente').forEach((c) => {
     rows.push(<Row key={`mandate-${c.id}`} icon={FileSignature} tone="amber" title="Mandat de vente à signer" text={`${listingTitle(c)} : dernière étape avant la publication immédiate. Mandat simple, sans exclusivité, signature par code.`} action={<Link to={`/seller/mandat/${c.id}`} className="btn-primary" data-testid={`todo-sign-${c.id}`}>Signer le mandat</Link>} testId={`todo-mandate-${c.id}`} />);
   });
 
-  companies.filter((c) => c.status === 'draft' && blockingReasons(c).length).forEach((c) => {
+  properties.filter((c) => c.status === 'draft' && blockingReasons(c).length).forEach((c) => {
     const reasons = blockingReasons(c).map((r) => r.label).join(' ; ');
     rows.push(<Row key={`blocked-${c.id}`} icon={AlertTriangle} tone="red" title="Publication bloquée" text={`${listingTitle(c)} : ${reasons}.`} action={<Link to={`/seller/edit/${c.id}`} className="btn-secondary">Corriger</Link>} testId={`todo-blocked-${c.id}`} />);
   });
 
-  companies.filter((c) => c.status === 'draft' && !blockingReasons(c).length && !(c.asking_price > 0 && (c.trades || []).length)).forEach((c) => {
+  properties.filter((c) => c.status === 'draft' && !blockingReasons(c).length && !(c.asking_price > 0 && (c.trades || []).length)).forEach((c) => {
     rows.push(<Row key={`draft-${c.id}`} icon={FileSignature} title="Brouillon à terminer" text={listingTitle(c)} action={<Link to={`/seller/edit/${c.id}`} className="btn-secondary">Reprendre</Link>} testId={`todo-draft-${c.id}`} />);
   });
 
   const pendingRequests = [];
-  companies.forEach((c) => (requestsByCompany[c.id] || []).filter((r) => r.status === 'pending').forEach((r) => pendingRequests.push({ company: c, request: r })));
+  properties.forEach((c) => (requestsByProperty[c.id] || []).filter((r) => r.status === 'pending').forEach((r) => pendingRequests.push({ property: c, request: r })));
 
-  companies.forEach((c) => (offersByCompany[c.id] || []).filter((o) => o.status === 'pending').forEach((o) => {
+  properties.forEach((c) => (offersByProperty[c.id] || []).filter((o) => o.status === 'pending').forEach((o) => {
     rows.push(<Row key={`offer-${o.id}`} icon={Euro} tone="amber" title={`Offre indicative reçue : ${formatEur(o.amount)}`} text={`${listingTitle(c)} · ${o.buyer_label || 'repreneur'}${o.expires_at ? ` · valable jusqu'au ${formatDateTimeFr(o.expires_at)}` : ''}`} action={<button type="button" onClick={() => onSelect(c.id, 'offers')} className="btn-primary">Répondre</button>} testId={`todo-offer-${o.id}`} />);
   }));
 
@@ -57,14 +57,14 @@ const TodoBlock = ({ user, kyc, companies, requestsByCompany, offersByCompany, c
   }
 
   (closings || []).filter((cl) => cl.status === 'declared' && cl.declared?.by && cl.declared.by !== 'seller').forEach((cl) => {
-    rows.push(<Row key={`closing-confirm-${cl.id}`} icon={Handshake} tone="amber" title="Vente déclarée par le repreneur : à confirmer" text={`${cl.company_title || ''}${cl.declared?.final_price ? ` · ${formatEur(cl.declared.final_price)}` : ''}${cl.confirm_deadline ? ` · confirmation automatique le ${formatDateTimeFr(cl.confirm_deadline)}` : ''}`} action={<Link to={`/vente/${cl.id}`} className="btn-primary">Vérifier et confirmer</Link>} testId={`todo-closing-${cl.id}`} />);
+    rows.push(<Row key={`closing-confirm-${cl.id}`} icon={Handshake} tone="amber" title="Vente déclarée par le repreneur : à confirmer" text={`${cl.property_title || ''}${cl.declared?.final_price ? ` · ${formatEur(cl.declared.final_price)}` : ''}${cl.confirm_deadline ? ` · confirmation automatique le ${formatDateTimeFr(cl.confirm_deadline)}` : ''}`} action={<Link to={`/vente/${cl.id}`} className="btn-primary">Vérifier et confirmer</Link>} testId={`todo-closing-${cl.id}`} />);
   });
   (closings || []).filter((cl) => cl.status === 'in_progress').forEach((cl) => {
-    rows.push(<Row key={`closing-${cl.id}`} icon={Handshake} title="Étape de vente en cours" text={`${cl.company_title || ''} : renseignez le rédacteur de l'acte et déclarez la vente dès la signature.`} action={<Link to={`/vente/${cl.id}`} className="btn-secondary">Suivre la vente</Link>} testId={`todo-closing-${cl.id}`} />);
+    rows.push(<Row key={`closing-${cl.id}`} icon={Handshake} title="Étape de vente en cours" text={`${cl.property_title || ''} : renseignez le rédacteur de l'acte et déclarez la vente dès la signature.`} action={<Link to={`/vente/${cl.id}`} className="btn-secondary">Suivre la vente</Link>} testId={`todo-closing-${cl.id}`} />);
   });
 
-  companies.forEach((c) => {
-    const m = mandatesByCompany[c.id];
+  properties.forEach((c) => {
+    const m = mandatesByProperty[c.id];
     const days = m?.status === 'signed' ? daysUntil(m.ends_at) : null;
     if (days !== null && days <= 30 && ['published', 'paused'].includes(c.status)) {
       rows.push(<Row key={`renew-${c.id}`} icon={CalendarPlus} tone="amber" title={days > 0 ? `Mandat à échéance dans ${days} j` : 'Mandat à échéance'} text={`${listingTitle(c)} : prolongez de 12 mois par une nouvelle signature, sinon l'annonce sera retirée le ${formatDateTimeFr(m.ends_at)}.`} action={<button type="button" onClick={() => onSelect(c.id, 'mandate')} className="btn-secondary">Prolonger</button>} testId={`todo-renew-${c.id}`} />);
@@ -84,10 +84,10 @@ const TodoBlock = ({ user, kyc, companies, requestsByCompany, offersByCompany, c
         <div className="space-y-3">
           <p className="text-sm font-semibold text-brand-navy">{pendingRequests.length > 1 ? `${pendingRequests.length} demandes de dossier à traiter` : 'Une demande de dossier à traiter'} · sans réponse sous 10 jours, la demande expire</p>
           <div className="grid gap-4 lg:grid-cols-2">
-            {pendingRequests.map(({ company, request }) => (
+            {pendingRequests.map(({ property, request }) => (
               <div key={request.id} className="min-w-0">
-                <p className="text-xs text-gray-500 mb-1 truncate">{listingTitle(company)}</p>
-                <AccessRequestCard request={request} companyId={company.id} onChanged={onChanged} compact />
+                <p className="text-xs text-gray-500 mb-1 truncate">{listingTitle(property)}</p>
+                <AccessRequestCard request={request} propertyId={property.id} onChanged={onChanged} compact />
               </div>
             ))}
           </div>

@@ -136,7 +136,7 @@ const AdminClosings = ({ focusId, onNavigate, onEmailBlocked }) => {
   };
 
   const columns = [
-    { key: 'company', label: 'Annonce', primary: true, wide: true, render: (cl) => <span className="font-semibold text-brand-navy break-words">{cl.company_title || cl.company_label || 'Annonce'}</span> },
+    { key: 'company', label: 'Annonce', primary: true, wide: true, render: (cl) => <span className="font-semibold text-brand-navy break-words">{cl.property_title || cl.property_label || 'Annonce'}</span> },
     {
       key: 'status',
       label: 'Statut',
@@ -219,8 +219,8 @@ const AdminClosings = ({ focusId, onNavigate, onEmailBlocked }) => {
         onClose={() => setDialog(null)}
         title={dialog?.action === 'cancel' ? 'Annuler la déclaration de vente' : 'Confirmer la vente'}
         description={dialog?.action === 'cancel'
-          ? `${dialog?.closing?.company_title || ''} : l'étape de vente revient « en cours », la déclaration est conservée dans l'historique.`
-          : `${dialog?.closing?.company_title || ''} : la vente est confirmée au nom de la plateforme. La facture d'honoraires est émise et envoyée au cédant, l'ordre de paiement au rédacteur d'acte.`}
+          ? `${dialog?.closing?.property_title || ''} : l'étape de vente revient « en cours », la déclaration est conservée dans l'historique.`
+          : `${dialog?.closing?.property_title || ''} : la vente est confirmée au nom de la plateforme. La facture d'honoraires est émise et envoyée au cédant, l'ordre de paiement au rédacteur d'acte.`}
         confirmLabel={dialog?.action === 'cancel' ? 'Annuler la déclaration' : 'Confirmer la vente'}
         noteLabel="Note (facultative)"
         tone={dialog?.action === 'cancel' ? 'danger' : 'navy'}

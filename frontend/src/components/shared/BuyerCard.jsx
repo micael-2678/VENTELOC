@@ -68,7 +68,7 @@ const BuyerCard = ({ buyer, message, title = 'Projet de reprise', className = ''
   const trades = listText(b.trades, tradeLabel);
   const score = Number.isFinite(Number(b.profile_score)) ? Math.max(0, Math.min(100, Math.round(Number(b.profile_score)))) : null;
   const verified = b.siren_verified === true;
-  const hasCompany = Boolean(b.company_name || b.siren);
+  const hasProperty = Boolean(b.company_name || b.siren);
 
   return (
     <article className={cn('card min-w-0', compact ? 'p-4' : 'p-5 sm:p-6', className)} data-testid="buyer-card">
@@ -85,7 +85,7 @@ const BuyerCard = ({ buyer, message, title = 'Projet de reprise', className = ''
               Société vérifiée
             </span>
           )}
-          {!verified && hasCompany && <span className="badge badge-declared">Société déclarée</span>}
+          {!verified && hasProperty && <span className="badge badge-declared">Société déclarée</span>}
           {b.email_verified === true && <span className="badge badge-declared">E-mail confirmé</span>}
         </div>
       </header>

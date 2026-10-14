@@ -308,7 +308,7 @@ const ClosingPanel = ({ closing, user, onChange }) => {
         <div className="flex flex-wrap items-start justify-between gap-2 min-w-0">
           <div className="min-w-0">
             <p className="eyebrow">Étape de vente</p>
-            <h2 className="font-display text-xl font-bold text-brand-navy break-words">{c.company_title || c.company_label || 'Entreprise'}</h2>
+            <h2 className="font-display text-xl font-bold text-brand-navy break-words">{c.property_title || c.property_label || 'Entreprise'}</h2>
             {otherName && <p className="text-sm text-gray-600 mt-0.5 break-words">{role === 'seller' ? 'Repreneur' : 'Cédant'} : {otherName}</p>}
           </div>
           <span className={cn('badge shrink-0', STATUS_TONE[c.status] || 'badge-info')} data-testid="closing-status">{closingStatusLabel(c)}</span>
@@ -423,7 +423,7 @@ const ClosingPanel = ({ closing, user, onChange }) => {
           <InvoiceCard closing={c} role={role} />
 
           <p className="text-sm text-gray-600">
-            Une question sur cette étape ? <Link to={`/messages?conversation=${encodeURIComponent(c.conversation_id || c.company_id || '')}`} className="btn-link text-sm">Écrire à l&apos;autre partie</Link>
+            Une question sur cette étape ? <Link to={`/messages?conversation=${encodeURIComponent(c.conversation_id || c.property_id || '')}`} className="btn-link text-sm">Écrire à l&apos;autre partie</Link>
           </p>
         </div>
       </div>

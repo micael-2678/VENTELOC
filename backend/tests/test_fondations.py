@@ -60,28 +60,28 @@ def test_lien_expire(api, client):
 def test_interdictions_tant_que_l_email_n_est_pas_confirme(api, client):
     seller = api.register(uid("vendeur"), "seller")
     api.verify_kyc(seller)
-    c = client.post("/api/companies", headers=api.h(seller), json=listing()).json()
+    c = client.post("/api/properties", headers=api.h(seller), json=listing()).json()
     api.publish(seller, c["id"])
 
     buyer = api.register(uid("acheteur"), "buyer", verify_email=False)
     api.verify_kyc(buyer)
     h = api.h(buyer)
-    assert client.post(f"/api/companies/{c['id']}/contact", headers=h).status_code == 403
-    assert client.post("/api/messages", headers=h, json={"receiver_id": seller["id"], "company_id": c["id"], "content": "Bonjour"}).status_code == 403
+    assert client.post(f"/api/properties/{c['id']}/contact", headers=h).status_code == 403
+    assert client.post("/api/messages", headers=h, json={"receiver_id": seller["id"], "property_id": c["id"], "content": "Bonjour"}).status_code == 403
     assert client.post("/api/alerts", headers=h, json={"name": "PAC", "region": "Île-de-France"}).status_code == 403
     assert client.post(f"/api/dataroom/{c['id']}/request-access", headers=h).status_code == 403
-    r = client.post("/api/contracts/generate-for-signature", headers=h, json={"company_id": c["id"], "doc_type": "nda"})
+    r = client.post("/api/contracts/generate-for-signature", headers=h, json={"property_id": c["id"], "doc_type": "nda"})
     assert r.status_code == 403 and r.json()["detail"].startswith("Confirmez")
     # Navigation libre
-    assert client.get(f"/api/companies/{c['id']}", headers=h).status_code == 200
+    assert client.get(f"/api/properties/{c['id']}", headers=h).status_code == 200
 
     # Une fois l'adresse confirmée, tout est ouvert (sans KYC pour le premier contact)
     api.verify_email(buyer)
     unverified_kyc = api.register(uid("sanskyc"), "buyer")
-    assert client.post(f"/api/companies/{c['id']}/contact", headers=api.h(unverified_kyc)).status_code == 200
+    assert client.post(f"/api/properties/{c['id']}/contact", headers=api.h(unverified_kyc)).status_code == 200
     assert client.post("/api/alerts", headers=api.h(buyer), json={"name": "PAC", "region": "Île-de-France"}).status_code == 200
     api.accept_dataroom(seller, buyer, c["id"])
-    nda = client.post("/api/contracts/generate-for-signature", headers=h, json={"company_id": c["id"], "doc_type": "nda"}).json()
+    nda = client.post("/api/contracts/generate-for-signature", headers=h, json={"property_id": c["id"], "doc_type": "nda"}).json()
     # Le code de signature n'est envoyé qu'à une adresse confirmée (double opt-in)
     db_call(client, server.db.users.update_one, {"id": buyer["id"]}, {"$set": {"email_verified": False}})
     r = client.post("/api/signatures/request-code", headers=h, json={"contract_id": nda["contract_id"]})
@@ -93,7 +93,7 @@ def test_interdictions_tant_que_l_email_n_est_pas_confirme(api, client):
 def test_publication_impossible_sans_email_confirme(api, client, emails):
     seller = api.register(uid("cedant"), "seller", verify_email=False)
     api.verify_kyc(seller)
-    c = client.post("/api/companies", headers=api.h(seller), json=listing()).json()
+    c = client.post("/api/properties", headers=api.h(seller), json=listing()).json()
     assert c["status"] == "draft" and c["blocked_reason"] == "email_not_verified"
     # Le mandat lui-même n'est pas généré tant que l'adresse n'est pas confirmée (403 email_not_verified)
     assert api.mandate(seller, c["id"], expect=403)["detail"]["code"] == "email_not_verified"
@@ -147,7 +147,7 @@ def test_stripe_error_devient_une_400(api, client, monkeypatch):
     user = api.register(uid("kyc"), "buyer")
     # Identité ouverte au repreneur seulement après acceptation d'une demande de dossier (ops-05)
     db_call(client, server.db.dataroom_access.insert_one, {"id": str(uuid.uuid4()), "buyer_id": user["id"],
-                                                            "company_id": "c-kyc", "status": "accepted"})
+                                                            "property_id": "c-kyc", "status": "accepted"})
 
     def boom(**kwargs):
         raise stripe.StripeError("Stripe indisponible")
@@ -277,11 +277,11 @@ def test_jeton_valable_24h():
 def test_suppression_de_compte_anonymise_et_conserve_le_mandat(api, client, emails):
     seller = api.register(uid("rgpd"), "seller", first="Paul", last="Rgpd", phone="0601020304")
     api.verify_kyc(seller)
-    c = client.post("/api/companies", headers=api.h(seller), json=listing()).json()
+    c = client.post("/api/properties", headers=api.h(seller), json=listing()).json()
     api.publish(seller, c["id"])
     client.post("/api/alerts", headers=api.h(seller), json={"name": "x"})
     export = client.get("/api/auth/export", headers=api.h(seller)).json()
-    assert export["account"]["email"] == seller["email"] and len(export["companies"]) == 1 and len(export["contracts"]) == 1
+    assert export["account"]["email"] == seller["email"] and len(export["properties"]) == 1 and len(export["contracts"]) == 1
 
     assert client.request("DELETE", "/api/auth/account", headers=api.h(seller), json={"password": "faux"}).status_code == 400
     r = client.request("DELETE", "/api/auth/account", headers=api.h(seller), json={"password": "Password1!"})
@@ -295,10 +295,10 @@ def test_suppression_de_compte_anonymise_et_conserve_le_mandat(api, client, emai
     assert client.get("/api/auth/profile", headers=api.h(seller)).status_code == 401
     assert client.post("/api/auth/login", json={"email": seller["email"], "password": "Password1!"}).status_code == 401
     # Mandat et preuve conservés, rattachés au même user_id ; annonce retirée
-    mandat = db_call(client, server.db.generated_contracts.find_one, {"company_id": c["id"], "type": "mandat"})
+    mandat = db_call(client, server.db.generated_contracts.find_one, {"property_id": c["id"], "type": "mandat"})
     assert mandat["status"] == "signed" and mandat["seller_id"] == seller["id"] and mandat["signature_evidence"]
-    assert db_call(client, server.db.companies.find_one, {"id": c["id"]})["status"] == "archived"
-    assert client.get(f"/api/companies/{c['id']}").status_code == 404
+    assert db_call(client, server.db.properties.find_one, {"id": c["id"]})["status"] == "archived"
+    assert client.get(f"/api/properties/{c['id']}").status_code == 404
     assert db_call(client, server.db.alerts.count_documents, {"user_id": seller["id"]}) == 0
     # Le compte admin ne se supprime pas en ligne
     assert client.request("DELETE", "/api/auth/account", headers=api.h(api.admin()), json={"password": "AdminTest123!"}).status_code == 403

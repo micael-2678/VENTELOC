@@ -44,18 +44,18 @@ const L = require('./lib');
   if (await validateBtn.count()) {
     await validateBtn.click();
     await L.sleep(1200);
-    const c1 = (await L.api('GET', `/companies/${toReview.id}`, { token: s.admin.token })).data;
+    const c1 = (await L.api('GET', `/properties/${toReview.id}`, { token: s.admin.token })).data;
     L.check('admin : « Valider » clôt la relecture (moderation.status ok)', c1.moderation && c1.moderation.status === 'ok', JSON.stringify(c1.moderation));
   } else {
     L.check('admin : bouton Valider présent dans la relecture', false, 'absent');
   }
 
   // ---- Retrait motivé (annonce 2)
-  await p.getByTestId('admin-tab-companies').click();
-  await p.getByTestId('admin-companies').waitFor({ timeout: 15000 });
+  await p.getByTestId('admin-tab-properties').click();
+  await p.getByTestId('admin-properties').waitFor({ timeout: 15000 });
   await L.sleep(800);
   const since2 = L.emailCount();
-  await p.getByTestId(`company-remove-${toRemove.id}`).click();
+  await p.getByTestId(`property-remove-${toRemove.id}`).click();
   await p.getByTestId('removal-dialog').waitFor();
   await p.getByTestId('removal-reason').selectOption('autre');
   const confirmBtn = p.getByTestId('removal-dialog-confirm');
@@ -64,13 +64,13 @@ const L = require('./lib');
   await p.getByTestId('removal-text').fill('Activité principale hors bâtiment d\'après les pièces fournies.');
   await confirmBtn.click();
   await L.sleep(1500);
-  const c2 = (await L.api('GET', `/companies/${toRemove.id}`, { token: s.admin.token })).data;
+  const c2 = (await L.api('GET', `/properties/${toRemove.id}`, { token: s.admin.token })).data;
   L.check('admin : annonce retirée avec motif (statut removed, mandat caduc)', c2.status === 'removed' && c2.moderation && c2.moderation.reason === 'hors_perimetre' && !c2.mandat_signed, JSON.stringify({ s: c2.status, m: c2.moderation, mandat: c2.mandat_signed }));
   L.check('admin : e-mail de retrait au cédant', !!L.findEmail(s.seller2.user.email, /retir/i, since2));
-  L.check('admin : fiche publique retirée (404)', (await L.api('GET', `/companies/${toRemove.id}`)).status === 404);
-  t = await p.getByTestId(`company-${toRemove.id}`).innerText();
+  L.check('admin : fiche publique retirée (404)', (await L.api('GET', `/properties/${toRemove.id}`)).status === 404);
+  t = await p.getByTestId(`property-${toRemove.id}`).innerText();
   L.check('admin : statut lisible « Retirée » + motif affiché', /Retirée|retirée/.test(t) && /hors/i.test(t), t.slice(0, 200));
-  await L.shot(p, 'admin-companies-desktop.png');
+  await L.shot(p, 'admin-properties-desktop.png');
 
   // ---- Factures
   await p.getByTestId('admin-tab-invoices').click();

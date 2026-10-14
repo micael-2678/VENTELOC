@@ -46,7 +46,7 @@ afterEach(() => {
 });
 
 const buyer = { id: 'b1', role: 'buyer', first_name: 'Claire', last_name: 'Martin', email: 'claire@exemple.fr', email_verified: true, identity_verified: true };
-const company = { id: 'c1', status: 'published', title: 'Entreprise de plomberie-chauffage · Bretagne', trades: ['plomberie-chauffage'], region: 'Bretagne', asking_price: 290000 };
+const property = { id: 'c1', status: 'published', title: 'Entreprise de plomberie-chauffage · Bretagne', trades: ['plomberie-chauffage'], region: 'Bretagne', asking_price: 290000 };
 
 test('les deux événements font partie de la liste fermée', () => {
   const { EVENT_NAMES } = jest.requireActual('@/lib/analytics');
@@ -55,7 +55,7 @@ test('les deux événements font partie de la liste fermée', () => {
 
 test('signature de l\'accord de confidentialité → trackEvent(nda_signed)', async () => {
   const routes = {
-    '/companies/c1': company,
+    '/properties/c1': property,
     '/kyc/status': { verified: true },
     '/offers/my': { offers: [] },
     '/dataroom/c1/access-status': { access_granted: false, access_status: 'accepted', steps: { identity: true, nda: false, funds: false }, next_step: 'nda', request: { id: 'r1' } },
@@ -67,7 +67,7 @@ test('signature de l\'accord de confidentialité → trackEvent(nda_signed)', as
   api.post.mockImplementation((url) => Promise.resolve({ data: url === '/contracts/generate-for-signature'
     ? { contract_id: 'nda1', contract_number: 'NDA-1', content: 'ACCORD', terms_date: '10/10/2026' }
     : { signed: true } }));
-  const c = await render(<DataroomPage user={buyer} />, '/dataroom/c1', '/dataroom/:companyId');
+  const c = await render(<DataroomPage user={buyer} />, '/dataroom/c1', '/dataroom/:propertyId');
   await click(c.querySelector('[data-testid="nda-btn"]'));
   expect(trackEvent).not.toHaveBeenCalledWith('nda_signed', expect.anything());
   await click(document.querySelector('[data-testid="stub-sign"]'));
@@ -78,7 +78,7 @@ test('signature de l\'accord de confidentialité → trackEvent(nda_signed)', as
 test('signature de l\'offre indicative → trackEvent(offer_signed), pas d\'événement si la signature échoue', async () => {
   api.post.mockResolvedValueOnce({ data: { status: 'pending' } });
   const onSigned = jest.fn();
-  await render(<OfferSignatureDialog open offer={{ id: 'o1', company_id: 'c1', amount: 290000 }} contractId="ctr1" documentText="OFFRE" onSigned={onSigned} onClose={() => {}} />);
+  await render(<OfferSignatureDialog open offer={{ id: 'o1', property_id: 'c1', amount: 290000 }} contractId="ctr1" documentText="OFFRE" onSigned={onSigned} onClose={() => {}} />);
   await click(document.querySelector('[data-testid="stub-sign"]'));
   expect(api.post).toHaveBeenCalledWith('/contracts/ctr1/sign', { otp_code: '123456' });
   expect(trackEvent).toHaveBeenCalledWith('offer_signed', { listing: 'c1' });
@@ -86,7 +86,7 @@ test('signature de l\'offre indicative → trackEvent(offer_signed), pas d\'év�
 
   trackEvent.mockClear();
   api.post.mockRejectedValueOnce(new Error('code invalide'));
-  const dialog = OfferSignatureDialog({ open: true, offer: { company_id: 'c1' }, contractId: 'ctr2', documentText: 'OFFRE' });
+  const dialog = OfferSignatureDialog({ open: true, offer: { property_id: 'c1' }, contractId: 'ctr2', documentText: 'OFFRE' });
   await expect(dialog.props.onSign('000000')).rejects.toThrow('code invalide');
   expect(trackEvent).not.toHaveBeenCalled();
 });

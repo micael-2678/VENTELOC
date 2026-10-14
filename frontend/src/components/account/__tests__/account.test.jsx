@@ -91,14 +91,14 @@ describe('outils de compte', () => {
   test('SIRET : nettoyage, format, normalisation des deux formes de réponse', () => {
     expect(cleanSiret('123 456 789 00012x')).toBe('12345678900012');
     expect(formatSiret('12345678900012')).toBe('123 456 789 00012');
-    const a = normalizeCompanyLookup({ siret: '12345678900012', company: { available: true, found: true, company_name: 'DUPONT SAS', naf_code: '43.22A', staff_count: 7, department: '29', region: 'Bretagne' }, rge: { found: true, details: [{ nom_qualification: 'QualiPAC', organisme: "Qualit'EnR", lien_date_fin: '2027-03-01' }] } });
-    expect(a.company).toMatchObject({ found: true, name: 'DUPONT SAS', naf: '43.22A', staffCount: 7, department: '29' });
+    const a = normalizeCompanyLookup({ siret: '12345678900012', property: { available: true, found: true, company_name: 'DUPONT SAS', naf_code: '43.22A', staff_count: 7, department: '29', region: 'Bretagne' }, rge: { found: true, details: [{ nom_qualification: 'QualiPAC', organisme: "Qualit'EnR", lien_date_fin: '2027-03-01' }] } });
+    expect(a.property).toMatchObject({ found: true, name: 'DUPONT SAS', naf: '43.22A', staffCount: 7, department: '29' });
     expect(a.rge.qualifications[0]).toMatchObject({ name: 'QualiPAC', organisme: "Qualit'EnR", dateFin: '2027-03-01' });
-    const b = normalizeCompanyLookup({ company: { available: true, nom_complet: 'MARTIN', naf: '43.21A', tranche_effectif: '6 à 9 salariés', departement: '35' }, rge: { qualifications: ['Qualibat'] } }, '12345678900012');
-    expect(b.company).toMatchObject({ found: true, name: 'MARTIN', naf: '43.21A', staffLabel: '6 à 9 salariés' });
+    const b = normalizeCompanyLookup({ property: { available: true, nom_complet: 'MARTIN', naf: '43.21A', tranche_effectif: '6 à 9 salariés', departement: '35' }, rge: { qualifications: ['Qualibat'] } }, '12345678900012');
+    expect(b.property).toMatchObject({ found: true, name: 'MARTIN', naf: '43.21A', staffLabel: '6 à 9 salariés' });
     expect(b.rge.found).toBe(true);
-    const c = normalizeCompanyLookup({ company: { available: false }, rge: { available: false } }, '12345678900012');
-    expect(c.company.available).toBe(false);
+    const c = normalizeCompanyLookup({ property: { available: false }, rge: { available: false } }, '12345678900012');
+    expect(c.property.available).toBe(false);
     expect(c.rge.available).toBe(false);
   });
 
@@ -207,13 +207,13 @@ describe('RegisterPage', () => {
   });
 
   test('?role=seller : SIRET facultatif, préremplissage open data, « vérification différée » si indisponible', async () => {
-    axiosInstance.get.mockResolvedValueOnce({ data: { siret: '12345678900012', company: { available: true, found: true, company_name: 'DUPONT SAS', staff_count: 7 }, rge: { found: true, details: [{ nom_qualification: 'QualiPAC', organisme: "Qualit'EnR" }] } } });
+    axiosInstance.get.mockResolvedValueOnce({ data: { siret: '12345678900012', property: { available: true, found: true, company_name: 'DUPONT SAS', staff_count: 7 }, rge: { found: true, details: [{ nom_qualification: 'QualiPAC', organisme: "Qualit'EnR" }] } } });
     const c = withRouter(<RegisterPage setUser={jest.fn()} />, '/register?role=seller');
     expect(c.querySelector('[data-testid="buyer-profile-fields"]')).toBeNull();
     setInput(c.querySelector('[data-testid="register-siret-input"]'), '12345678900012');
     await flush();
-    expect(axiosInstance.get).toHaveBeenCalledWith('/estimates/company/12345678900012');
-    expect(c.querySelector('[data-testid="register-company-input"]').value).toBe('DUPONT SAS');
+    expect(axiosInstance.get).toHaveBeenCalledWith('/estimates/property/12345678900012');
+    expect(c.querySelector('[data-testid="register-property-input"]').value).toBe('DUPONT SAS');
     expect(c.textContent).toContain('RGE vérifié ADEME');
     expect(c.textContent).toContain('QualiPAC');
     // Annuaire indisponible : jamais bloquant

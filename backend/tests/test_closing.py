@@ -35,43 +35,43 @@ def day(days):
     return (NOW + timedelta(days=days)).date().isoformat()
 
 
-def _company(client, seller, name="SECRET ENERGIE SAS", **extra):
+def _property(client, seller, name="SECRET ENERGIE SAS", **extra):
     doc = {"id": str(uuid.uuid4()), "seller_id": seller["id"], "siret": "73282932000074", "company_name": name,
            "legal_structure": "SAS", "status": "published", "rge_types": ["Pompes à chaleur air/eau"], "region": "Bretagne",
            "sale_object": "titres", "asking_price": 500000, "created_at": iso(-100), **extra}
-    db_call(client, server.db.companies.insert_one, doc)
+    db_call(client, server.db.properties.insert_one, doc)
     return doc
 
 
-def _mandat(client, company, address="12 rue de la Mer, 29200 Brest", **extra):
+def _mandat(client, property, address="12 rue de la Mer, 29200 Brest", **extra):
     registry = db_call(client, server.next_sequence, "mandate_registry")
-    doc = {"id": str(uuid.uuid4()), "type": "mandat", "contract_number": f"MANDAT-TEST-{registry}", "company_id": company["id"],
-           "seller_id": company["seller_id"], "status": "signed", "signed_at": iso(-90), "created_at": iso(-91),
-           "registry_number": registry, "terms_version": "v2", "sale_object": company.get("sale_object", "titres"), **extra}
+    doc = {"id": str(uuid.uuid4()), "type": "mandat", "contract_number": f"MANDAT-TEST-{registry}", "property_id": property["id"],
+           "seller_id": property["seller_id"], "status": "signed", "signed_at": iso(-90), "created_at": iso(-91),
+           "registry_number": registry, "terms_version": "v2", "sale_object": property.get("sale_object", "titres"), **extra}
     if address is not None:
         doc["mandant_address"] = address
     db_call(client, server.db.generated_contracts.insert_one, doc)
-    db_call(client, server.db.companies.update_one, {"id": company["id"]}, {"$set": {"mandate_id": doc["id"], "mandat_signed": True}})
+    db_call(client, server.db.properties.update_one, {"id": property["id"]}, {"$set": {"mandate_id": doc["id"], "mandat_signed": True}})
     return doc
 
 
-def _offer(client, company, buyer, amount=500000, status="accepted", **extra):
-    doc = {"id": str(uuid.uuid4()), "company_id": company["id"], "buyer_id": buyer["id"], "buyer_email": buyer["email"],
-           "seller_id": company["seller_id"], "amount": amount, "status": status, "created_at": iso(-10),
+def _offer(client, property, buyer, amount=500000, status="accepted", **extra):
+    doc = {"id": str(uuid.uuid4()), "property_id": property["id"], "buyer_id": buyer["id"], "buyer_email": buyer["email"],
+           "seller_id": property["seller_id"], "amount": amount, "status": status, "created_at": iso(-10),
            "responded_at": iso(-1) if status == "accepted" else None, **extra}
     db_call(client, server.db.offers.insert_one, doc)
     return doc
 
 
-def _setup(api, client, prefix, amount=500000, sale_object="titres", address="12 rue de la Mer, 29200 Brest", **company_extra):
+def _setup(api, client, prefix, amount=500000, sale_object="titres", address="12 rue de la Mer, 29200 Brest", **property_extra):
     """Cédant + repreneur + annonce publiée + mandat signé + offre acceptée → closing (sans e-mail de checklist)"""
     seller = api.register(uid(f"{prefix}-ced"), "seller", first="Paul", last="Dupont")
     buyer = api.register(uid(f"{prefix}-rep"), "buyer", first="Marie", last="Martin")
-    company = _company(client, seller, sale_object=sale_object, **company_extra)
-    mandat = _mandat(client, company, address=address)
-    offer = _offer(client, company, buyer, amount=amount)
-    clo = db_call(client, closing.create_closing_for_offer, offer, company, False)
-    return {"seller": seller, "buyer": buyer, "company": company, "mandat": mandat, "offer": offer, "closing": clo}
+    property = _property(client, seller, sale_object=sale_object, **property_extra)
+    mandat = _mandat(client, property, address=address)
+    offer = _offer(client, property, buyer, amount=amount)
+    clo = db_call(client, closing.create_closing_for_offer, offer, property, False)
+    return {"seller": seller, "buyer": buyer, "company": property, "mandat": mandat, "offer": offer, "closing": clo}
 
 
 def pdf_text(content: bytes) -> str:
@@ -123,16 +123,16 @@ def test_creation_closing_checklist_et_redacteur(api, client, emails):
     seller = api.register(uid("crea-ced"), "seller", first="Paul", last="Dupont")
     buyer = api.register(uid("crea-rep"), "buyer", first="Marie", last="Martin")
     stranger = api.register(uid("crea-autre"), "buyer")
-    company = _company(client, seller)
-    _mandat(client, company)
-    offer = _offer(client, company, buyer, amount=450000)
+    property = _property(client, seller)
+    _mandat(client, property)
+    offer = _offer(client, property, buyer, amount=450000)
     emails.clear()
 
     # Création à l'acceptation (fonction appelée par server.py) : idempotente, checklist aux deux parties
-    clo = db_call(client, closing.create_closing_for_offer, offer, company)
+    clo = db_call(client, closing.create_closing_for_offer, offer, property)
     assert clo["status"] == "in_progress" and clo["offer_id"] == offer["id"] and clo["sale_object"] == "titres"
     assert clo["seller_id"] == seller["id"] and clo["buyer_id"] == buyer["id"] and clo["tokens"]["seller"] != clo["tokens"]["buyer"]
-    assert db_call(client, closing.create_closing_for_offer, offer, company)["id"] == clo["id"]
+    assert db_call(client, closing.create_closing_for_offer, offer, property)["id"] == clo["id"]
     assert db_call(client, server.db.closings.count_documents, {"offer_id": offer["id"]}) == 1
     assert db_call(client, server.db.offers.find_one, {"id": offer["id"]})["closing_id"] == clo["id"]
     for u in (seller, buyer):
@@ -148,7 +148,7 @@ def test_creation_closing_checklist_et_redacteur(api, client, emails):
     seller_view = client.post(f"/api/closing/from-offer/{offer['id']}", headers=api.h(seller)).json()
     assert seller_view["commission_preview"]["final_commission_ht"] == business_model.calculate_commission(450000)["final_commission_ht"]
     assert client.post(f"/api/closing/from-offer/{offer['id']}", headers=api.h(stranger)).status_code == 403
-    pending = _offer(client, company, buyer, amount=1, status="pending")
+    pending = _offer(client, property, buyer, amount=1, status="pending")
     assert client.post(f"/api/closing/from-offer/{pending['id']}", headers=api.h(buyer)).status_code == 400
     assert client.post("/api/closing/from-offer/inconnue", headers=api.h(buyer)).status_code == 404
 
@@ -239,10 +239,10 @@ def test_relances_et_reponses_en_un_clic(api, client, emails):
 
 def test_declaration_confirmation_facture_pdf_paiement(api, client, emails):
     ctx = _setup(api, client, "vente", amount=500000)
-    clo, seller, buyer, company = ctx["closing"], ctx["seller"], ctx["buyer"], ctx["company"]
+    clo, seller, buyer, property = ctx["closing"], ctx["seller"], ctx["buyer"], ctx["company"]
     client.put(f"/api/closing/{clo['id']}/redacteur", headers=api.h(seller),
                json={"type": "avocat", "name": "Maître Durand", "email": "durand@avocats.test"})
-    db_call(client, server.db.incidents.insert_one, {"id": "inc-1", "company_id": company["id"], "status": "open", "siren": "732829320", "event": {"id": "inc-1"}})
+    db_call(client, server.db.incidents.insert_one, {"id": "inc-1", "property_id": property["id"], "status": "open", "siren": "732829320", "event": {"id": "inc-1"}})
     emails.clear()
 
     # Validation
@@ -265,7 +265,7 @@ def test_declaration_confirmation_facture_pdf_paiement(api, client, emails):
     assert e and "480 000 €" in e["html"] and "Le repreneur" in e["html"] and deadline.strftime("%d/%m/%Y") in e["html"]
     a = last_email(ADMIN, "Vente déclarée")
     expected = business_model.calculate_commission(480000)
-    assert a and company["id"] in a["html"] and closing.fmt_eur_cents(expected["final_commission_ht"]) in a["html"]
+    assert a and property["id"] in a["html"] and closing.fmt_eur_cents(expected["final_commission_ht"]) in a["html"]
     assert db_call(client, server.db.incidents.find_one, {"id": "inc-1"})["status"] == "closed"
     assert last_email(buyer["email"], "Vente déclarée") is None
 
@@ -297,7 +297,7 @@ def test_declaration_confirmation_facture_pdf_paiement(api, client, emails):
     assert inv["issuer"]["vat_number"] == closing.vat_number() and inv["issuer"]["carte_t"]
     c = _closing(client, cid)
     assert c["invoice_id"] == inv["id"] and c["invoice_number"] == inv["number"]
-    assert db_call(client, server.db.companies.find_one, {"id": company["id"]})["status"] == "sold"
+    assert db_call(client, server.db.properties.find_one, {"id": property["id"]})["status"] == "sold"
 
     # E-mails : facture au cédant (lien PDF), ordre de paiement au rédacteur, confirmation au repreneur
     e = last_email(seller["email"], f"Votre facture n° {inv['number']}")
@@ -580,7 +580,7 @@ def test_declaration_du_repreneur_jamais_confirmee_automatiquement(api, client, 
     c = _closing(client, cid)
     assert c["status"] == "declared" and not c.get("invoice_id")
     assert db_call(client, server.db.invoices.count_documents, {"closing_id": cid}) == 0
-    assert db_call(client, server.db.companies.find_one, {"id": ctx["company"]["id"]})["status"] == "published"
+    assert db_call(client, server.db.properties.find_one, {"id": ctx["company"]["id"]})["status"] == "published"
     todo = db_call(client, server.db.todos.find_one, {"type": closing.TODO_DECLARATION_UNCONFIRMED, "key": cid, "status": "open"})
     assert todo, "arbitrage admin à l'échéance"
     # Le cédant confirme explicitement : facture, ligne « À faire » close

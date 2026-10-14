@@ -25,7 +25,7 @@ export function PresidentAcceptPage({ user, setUser }) {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [invitation, setInvitation] = useState(null);
-  const [company, setCompany] = useState(null);
+  const [property, setProperty] = useState(null);
   const [error, setError] = useState(null);
   const [processing, setProcessing] = useState(false);
   const [declineReason, setDeclineReason] = useState('');
@@ -41,7 +41,7 @@ export function PresidentAcceptPage({ user, setUser }) {
       .then((res) => {
         if (cancelled) return;
         setInvitation(res.data.invitation);
-        setCompany(res.data.company);
+        setProperty(res.data.property);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -87,7 +87,7 @@ export function PresidentAcceptPage({ user, setUser }) {
     try {
       await axiosInstance.post(`/president/accept/${token}`);
       toast.success('Invitation acceptée. Vous pouvez maintenant signer le mandat de vente depuis votre espace.', { duration: 8000 });
-      navigate(company?.id ? `/seller/mandat/${company.id}` : dashboardPath(currentUser?.role));
+      navigate(property?.id ? `/seller/mandat/${property.id}` : dashboardPath(currentUser?.role));
     } catch (err) {
       toast.error(apiErrorMessage(err, 'L\'acceptation a échoué.'));
     } finally {
@@ -185,18 +185,18 @@ export function PresidentAcceptPage({ user, setUser }) {
           </CardContent>
         </Card>
 
-        {company && (
+        {property && (
           <Card className="mb-6 rounded-2xl">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg"><Building2 className="h-5 w-5" aria-hidden="true" />Annonce concernée</CardTitle>
-              <CardDescription>{listingTitle(company)}</CardDescription>
+              <CardDescription>{listingTitle(property)}</CardDescription>
             </CardHeader>
             <CardContent>
               <dl className="grid sm:grid-cols-2 gap-4 text-sm">
-                <div className="min-w-0"><dt className="text-gray-500">Métiers</dt><dd className="font-medium break-words">{(company.trades || []).map((t) => tradeLabel(t)).filter(Boolean).join(', ') || (company.rge_types || []).join(', ') || 'Non renseignés'}</dd></div>
-                <div><dt className="text-gray-500">Localisation</dt><dd className="font-medium">{[company.region, departementLabel(company.department)].filter(Boolean).join(' · ') || 'Non renseignée'}</dd></div>
-                <div><dt className="text-gray-500">Prix demandé</dt><dd className="font-medium tabular">{company.asking_price ? formatEur(company.asking_price) : 'Non renseigné'}</dd></div>
-                <div><dt className="text-gray-500">Effectif</dt><dd className="font-medium">{company.staff_count ? `${company.staff_count} salariés` : 'Non renseigné'}</dd></div>
+                <div className="min-w-0"><dt className="text-gray-500">Métiers</dt><dd className="font-medium break-words">{(property.trades || []).map((t) => tradeLabel(t)).filter(Boolean).join(', ') || (property.rge_types || []).join(', ') || 'Non renseignés'}</dd></div>
+                <div><dt className="text-gray-500">Localisation</dt><dd className="font-medium">{[property.region, departementLabel(property.department)].filter(Boolean).join(' · ') || 'Non renseignée'}</dd></div>
+                <div><dt className="text-gray-500">Prix demandé</dt><dd className="font-medium tabular">{property.asking_price ? formatEur(property.asking_price) : 'Non renseigné'}</dd></div>
+                <div><dt className="text-gray-500">Effectif</dt><dd className="font-medium">{property.staff_count ? `${property.staff_count} salariés` : 'Non renseigné'}</dd></div>
               </dl>
             </CardContent>
           </Card>

@@ -207,7 +207,7 @@ const ListingsPage = ({ user: userProp }) => {
       .then((res) => {
         const data = res && res.data;
         const list = Array.isArray(data) ? data : (data && Array.isArray(data.favorites) ? data.favorites : []);
-        if (alive) setFavorites(new Set(list.map((f) => f && (f.company_id || (f.company && f.company.id))).filter(Boolean)));
+        if (alive) setFavorites(new Set(list.map((f) => f && (f.property_id || (f.property && f.property.id))).filter(Boolean)));
       })
       .catch(() => {});
     return () => { alive = false; };
@@ -243,12 +243,12 @@ const ListingsPage = ({ user: userProp }) => {
     }
   }, [result, filters, pages, navigate]);
 
-  const toggleFavorite = async (company) => {
+  const toggleFavorite = async (property) => {
     if (!user) {
       navigate(`/register?role=buyer&redirect=${encodeURIComponent(`${location.pathname}${location.search}`)}`);
       return;
     }
-    const id = company.id;
+    const id = property.id;
     const wasFavorite = favorites.has(id);
     const nextSet = (add) => setFavorites((prev) => {
       const s = new Set(prev);
@@ -258,7 +258,7 @@ const ListingsPage = ({ user: userProp }) => {
     nextSet(!wasFavorite);
     try {
       if (wasFavorite) await axiosInstance.delete(`/favorites/${id}`);
-      else await axiosInstance.post('/favorites', { company_id: id });
+      else await axiosInstance.post('/favorites', { property_id: id });
       toast.success(wasFavorite ? 'Annonce retirée de vos favoris' : 'Annonce ajoutée à vos favoris');
     } catch (e) {
       nextSet(wasFavorite);
@@ -293,7 +293,7 @@ const ListingsPage = ({ user: userProp }) => {
     jsonLd: [
       organizationLd(SITE_URL, BRAND, LEGAL),
       websiteLd(SITE_URL, BRAND),
-      ...(indexable.length ? [itemListLd(SITE_URL, indexable.map((c) => ({ name: listingTitle(c), path: `/company/${c.id}` })))] : []),
+      ...(indexable.length ? [itemListLd(SITE_URL, indexable.map((c) => ({ name: listingTitle(c), path: `/property/${c.id}` })))] : []),
     ],
   });
 
@@ -433,7 +433,7 @@ const ListingsPage = ({ user: userProp }) => {
                   {items.map((c) => (
                     <li key={c.id} className="min-w-0 flex">
                       <ListingCard
-                        company={c}
+                        property={c}
                         source="listings"
                         className="w-full"
                         favorite={favorites.has(c.id)}

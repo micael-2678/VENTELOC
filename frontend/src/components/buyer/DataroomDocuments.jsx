@@ -32,7 +32,7 @@ const groupByCategory = (docs) => {
   return Object.keys(groups).sort().map((label) => ({ label, docs: groups[label] }));
 };
 
-const DataroomDocuments = ({ companyId, documents }) => {
+const DataroomDocuments = ({ propertyId, documents }) => {
   const [viewing, setViewing] = useState(null); // { filename, content, watermark }
   const [loadingId, setLoadingId] = useState(null);
   const docs = Array.isArray(documents) ? documents : [];
@@ -41,7 +41,7 @@ const DataroomDocuments = ({ companyId, documents }) => {
     if (loadingId) return;
     setLoadingId(doc.id);
     try {
-      const res = await axiosInstance.post(`/dataroom/${companyId}/documents/${doc.id}/view`);
+      const res = await axiosInstance.post(`/dataroom/${propertyId}/documents/${doc.id}/view`);
       const data = res.data || {};
       const content = data.document?.content;
       if (!content) {

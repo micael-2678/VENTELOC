@@ -28,8 +28,8 @@ import {
   BadgeCheck,
 } from "lucide-react";
 
-// Contrôle « dirigeant » sur les bases publiques (SPEC §2.3 et §4.4) : GET /company/{siren}/dirigeants et
-// POST /company/{siren}/verify-dirigeant → status ∈ match_exact | match_partial | no_match | unavailable (+ reason,
+// Contrôle « dirigeant » sur les bases publiques (SPEC §2.3 et §4.4) : GET /property/{siren}/dirigeants et
+// POST /property/{siren}/verify-dirigeant → status ∈ match_exact | match_partial | no_match | unavailable (+ reason,
 // message, president, can_invite_president). Ce n'est PLUS une condition de publication : c'est un badge et un
 // drapeau de post-modération. Le signataire déclare sa qualité à la signature du mandat ; l'invitation du
 // dirigeant reste possible pour qu'il signe lui-même.
@@ -148,7 +148,7 @@ export function VerificationDirigeantStatus({ verificationResult }) {
 
 // Invitation du dirigeant : il crée son compte, vérifie son identité et signe lui-même le mandat
 export function InvitePresidentModal({
-  companyId,
+  propertyId,
   dirigeants = [],
   president,
   isOpen,
@@ -195,8 +195,8 @@ export function InvitePresidentModal({
 
     setLoading(true);
     try {
-      await axiosInstance.post(`/listings/${companyId}/invite-president`, {
-        company_id: companyId,
+      await axiosInstance.post(`/listings/${propertyId}/invite-president`, {
+        property_id: propertyId,
         ...formData,
       });
       toast.success(`Invitation envoyée à ${formData.president_email}. Le dirigeant signera lui-même le mandat de vente.`);
@@ -313,7 +313,7 @@ export function useDirigeantVerification() {
     setLoading(true);
     try {
       const sirenClean = siren.replace(/\s/g, '').substring(0, 9);
-      const response = await axiosInstance.get(`/company/${sirenClean}/dirigeants`);
+      const response = await axiosInstance.get(`/property/${sirenClean}/dirigeants`);
       setDirigeants(response.data);
       return response.data;
     } catch (err) {
@@ -329,7 +329,7 @@ export function useDirigeantVerification() {
     setLoading(true);
     try {
       const sirenClean = siren.replace(/\s/g, '').substring(0, 9);
-      const response = await axiosInstance.post(`/company/${sirenClean}/verify-dirigeant`);
+      const response = await axiosInstance.post(`/property/${sirenClean}/verify-dirigeant`);
       setVerificationResult(response.data);
       return response.data;
     } catch (err) {

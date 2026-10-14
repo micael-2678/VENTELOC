@@ -115,8 +115,8 @@ export const callAction = async (action, { body, params } = {}) => {
   return res.data;
 };
 
-// Retrait motivé d'une annonce : PUT /companies/{id}/status?status=removed&reason=…&reason_text=…
-export const removeListing = (companyId, reason, reasonText) => axiosInstance.put(`/companies/${companyId}/status`, null, {
+// Retrait motivé d'une annonce : PUT /properties/{id}/status?status=removed&reason=…&reason_text=…
+export const removeListing = (propertyId, reason, reasonText) => axiosInstance.put(`/properties/${propertyId}/status`, null, {
   params: { status: 'removed', reason, reason_text: reasonText || '' },
 });
 
@@ -128,7 +128,7 @@ export const tabForUrl = (url) => {
   if (u.includes('/admin/invoices')) return 'invoices';
   if (u.includes('/admin/incidents')) return 'incidents';
   if (u.includes('/admin/users') || u.includes('/admin/kyc')) return 'users';
-  if (u.includes('/admin/companies') || u.includes('/companies/')) return 'companies';
+  if (u.includes('/admin/properties') || u.includes('/properties/')) return 'properties';
   return null;
 };
 

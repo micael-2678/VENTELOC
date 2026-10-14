@@ -12,7 +12,7 @@ import { apiErrorMessage } from '@/components/account/errors';
 import AdminMetrics from '@/components/AdminMetrics';
 import AdminMandates from '@/components/AdminMandates';
 import AdminTodo from '@/components/admin/AdminTodo';
-import AdminCompanies from '@/components/admin/AdminCompanies';
+import AdminProperties from '@/components/admin/AdminProperties';
 import AdminUsers from '@/components/admin/AdminUsers';
 import AdminInvoices from '@/components/admin/AdminInvoices';
 import AdminClosings from '@/components/admin/AdminClosings';
@@ -25,7 +25,7 @@ import { fmtEurCents, fmtNumber, jobsRunSummary } from '@/components/admin/share
 
 export const ADMIN_TABS = [
   { value: 'todo', label: 'À faire' },
-  { value: 'companies', label: 'Annonces' },
+  { value: 'properties', label: 'Annonces' },
   { value: 'users', label: 'Utilisateurs' },
   { value: 'mandates', label: 'Mandats' },
   { value: 'invoices', label: 'Factures' },
@@ -50,7 +50,7 @@ const AdminDashboard = ({ user, setUser }) => {
 
   const [stats, setStats] = useState(null);
   const [todo, setTodo] = useState(null);
-  const [companies, setCompanies] = useState(null);
+  const [properties, setProperties] = useState(null);
   const [users, setUsers] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadingTodo, setLoadingTodo] = useState(true);
@@ -73,15 +73,15 @@ const AdminDashboard = ({ user, setUser }) => {
 
   const loadAll = useCallback(async () => {
     setLoading(true);
-    const [statsRes, companiesRes, usersRes] = await Promise.allSettled([
+    const [statsRes, propertiesRes, usersRes] = await Promise.allSettled([
       axiosInstance.get('/admin/stats'),
-      axiosInstance.get('/admin/companies'),
+      axiosInstance.get('/admin/properties'),
       axiosInstance.get('/admin/users'),
     ]);
     if (statsRes.status === 'fulfilled') setStats(statsRes.value.data || null);
-    if (companiesRes.status === 'fulfilled') setCompanies(companiesRes.value.data?.companies || []);
+    if (propertiesRes.status === 'fulfilled') setProperties(propertiesRes.value.data?.properties || []);
     if (usersRes.status === 'fulfilled') setUsers(Array.isArray(usersRes.value.data) ? usersRes.value.data : usersRes.value.data?.users || []);
-    const failed = [statsRes, companiesRes, usersRes].find((r) => r.status === 'rejected');
+    const failed = [statsRes, propertiesRes, usersRes].find((r) => r.status === 'rejected');
     if (failed) toast.error(apiErrorMessage(failed.reason, 'Une partie des données n\'a pas pu être chargée.'));
     setLoading(false);
   }, []);
@@ -119,8 +119,8 @@ const AdminDashboard = ({ user, setUser }) => {
   const tiles = useMemo(() => {
     const s = stats || {};
     const out = [];
-    if (s.published_companies > 0) out.push({ key: 'published', label: 'Annonces en ligne', value: fmtNumber(s.published_companies) });
-    if (s.total_companies > 0) out.push({ key: 'companies', label: 'Annonces au total', value: fmtNumber(s.total_companies) });
+    if (s.published_properties > 0) out.push({ key: 'published', label: 'Annonces en ligne', value: fmtNumber(s.published_properties) });
+    if (s.total_properties > 0) out.push({ key: 'properties', label: 'Annonces au total', value: fmtNumber(s.total_properties) });
     if (s.total_users > 0) out.push({ key: 'users', label: 'Comptes', value: fmtNumber(s.total_users) });
     if (s.total_revenue > 0) out.push({ key: 'invoiced', label: 'Facturé (HT)', value: fmtEurCents(s.total_revenue) });
     if (s.paid_revenue > 0) out.push({ key: 'paid', label: 'Encaissé (HT)', value: fmtEurCents(s.paid_revenue) });
@@ -177,8 +177,8 @@ const AdminDashboard = ({ user, setUser }) => {
           <TabsContent value="todo" className="mt-0">
             <AdminTodo data={todo} loading={loadingTodo} onReload={refreshAfterAction} onNavigate={navigateTo} onEmailBlocked={() => setEmailBlocked(true)} />
           </TabsContent>
-          <TabsContent value="companies" className="mt-0">
-            <AdminCompanies companies={companies} loading={loading} onReload={refreshAfterAction} focusId={focus.companies} onEmailBlocked={() => setEmailBlocked(true)} />
+          <TabsContent value="properties" className="mt-0">
+            <AdminProperties properties={properties} loading={loading} onReload={refreshAfterAction} focusId={focus.properties} onEmailBlocked={() => setEmailBlocked(true)} />
           </TabsContent>
           <TabsContent value="users" className="mt-0">
             <AdminUsers users={users} loading={loading} onReload={refreshAfterAction} focusId={focus.users} onEmailBlocked={() => setEmailBlocked(true)} />

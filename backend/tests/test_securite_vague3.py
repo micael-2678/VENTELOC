@@ -17,7 +17,7 @@ def db_call(client, fn, *args, **kwargs):
 # ---------- Invitation du président ----------
 
 def _invite(client, api, seller, cid, **overrides):
-    body = {"company_id": cid, "president_firstname": "Paul", "president_lastname": "Dupont",
+    body = {"property_id": cid, "president_firstname": "Paul", "president_lastname": "Dupont",
             "president_email": overrides.pop("email", uid("president"))}
     body.update(overrides)
     return client.post(f"/api/listings/{cid}/invite-president", headers=api.h(seller), json=body)
@@ -25,7 +25,7 @@ def _invite(client, api, seller, cid, **overrides):
 
 def test_invitation_president_echappe_le_html(api, client, emails):
     seller = api.register(uid("inv"), "seller")
-    cid = client.post("/api/companies", headers=api.h(seller), json=listing()).json()["id"]
+    cid = client.post("/api/properties", headers=api.h(seller), json=listing()).json()["id"]
     victim = uid("victime")
     r = _invite(client, api, seller, cid, email=victim,
                 president_firstname='<a href="https://evil.example/login">Cliquez ici</a>')
@@ -36,14 +36,14 @@ def test_invitation_president_echappe_le_html(api, client, emails):
 
 def test_invitation_president_email_confirme_et_volume_borne(api, client):
     unverified = api.register(uid("inv-nv"), "seller", verify_email=False)
-    cid = client.post("/api/companies", headers=api.h(unverified), json=listing()).json()["id"]
+    cid = client.post("/api/properties", headers=api.h(unverified), json=listing()).json()["id"]
     assert _invite(client, api, unverified, cid).status_code == 403
     seller = api.register(uid("inv-v"), "seller")
-    cid = client.post("/api/companies", headers=api.h(seller), json=listing()).json()["id"]
+    cid = client.post("/api/properties", headers=api.h(seller), json=listing()).json()["id"]
     codes = [_invite(client, api, seller, cid).status_code for _ in range(4)]
     assert codes == [200, 200, 200, 429]
     # Une seule invitation en attente par annonce
-    pending = db_call(client, server.db.president_invitations.count_documents, {"company_id": cid, "status": "pending"})
+    pending = db_call(client, server.db.president_invitations.count_documents, {"property_id": cid, "status": "pending"})
     assert pending == 1
     assert _invite(client, api, seller, cid, president_firstname="x" * 101).status_code == 422
 
@@ -80,19 +80,19 @@ def test_en_tetes_list_unsubscribe(monkeypatch):
 def _deal(api, client, prefix, **extra):
     seller, buyer = api.register(uid(f"{prefix}-ced"), "seller"), api.register(uid(f"{prefix}-rep"), "buyer")
     api.verify_kyc(seller)
-    cid = client.post("/api/companies", headers=api.h(seller), json=listing(**extra)).json()["id"]
+    cid = client.post("/api/properties", headers=api.h(seller), json=listing(**extra)).json()["id"]
     api.publish(seller, cid)
-    client.post(f"/api/companies/{cid}/contact", headers=api.h(buyer))
+    client.post(f"/api/properties/{cid}/contact", headers=api.h(buyer))
     return seller, buyer, cid
 
 
 def test_vue_nda_sans_coordonnees_du_president(api, client):
     seller, buyer, cid = _deal(api, client, "ndapres")
-    db_call(client, server.db.companies.update_one, {"id": cid}, {"$set": {
+    db_call(client, server.db.properties.update_one, {"id": cid}, {"$set": {
         "president_email": "president@secret.fr", "president_firstname": "Pierre", "president_lastname": "Secret",
         "president_invitation_id": "inv-1", "president_invitation_pending": True}})
     api.grant_dataroom(seller, buyer, cid)
-    view = client.get(f"/api/companies/{cid}", headers=api.h(buyer)).json()
+    view = client.get(f"/api/properties/{cid}", headers=api.h(buyer)).json()
     assert view["company_name"] == "SECRET ENERGIE SAS" and view.get("siret")
     for field in ("president_email", "president_firstname", "president_lastname", "president_invitation_id",
                   "president_invitation_pending", "seller_email", "mandant_address", "seller_id"):
@@ -107,15 +107,15 @@ def test_description_et_experience_sans_coordonnees(api, client):
     description = ("Entreprise reconnue depuis vingt ans dans l'installation de pompes à chaleur, clientèle fidèle de particuliers "
                    "et de bailleurs sociaux, équipe autonome et carnet de commandes rempli pour six mois. Appelez le "
                    "06 12 34 56 78 ou écrivez à patron@maboite.fr pour en savoir plus.")
-    r = client.post("/api/companies", headers=api.h(seller), json=listing(description=description, equipment="Contact : 0612345678"))
+    r = client.post("/api/properties", headers=api.h(seller), json=listing(description=description, equipment="Contact : 0612345678"))
     assert r.status_code == 200, r.text
     cid = r.json()["id"]
-    stored = db_call(client, server.db.companies.find_one, {"id": cid})
+    stored = db_call(client, server.db.properties.find_one, {"id": cid})
     assert "06 12 34 56 78" not in stored["description"] and "patron@maboite.fr" not in stored["description"]
     assert "[coordonnées masquées]" in stored["description"] and "0612345678" not in stored["equipment"]
-    r = client.put(f"/api/companies/{cid}", headers=api.h(seller), json={"description": description.replace("06 12", "07 12")})
+    r = client.put(f"/api/properties/{cid}", headers=api.h(seller), json={"description": description.replace("06 12", "07 12")})
     assert r.status_code == 200, r.text
-    assert "07 12 34 56 78" not in db_call(client, server.db.companies.find_one, {"id": cid})["description"]
+    assert "07 12 34 56 78" not in db_call(client, server.db.properties.find_one, {"id": cid})["description"]
 
     buyer = api.register(uid("exp"), "buyer")
     r = client.put("/api/auth/profile", headers=api.h(buyer),
@@ -140,15 +140,15 @@ def _find_value(obj, needle, path=""):
 
 def test_suppression_de_compte_sans_email_residuel(api, client):
     seller, buyer, cid = _deal(api, client, "rgpd2")
-    client.post("/api/messages", headers=api.h(buyer), json={"receiver_id": seller["id"], "company_id": cid, "content": "Bonjour"})
+    client.post("/api/messages", headers=api.h(buyer), json={"receiver_id": seller["id"], "property_id": cid, "content": "Bonjour"})
     api.grant_dataroom(seller, buyer, cid)
     # Le repreneur est aussi président invité d'une autre annonce, et abonné à la lettre d'information
-    other = client.post("/api/companies", headers=api.h(seller), json=listing(siret="98765432100019")).json()["id"]
+    other = client.post("/api/properties", headers=api.h(seller), json=listing(siret="98765432100019")).json()["id"]
     r = client.post(f"/api/listings/{other}/invite-president", headers=api.h(seller),
-                    json={"company_id": other, "president_firstname": "Jean", "president_lastname": "Test", "president_email": buyer["email"]})
+                    json={"property_id": other, "president_firstname": "Jean", "president_lastname": "Test", "president_email": buyer["email"]})
     assert r.status_code == 200, r.text
     db_call(client, server.db.newsletter_subscribers.insert_one, {"id": "nl-1", "email": buyer["email"]})
-    db_call(client, server.db.dataroom_access_logs.insert_one, {"id": str(uuid.uuid4()), "company_id": cid, "viewer_id": buyer["id"],
+    db_call(client, server.db.dataroom_access_logs.insert_one, {"id": str(uuid.uuid4()), "property_id": cid, "viewer_id": buyer["id"],
                                                                 "viewer_email": buyer["email"]})
     db_call(client, server.create_audit_log, "test", cid, buyer["id"], buyer["email"], target_id=seller["id"], target_email=buyer["email"])
 
@@ -169,7 +169,7 @@ def test_suppression_de_compte_sans_email_residuel(api, client):
 
 def test_proxys_open_data_limites(client, monkeypatch):
     assert client.get("/api/rge/verify/123").status_code == 400
-    assert client.get("/api/rge/company/abc/qualifications").status_code == 400
+    assert client.get("/api/rge/property/abc/qualifications").status_code == 400
     assert client.get("/api/rge/search", params={"q": "ab"}).status_code == 400
     calls = []
 
@@ -186,7 +186,7 @@ def test_proxys_open_data_limites(client, monkeypatch):
         assert codes[:30] == [200] * 30 and codes[30] == 429
         assert calls == ["12345678900011"], "réponse gardée en cache : un seul appel à l'ADEME"
         server.limiter.reset()
-        codes = [client.get("/api/company/123456789/dirigeants").status_code for _ in range(31)]
+        codes = [client.get("/api/property/123456789/dirigeants").status_code for _ in range(31)]
         assert codes[30] == 429
     finally:
         server.limiter.enabled = False

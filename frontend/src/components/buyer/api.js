@@ -12,15 +12,15 @@ export const asList = (data, key) => {
 
 const settled = (p) => p.then((r) => r.data).catch(() => null);
 
-export const fetchCompany = (companyId) => settled(axiosInstance.get(`/companies/${companyId}`));
+export const fetchProperty = (propertyId) => settled(axiosInstance.get(`/properties/${propertyId}`));
 export const fetchFavorites = () => settled(axiosInstance.get('/favorites')).then((d) => asList(d, 'favorites'));
 export const fetchAlerts = () => settled(axiosInstance.get('/alerts')).then((d) => asList(d, 'alerts'));
 export const fetchMyOffers = () => settled(axiosInstance.get('/offers/my')).then((d) => asList(d, 'offers'));
 export const fetchClosings = () => settled(axiosInstance.get('/closing/my')).then((d) => asList(d, 'closings'));
 export const fetchKyc = () => settled(axiosInstance.get('/kyc/status'));
 export const fetchProfile = () => settled(axiosInstance.get('/auth/profile')).then((d) => (d && d.user ? d.user : d));
-export const fetchTransmissibility = (companyId) => settled(axiosInstance.get(`/companies/${companyId}/transmissibility`));
-export const fetchDataroomDocuments = (companyId) => settled(axiosInstance.get(`/dataroom/${companyId}/documents`));
+export const fetchTransmissibility = (propertyId) => settled(axiosInstance.get(`/properties/${propertyId}/transmissibility`));
+export const fetchDataroomDocuments = (propertyId) => settled(axiosInstance.get(`/dataroom/${propertyId}/documents`));
 
 // ------------------------------------------------------------------------------------------------
 // Statut d'accès au dossier (API.md §4) : {access_granted, access_status, steps:{identity, nda, funds}, next_step, request}.
@@ -48,26 +48,26 @@ export const normalizeAccessStatus = (data, user) => {
   };
 };
 
-export const fetchAccessStatus = (companyId, user) =>
-  settled(axiosInstance.get(`/dataroom/${companyId}/access-status`)).then((d) => (d ? normalizeAccessStatus(d, user) : null));
+export const fetchAccessStatus = (propertyId, user) =>
+  settled(axiosInstance.get(`/dataroom/${propertyId}/access-status`)).then((d) => (d ? normalizeAccessStatus(d, user) : null));
 
 // ------------------------------------------------------------------------------------------------
-// Conversations (API.md §3) : tableau [{id, company_id, company_title, last_message, last_at, unread_count, access_status…}] ;
-// forme historique tolérée ({company_id: [messages]}).
+// Conversations (API.md §3) : tableau [{id, property_id, property_title, last_message, last_at, unread_count, access_status…}] ;
+// forme historique tolérée ({property_id: [messages]}).
 export const normalizeConversations = (data, userId) => {
   if (Array.isArray(data)) {
     return data.map((c) => ({ ...c, unread_count: Number(c.unread_count) || 0, legacy: false }));
   }
   if (data && typeof data === 'object') {
-    return Object.keys(data).map((companyId) => {
-      const msgs = Array.isArray(data[companyId]) ? data[companyId] : [];
+    return Object.keys(data).map((propertyId) => {
+      const msgs = Array.isArray(data[propertyId]) ? data[propertyId] : [];
       const sorted = [...msgs].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
       const last = sorted[sorted.length - 1] || {};
       const first = sorted[0] || {};
       return {
-        id: companyId,
-        company_id: companyId,
-        company_title: '',
+        id: propertyId,
+        property_id: propertyId,
+        property_title: '',
         last_message: last.content || '',
         last_at: last.created_at || null,
         first_at: first.created_at || null,
@@ -142,13 +142,13 @@ export const PIPELINE_STAGES = [
 const STAGE_INDEX = PIPELINE_STAGES.reduce((acc, s, i) => { acc[s.key] = i; return acc; }, {});
 
 // stage : clé d'étape ; detail : phrase courte ; actionTo : lien vers la page utile
-export const buildPipeline = ({ conversations = [], accessByCompany = {}, offers = [], closings = [], companies = {} }) => {
+export const buildPipeline = ({ conversations = [], accessByProperty = {}, offers = [], closings = [], properties = {} }) => {
   const rows = {};
-  const ensure = (companyId) => {
-    if (!rows[companyId]) {
-      rows[companyId] = { companyId, stage: 'contacted', detail: 'Projet présenté au cédant', lastAt: null, unread: 0, conversationId: null, offer: null, closing: null, access: null };
+  const ensure = (propertyId) => {
+    if (!rows[propertyId]) {
+      rows[propertyId] = { propertyId, stage: 'contacted', detail: 'Projet présenté au cédant', lastAt: null, unread: 0, conversationId: null, offer: null, closing: null, access: null };
     }
-    return rows[companyId];
+    return rows[propertyId];
   };
   const bump = (row, stage, detail) => {
     if (STAGE_INDEX[stage] >= STAGE_INDEX[row.stage]) {
@@ -161,18 +161,18 @@ export const buildPipeline = ({ conversations = [], accessByCompany = {}, offers
   };
 
   conversations.forEach((c) => {
-    if (!c.company_id) return;
-    const row = ensure(c.company_id);
-    row.conversationId = c.id || c.company_id;
+    if (!c.property_id) return;
+    const row = ensure(c.property_id);
+    row.conversationId = c.id || c.property_id;
     row.unread = Number(c.unread_count) || 0;
-    row.title = c.company_title || row.title;
+    row.title = c.property_title || row.title;
     later(row, c.last_at);
   });
 
-  Object.keys(accessByCompany).forEach((companyId) => {
-    const a = accessByCompany[companyId];
+  Object.keys(accessByProperty).forEach((propertyId) => {
+    const a = accessByProperty[propertyId];
     if (!a || a.isSeller) return;
-    const row = ensure(companyId);
+    const row = ensure(propertyId);
     row.access = a;
     later(row, a.request?.createdAt);
     if (a.accessGranted) bump(row, 'dataroom', 'Accès au dossier accordé');
@@ -185,23 +185,23 @@ export const buildPipeline = ({ conversations = [], accessByCompany = {}, offers
   });
 
   offers.forEach((o) => {
-    if (!o.company_id) return;
-    const row = ensure(o.company_id);
+    if (!o.property_id) return;
+    const row = ensure(o.property_id);
     row.offer = o;
     later(row, o.updated_at || o.created_at);
     bump(row, 'offer', OFFER_PIPELINE_DETAIL[o.status] || 'Offre déposée');
   });
 
   closings.forEach((cl) => {
-    if (!cl.company_id) return;
-    const row = ensure(cl.company_id);
+    if (!cl.property_id) return;
+    const row = ensure(cl.property_id);
     row.closing = cl;
     later(row, cl.updated_at || cl.created_at);
     bump(row, 'closing', closingStatus(cl).label);
   });
 
   return Object.values(rows)
-    .map((row) => ({ ...row, company: companies[row.companyId] || null, title: row.title || companies[row.companyId]?.title || '' }))
+    .map((row) => ({ ...row, property: properties[row.propertyId] || null, title: row.title || properties[row.propertyId]?.title || '' }))
     .sort((a, b) => new Date(b.lastAt || 0) - new Date(a.lastAt || 0));
 };
 

@@ -25,7 +25,7 @@ def future(days):
 
 
 def ademe_raw(details=True):
-    """Réponse de server.get_company_qualifications ; `details` = dates par qualification (ajout HANDOFF)"""
+    """Réponse de server.get_property_qualifications ; `details` = dates par qualification (ajout HANDOFF)"""
     raw = {"found": True, "company": {"siret": SIRET, "nom_entreprise": "SECRET ENERGIE", "code_postal": "29200", "commune": "BREST"},
            "domaines": ["Pompe à chaleur", "Isolation des murs par l'extérieur"],
            "qualifications": ["QualiPAC", "Qualibat 7131 ITE"], "organismes": ["Qualit'EnR", "QUALIBAT"], "total_certifications": 2}
@@ -47,7 +47,7 @@ def ademe(monkeypatch):
         state["calls"].append(siret)
         return state["raw"]
 
-    monkeypatch.setattr(server, "get_company_qualifications", fake)
+    monkeypatch.setattr(server, "get_property_qualifications", fake)
     return state
 
 
@@ -124,11 +124,11 @@ def test_diagnostic_sans_qualification():
 
 
 def test_diagnostic_complet_depuis_annonce():
-    company = {"id": "c1", "rge_types": ["Pompes à chaleur air/eau"], "other_qualifications": ["qualibat", "handibat"],
+    property = {"id": "c1", "rge_types": ["Pompes à chaleur air/eau"], "other_qualifications": ["qualibat", "handibat"],
                "rge_validity": future(600), "sale_object": "titres", "handover_months": 6, "has_maintenance_contracts": True,
                "technical_referent_stays": True, "key_staff_stays": True, "decennale_ok": True, "staff_count": 9,
                "ca_n": 900000, "ebitda": 150000, "asking_price": 500000}
-    d = tr.build_diagnostic(company, with_financials=True)
+    d = tr.build_diagnostic(property, with_financials=True)
     assert d["scope"] == "complet" and d["source"] == "declaration"
     assert [(q["name"], q["organisme"], q["source"]) for q in d["qualifications"]] == \
         [("Pompes à chaleur air/eau", "autre", "declaration"), ("Qualibat", "qualibat", "declaration")]
@@ -139,18 +139,18 @@ def test_diagnostic_complet_depuis_annonce():
     # Qualifications seulement déclarées (non retrouvées sur la liste ADEME) : pas de coche verte
     assert checklist == {"qualifications": "inconnu", "referent": "ok", "decennale": "ok", "sale_object": "ok", "key_staff": "ok", "handover": "ok"}
     assert next(c for c in d["checklist"] if c["key"] == "qualifications")["label"] == "Qualifications déclarées en cours de validité"
-    verified = tr.build_diagnostic({**company, "ademe_qualifications": [{"nom_qualification": "QualiPAC", "organisme": "qualit-enr",
+    verified = tr.build_diagnostic({**property, "ademe_qualifications": [{"nom_qualification": "QualiPAC", "organisme": "qualit-enr",
                                                                          "date_fin": future(600)[:10]}]}, with_financials=True)
     assert verified["source"] == "ademe" and {c["key"]: c["status"] for c in verified["checklist"]}["qualifications"] == "ok"
     assert d["financials"]["asking_price"] == 500000 and d["financials"]["sale_object"] == "titres"
 
     # Référent qui part + cession de fonds → moyenne ; décennale non à jour → fragile
-    weaker = {**company, "technical_referent_stays": False, "sale_object": "fonds", "handover_months": 1}
+    weaker = {**property, "technical_referent_stays": False, "sale_object": "fonds", "handover_months": 1}
     d2 = tr.build_diagnostic(weaker, with_financials=True)
     assert d2["level"]["value"] == "moyenne"
     c2 = {c["key"]: c["status"] for c in d2["checklist"]}
     assert c2["referent"] == "attention" and c2["sale_object"] == "attention" and c2["handover"] == "attention"
-    d3 = tr.build_diagnostic({**company, "decennale_ok": False}, with_financials=True)
+    d3 = tr.build_diagnostic({**property, "decennale_ok": False}, with_financials=True)
     assert d3["level"]["value"] == "fragile"
     # Rien de renseigné → inconnu partout, niveau moyen
     d4 = tr.build_diagnostic({"id": "c2", "rge_types": ["Isolation des combles"]}, with_financials=True)
@@ -158,17 +158,17 @@ def test_diagnostic_complet_depuis_annonce():
     assert c4["referent"] == "inconnu" and c4["decennale"] == "inconnu" and c4["sale_object"] == "inconnu" and c4["qualifications"] == "inconnu"
     assert d4["level"]["value"] == "moyenne"
     # Version publique d'une annonce : pas de données financières
-    pub = tr.build_diagnostic(company, with_financials=False)
+    pub = tr.build_diagnostic(property, with_financials=False)
     assert pub["scope"] == "public" and "financials" not in pub and pub["referent"]["stays"] is None
     # Qualifications ADEME injectées par la route : elles priment sur le déclaratif
-    with_ademe = {**company, "ademe_qualifications": tr.normalize_ademe(ademe_raw())["qualifications"]}
+    with_ademe = {**property, "ademe_qualifications": tr.normalize_ademe(ademe_raw())["qualifications"]}
     assert tr.build_diagnostic(with_ademe, with_financials=True)["source"] == "ademe"
 
 
 # ---------- Route publique ----------
 
 def test_route_publique(client, ademe):
-    r = client.get(f"/api/rge/company/{SIRET}/transmissibility")
+    r = client.get(f"/api/rge/property/{SIRET}/transmissibility")
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["found"] is True and body["available"] is True and body["company"]["nom_entreprise"] == "SECRET ENERGIE"
@@ -176,22 +176,22 @@ def test_route_publique(client, ademe):
     d = body["diagnostic"]
     assert d["scope"] == "public" and len(d["qualifications"]) == 2 and "financials" not in d
     assert d["verified_at"]
-    assert client.get("/api/rge/company/123/transmissibility").status_code == 400
+    assert client.get("/api/rge/property/123/transmissibility").status_code == 400
     # Entreprise absente de la liste ADEME : diagnostic générique, jamais bloquant
     ademe["raw"] = {"found": False, "message": "Entreprise non trouvée dans la base RGE"}
-    r = client.get("/api/rge/company/12345678900011/transmissibility")
+    r = client.get("/api/rge/property/12345678900011/transmissibility")
     assert r.status_code == 200 and r.json()["found"] is False and r.json()["diagnostic"]["level"]["value"] == "non-applicable"
     # Panne ADEME
     ademe["raw"] = {"found": False, "error": "timeout"}
-    r = client.get("/api/rge/company/12345678900011/transmissibility")
+    r = client.get("/api/rge/property/12345678900011/transmissibility")
     assert r.status_code == 200 and r.json()["available"] is False and "différée" in r.json()["message"]
 
 
 def test_route_publique_tolere_une_exception_ademe(client, monkeypatch):
     async def boom(siret):
         raise RuntimeError("ADEME HS")
-    monkeypatch.setattr(server, "get_company_qualifications", boom)
-    r = client.get(f"/api/rge/company/{SIRET}/transmissibility")
+    monkeypatch.setattr(server, "get_property_qualifications", boom)
+    r = client.get(f"/api/rge/property/{SIRET}/transmissibility")
     assert r.status_code == 200 and r.json()["available"] is False
 
 
@@ -200,10 +200,10 @@ def test_route_publique_tolere_une_exception_ademe(client, monkeypatch):
 def test_route_annonce_reservee_au_cedant_et_aux_repreneurs_autorises(api, client, ademe):
     seller = api.register(uid("ced"), "seller")
     payload = listing(siret=SIRET, sale_object="titres", technical_referent_stays=True, decennale_ok=True)
-    company = client.post("/api/companies", headers=api.h(seller), json=payload).json()
-    url = f"/api/companies/{company['id']}/transmissibility"
+    property = client.post("/api/properties", headers=api.h(seller), json=payload).json()
+    url = f"/api/properties/{property['id']}/transmissibility"
     assert client.get(url).status_code in (401, 403)
-    assert client.get("/api/companies/inexistante/transmissibility", headers=api.h(seller)).status_code == 404
+    assert client.get("/api/properties/inexistante/transmissibility", headers=api.h(seller)).status_code == 404
 
     r = client.get(url, headers=api.h(seller))
     assert r.status_code == 200, r.text
@@ -216,9 +216,9 @@ def test_route_annonce_reservee_au_cedant_et_aux_repreneurs_autorises(api, clien
     buyer = api.register(uid("rep"), "buyer")
     assert client.get(url, headers=api.h(buyer)).status_code == 403
     db_call(client, server.db.dataroom_access.insert_one,
-            {"id": str(uuid.uuid4()), "company_id": company["id"], "buyer_id": buyer["id"], "status": "pending"})
+            {"id": str(uuid.uuid4()), "property_id": property["id"], "buyer_id": buyer["id"], "status": "pending"})
     assert client.get(url, headers=api.h(buyer)).status_code == 403
-    db_call(client, server.db.dataroom_access.update_one, {"company_id": company["id"], "buyer_id": buyer["id"]},
+    db_call(client, server.db.dataroom_access.update_one, {"property_id": property["id"], "buyer_id": buyer["id"]},
             {"$set": {"status": "granted"}})
     assert client.get(url, headers=api.h(buyer)).status_code == 200
     assert client.get(url, headers=api.h(api.admin())).status_code == 200
@@ -226,8 +226,8 @@ def test_route_annonce_reservee_au_cedant_et_aux_repreneurs_autorises(api, clien
 
 def test_route_annonce_sans_siret_utilise_le_declaratif(api, client, ademe):
     seller = api.register(uid("decl"), "seller")
-    company = client.post("/api/companies", headers=api.h(seller), json=listing(siret="")).json()
-    r = client.get(f"/api/companies/{company['id']}/transmissibility", headers=api.h(seller))
+    property = client.post("/api/properties", headers=api.h(seller), json=listing(siret="")).json()
+    r = client.get(f"/api/properties/{property['id']}/transmissibility", headers=api.h(seller))
     assert r.status_code == 200
     assert r.json()["ademe"]["found"] is False and r.json()["diagnostic"]["source"] == "declaration"
     assert ademe["calls"] == [], "pas d'appel ADEME sans SIRET"

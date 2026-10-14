@@ -23,7 +23,7 @@ const MAX_PHOTOS = 5;
 
 // Dossier partagé du cédant (data room, upload existant) : documents par catégorie, journal des consultations,
 // photos (publiques ou réservées aux repreneurs sous accord de confidentialité).
-const DataroomPanel = ({ companyId }) => {
+const DataroomPanel = ({ propertyId }) => {
   const [docs, setDocs] = useState([]);
   const [logs, setLogs] = useState([]);
   const [photos, setPhotos] = useState([]);
@@ -33,7 +33,7 @@ const DataroomPanel = ({ companyId }) => {
   const [toDelete, setToDelete] = useState(null); // { kind: 'doc'|'photo', id, name }
 
   const load = async () => {
-    const [d, l, p] = await Promise.all([fetchDocuments(companyId), fetchAccessLog(companyId), fetchPhotos(companyId)]);
+    const [d, l, p] = await Promise.all([fetchDocuments(propertyId), fetchAccessLog(propertyId), fetchPhotos(propertyId)]);
     setDocs(d);
     setLogs(l);
     setPhotos(p);
@@ -43,13 +43,13 @@ const DataroomPanel = ({ companyId }) => {
   useEffect(() => {
     setLoading(true);
     load();
-  }, [companyId]);
+  }, [propertyId]);
 
   // Vraies images : le contenu est servi en base64 au propriétaire
   useEffect(() => {
     photos.forEach((photo) => {
       if (thumbs[photo.id]) return;
-      axiosInstance.get(`/companies/${companyId}/photos/${photo.id}`)
+      axiosInstance.get(`/properties/${propertyId}/photos/${photo.id}`)
         .then((r) => {
           const { content, content_type: type } = r.data || {};
           if (content) setThumbs((t) => ({ ...t, [photo.id]: `data:${type || 'image/jpeg'};base64,${content}` }));
@@ -67,7 +67,7 @@ const DataroomPanel = ({ companyId }) => {
     data.append('file', file);
     data.append('category', category);
     try {
-      await axiosInstance.post(`/dataroom/${companyId}/documents`, data, { headers: { 'Content-Type': 'multipart/form-data' } });
+      await axiosInstance.post(`/dataroom/${propertyId}/documents`, data, { headers: { 'Content-Type': 'multipart/form-data' } });
       toast.success('Document ajouté au dossier.');
       load();
     } catch (err) {
@@ -90,7 +90,7 @@ const DataroomPanel = ({ companyId }) => {
     data.append('file', file);
     data.append('visibility', visibility);
     try {
-      await axiosInstance.post(`/companies/${companyId}/photos`, data, { headers: { 'Content-Type': 'multipart/form-data' } });
+      await axiosInstance.post(`/properties/${propertyId}/photos`, data, { headers: { 'Content-Type': 'multipart/form-data' } });
       toast.success('Photo ajoutée.');
       load();
     } catch (err) {
@@ -103,8 +103,8 @@ const DataroomPanel = ({ companyId }) => {
   const remove = async () => {
     if (!toDelete) return;
     try {
-      if (toDelete.kind === 'doc') await axiosInstance.delete(`/dataroom/${companyId}/documents/${toDelete.id}`);
-      else await axiosInstance.delete(`/companies/${companyId}/photos/${toDelete.id}`);
+      if (toDelete.kind === 'doc') await axiosInstance.delete(`/dataroom/${propertyId}/documents/${toDelete.id}`);
+      else await axiosInstance.delete(`/properties/${propertyId}/photos/${toDelete.id}`);
       toast.success('Supprimé.');
       load();
     } catch (err) {

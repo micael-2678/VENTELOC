@@ -11,7 +11,7 @@ const isoPlus = (days) => new Date(Date.now() + days * 86400000).toISOString().s
   const browser = await L.launch();
   const errors = [];
   const s = L.seed();
-  const cid = s.company_id;
+  const cid = s.property_id;
   const sellerUser = s.seller;
   const p = await L.makePage(browser, { errors });
 
@@ -54,8 +54,8 @@ const isoPlus = (days) => new Date(Date.now() + days * 86400000).toISOString().s
 
   // ---- Page des annonces → fiche → contact
   await p.goto(L.FRONT + '/', { waitUntil: 'networkidle' });
-  await p.locator(`a[href="/company/${cid}"]`).first().click();
-  await p.waitForSelector('[data-testid=company-header]');
+  await p.locator(`a[href="/property/${cid}"]`).first().click();
+  await p.waitForSelector('[data-testid=property-header]');
   await p.getByTestId('contact-seller-btn').first().click();
   await p.getByTestId('contact-modal').waitFor();
   const prefilled = await p.getByTestId('contact-message').inputValue();
@@ -151,7 +151,7 @@ const isoPlus = (days) => new Date(Date.now() + days * 86400000).toISOString().s
   await L.otpSign(p, EMAIL);
   await L.sleep(1000);
   const myOffers = (await L.api('GET', '/offers/my', { token: buyerToken })).data.offers;
-  const offer = myOffers.find((o) => o.company_id === cid);
+  const offer = myOffers.find((o) => o.property_id === cid);
   L.check('offre : signée → statut pending, e-mail au cédant', offer && offer.status === 'pending' && !!L.findEmail(sellerUser.user.email, /offre/i, since), JSON.stringify(offer).slice(0, 200));
   L.check('offre : suivi affiché côté repreneur', (await p.getByTestId(`offer-${offer.id}`).count()) === 1);
 
@@ -201,7 +201,7 @@ const isoPlus = (days) => new Date(Date.now() + days * 86400000).toISOString().s
   const dl = sp.waitForEvent('download', { timeout: 10000 }).catch(() => null);
   await sp.getByTestId('invoice-pdf-btn').click();
   L.check('vente : PDF de facture téléchargé', !!(await dl));
-  const pub = (await L.api('GET', `/companies/${cid}`, { token: sellerUser.token })).data;
+  const pub = (await L.api('GET', `/properties/${cid}`, { token: sellerUser.token })).data;
   L.check('annonce : statut « vendue » après confirmation', pub.status === 'sold', pub.status);
   await L.shot(sp, 'closing-seller-desktop.png');
 

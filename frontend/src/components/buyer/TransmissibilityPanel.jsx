@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 import { formatDateFr } from '@/components/shared/formatters';
 
 // Diagnostic de transmissibilité (SPEC §4.6, API.md §8) : rendu de `diagnostic` renvoyé par
-// GET /companies/{id}/transmissibility (niveau, qualifications datées, règles titres/fonds, référent, décennale,
+// GET /properties/{id}/transmissibility (niveau, qualifications datées, règles titres/fonds, référent, décennale,
 // checklist). Les textes viennent du serveur (backend/transmissibility.py) ; rien n'est réécrit ici.
 
 const LEVEL_TONE = {

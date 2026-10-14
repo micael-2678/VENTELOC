@@ -171,11 +171,11 @@ const DEFAULT_LISTING = {
 const publishListing = async (sellerUser, siret, overrides = {}) => {
   const token = sellerUser.token;
   const body = { ...DEFAULT_LISTING, siret, company_name: overrides.company_name || `SOCIETE ${siret.slice(-5)}`, ...overrides };
-  const created = await api('POST', '/companies', { token, body });
-  if (created.status !== 200) throw new Error(`POST /companies ${created.status} ${JSON.stringify(created.data)}`);
+  const created = await api('POST', '/properties', { token, body });
+  if (created.status !== 200) throw new Error(`POST /properties ${created.status} ${JSON.stringify(created.data)}`);
   const id = created.data.id;
-  await api('PUT', `/companies/${id}`, { token, body: { mandant_address: { line1: '4 rue du Port', postal_code: '29200', city: 'Brest' }, mandant_capacity: 'dirigeant', sale_object: body.sale_object } });
-  const gen = await api('POST', '/seller/mandat/generate', { token, params: { company_id: id } });
+  await api('PUT', `/properties/${id}`, { token, body: { mandant_address: { line1: '4 rue du Port', postal_code: '29200', city: 'Brest' }, mandant_capacity: 'dirigeant', sale_object: body.sale_object } });
+  const gen = await api('POST', '/seller/mandat/generate', { token, params: { property_id: id } });
   if (!gen.data || !gen.data.contract_id) throw new Error(`generate ${gen.status} ${JSON.stringify(gen.data)}`);
   const since = emailCount();
   await api('POST', '/signatures/request-code', { token, body: { contract_id: gen.data.contract_id } });

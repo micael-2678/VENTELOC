@@ -252,8 +252,8 @@ const ProfilePage = ({ user, setUser }) => {
                     hint="Obligatoire à la publication d'une annonce ; charge vos qualifications RGE." testId="profile-siret-input" />
                   {lookup.result && ['found', 'not_found', 'unavailable'].includes(lookup.status) && <CompanyPrefillCard result={lookup.result} />}
                   <div>
-                    <label htmlFor="profile-company" className="block text-sm font-semibold text-brand-navy mb-1">Nom de l'entreprise</label>
-                    <input id="profile-company" autoComplete="organization" value={identity.company_name} onChange={(e) => setIdentity({ ...identity, company_name: e.target.value })} className={inputClass} />
+                    <label htmlFor="profile-property" className="block text-sm font-semibold text-brand-navy mb-1">Nom de l'entreprise</label>
+                    <input id="profile-property" autoComplete="organization" value={identity.company_name} onChange={(e) => setIdentity({ ...identity, company_name: e.target.value })} className={inputClass} />
                   </div>
                 </>
               )}

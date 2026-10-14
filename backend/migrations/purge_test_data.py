@@ -29,7 +29,7 @@ from storage import delete_file  # noqa: E402
 
 TEST_COUNTER_SUFFIX = "_test"
 # Collections dont les documents portent un fichier stocké (base64 en base, ou objet S3 à supprimer)
-FILE_COLLECTIONS = ("company_photos", "dataroom")
+FILE_COLLECTIONS = ("property_photos", "dataroom")
 
 
 def _any(*clauses) -> dict:
@@ -56,10 +56,10 @@ def _real_registry_number(value) -> bool:
 
 async def protected_records(db) -> dict:
     """Données réelles jamais purgées, même rattachées à une donnée de test : mandats du registre réel et factures réelles
-    → {contracts: [{id, company_id, registry_number}], invoices: [{id, number, closing_id}]}"""
+    → {contracts: [{id, property_id, registry_number}], invoices: [{id, number, closing_id}]}"""
     contracts = [c for c in await db.generated_contracts.find(
         {"type": "mandat", "is_test": {"$ne": True}, "registry_number": {"$exists": True}},
-        {"_id": 0, "id": 1, "company_id": 1, "registry_number": 1}).to_list(None) if _real_registry_number(c.get("registry_number"))]
+        {"_id": 0, "id": 1, "property_id": 1, "registry_number": 1}).to_list(None) if _real_registry_number(c.get("registry_number"))]
     invoices = await db.invoices.find({"is_test": {"$ne": True}, "number": {"$regex": "^FAC-"}},
                                       {"_id": 0, "id": 1, "number": 1, "closing_id": 1}).to_list(None)
     return {"contracts": contracts, "invoices": invoices}
@@ -75,22 +75,22 @@ async def purge_plan(db) -> tuple:
     is_test = {"is_test": True}
     protected = await protected_records(db)
     protected_contracts = [c["id"] for c in protected["contracts"]]
-    protected_companies = [c["company_id"] for c in protected["contracts"] if c.get("company_id")]
+    protected_properties = [c["property_id"] for c in protected["contracts"] if c.get("property_id")]
     protected_invoices = [i["id"] for i in protected["invoices"]]
     user_ids = await _ids(db.users, is_test)
-    company_ids = await _ids(db.companies, _except(_any(is_test, _in("seller_id", user_ids), _in("president_id", user_ids)),
-                                                   "id", protected_companies))
+    property_ids = await _ids(db.properties, _except(_any(is_test, _in("seller_id", user_ids), _in("president_id", user_ids)),
+                                                   "id", protected_properties))
     contract_ids = await _ids(db.generated_contracts, _except(_any(is_test, _in("seller_id", user_ids), _in("buyer_id", user_ids),
-                                                                   _in("company_id", company_ids)), "id", protected_contracts))
-    offer_ids = await _ids(db.offers, _any(is_test, _in("seller_id", user_ids), _in("buyer_id", user_ids), _in("company_id", company_ids)))
+                                                                   _in("property_id", property_ids)), "id", protected_contracts))
+    offer_ids = await _ids(db.offers, _any(is_test, _in("seller_id", user_ids), _in("buyer_id", user_ids), _in("property_id", property_ids)))
     closing_ids = await _ids(db.closings, _any(is_test, _in("seller_id", user_ids), _in("buyer_id", user_ids),
-                                               _in("company_id", company_ids), _in("offer_id", offer_ids)))
-    invoice_ids = await _ids(db.invoices, _except(_any(is_test, _in("closing_id", closing_ids), _in("company_id", company_ids),
+                                               _in("property_id", property_ids), _in("offer_id", offer_ids)))
+    invoice_ids = await _ids(db.invoices, _except(_any(is_test, _in("closing_id", closing_ids), _in("property_id", property_ids),
                                                        _in("debtor.user_id", user_ids)), "id", protected_invoices))
     conversation_ids = await _ids(db.conversations, _any(is_test, _in("seller_id", user_ids), _in("buyer_id", user_ids),
-                                                         _in("company_id", company_ids)))
+                                                         _in("property_id", property_ids)))
     by_user = lambda field="user_id": _in(field, user_ids)  # noqa: E731
-    by_company = _in("company_id", company_ids)
+    by_property = _in("property_id", property_ids)
     return [
         ("test_emails", {}),
         ("counters", {"_id": {"$regex": f"{TEST_COUNTER_SUFFIX}$"}}),
@@ -98,46 +98,46 @@ async def purge_plan(db) -> tuple:
         ("estimates", is_test),
         ("public_alerts", is_test),
         ("alerts", _any(is_test, by_user())),
-        ("favorites", _any(by_user(), by_company)),
-        ("company_photos", _any(is_test, by_company)),
-        ("dataroom", _any(is_test, by_company, by_user("uploaded_by"))),
-        ("dataroom_access_logs", _any(by_company, by_user(), by_user("buyer_id"))),
-        ("dataroom_access", _any(is_test, by_company, by_user("buyer_id"))),
-        ("messages", _any(_in("conversation_id", conversation_ids), by_company, by_user("sender_id"), by_user("receiver_id"))),
+        ("favorites", _any(by_user(), by_property)),
+        ("property_photos", _any(is_test, by_property)),
+        ("dataroom", _any(is_test, by_property, by_user("uploaded_by"))),
+        ("dataroom_access_logs", _any(by_property, by_user(), by_user("buyer_id"))),
+        ("dataroom_access", _any(is_test, by_property, by_user("buyer_id"))),
+        ("messages", _any(_in("conversation_id", conversation_ids), by_property, by_user("sender_id"), by_user("receiver_id"))),
         ("conversations", _any(is_test, _in("id", conversation_ids))),
-        ("contacts", _any(by_company, by_user("buyer_id"))),
-        ("contact_attempts", _any(by_company, by_user("sender_id"), by_user("receiver_id"))),
-        ("commercial_info_requests", _any(by_company, by_user("buyer_id"), by_user("seller_id"))),
-        ("followups", _any(by_company, by_user("buyer_id"))),
-        ("documents", _except(_any(is_test, _in("contract_id", contract_ids), by_company, by_user("signer_id")),
+        ("contacts", _any(by_property, by_user("buyer_id"))),
+        ("contact_attempts", _any(by_property, by_user("sender_id"), by_user("receiver_id"))),
+        ("commercial_info_requests", _any(by_property, by_user("buyer_id"), by_user("seller_id"))),
+        ("followups", _any(by_property, by_user("buyer_id"))),
+        ("documents", _except(_any(is_test, _in("contract_id", contract_ids), by_property, by_user("signer_id")),
                               "contract_id", protected_contracts)),
         ("signature_otps", _any(_in("contract_id", contract_ids), by_user())),
         ("generated_contracts", _except(_any(is_test, _in("id", contract_ids)), "id", protected_contracts)),
         ("offer_pdfs", _in("offer_id", offer_ids)),
         ("offers", _any(is_test, _in("id", offer_ids))),
         ("nps", _any(_in("closing_id", closing_ids), by_user())),
-        ("todos", _any(_in("ref.company_id", company_ids), _in("ref.closing_id", closing_ids), _in("ref.invoice_id", invoice_ids))),
+        ("todos", _any(_in("ref.property_id", property_ids), _in("ref.closing_id", closing_ids), _in("ref.invoice_id", invoice_ids))),
         ("invoices", _except(_any(is_test, _in("id", invoice_ids)), "id", protected_invoices)),
         ("closings", _any(is_test, _in("id", closing_ids))),
-        ("incidents", by_company),
+        ("incidents", by_property),
         # Journal d'audit chaîné : seules les chaînes des annonces de test sont supprimées (jamais un maillon d'une annonce réelle)
-        ("audit_logs", by_company),
-        ("president_invitations", _any(by_company, by_user("invited_by"))),
+        ("audit_logs", by_property),
+        ("president_invitations", _any(by_property, by_user("invited_by"))),
         ("dirigeant_verifications", by_user()),
         ("email_verifications", by_user()),
         ("login_otps", by_user()),
         ("password_resets", by_user()),
         ("kyc_sessions", by_user()),
-        ("contact_reveal_logs", _any(by_company, by_user("who"), by_user("subject_id"))),
-        ("companies", _except(_any(is_test, _in("id", company_ids)), "id", protected_companies)),
+        ("contact_reveal_logs", _any(by_property, by_user("who"), by_user("subject_id"))),
+        ("properties", _except(_any(is_test, _in("id", property_ids)), "id", protected_properties)),
         ("users", _any(is_test, _in("id", user_ids))),
-    ], user_ids, company_ids
+    ], user_ids, property_ids
 
 
 async def purge_test_data(db, dry_run: bool = True) -> dict:
     """Compte (dry_run) ou supprime les données de test ; renvoie {dry_run, counts: {collection: n}, total, files}.
     Les fichiers des photos et de la data room sont supprimés du stockage (S3) avant leurs documents."""
-    plan, user_ids, company_ids = await purge_plan(db)
+    plan, user_ids, property_ids = await purge_plan(db)
     counts, files = {}, 0
     # Étapes de vente réelles facturées pendant l'essai : la facture de test supprimée n'y reste pas référencée (une
     # facture réelle pourra être émise)
@@ -146,8 +146,8 @@ async def purge_test_data(db, dry_run: bool = True) -> dict:
     unlinked = {"invoice_id": {"$in": purged_invoice_ids}, "is_test": {"$ne": True}}
     unlinked_count = await db.closings.count_documents(unlinked) if purged_invoice_ids else 0
     # Une annonce réelle garde sa liste nominative de repreneurs présentés : seuls les repreneurs de test en sont retirés
-    presented = {"presented_buyers.buyer_id": {"$in": user_ids}, "id": {"$nin": company_ids}}
-    presented_count = await db.companies.count_documents(presented) if user_ids else 0
+    presented = {"presented_buyers.buyer_id": {"$in": user_ids}, "id": {"$nin": property_ids}}
+    presented_count = await db.properties.count_documents(presented) if user_ids else 0
     if unlinked_count and not dry_run:
         await db.closings.update_many(unlinked, {"$unset": {"invoice_id": "", "invoice_number": ""}})
     for name, query in plan:
@@ -167,9 +167,9 @@ async def purge_test_data(db, dry_run: bool = True) -> dict:
                         logging.warning(f"Fichier de test non supprimé du stockage ({doc.get('storage_key')}) : {e}")
         await coll.delete_many(query)
     if presented_count:
-        counts["companies.presented_buyers"] = presented_count
+        counts["properties.presented_buyers"] = presented_count
         if not dry_run:
-            await db.companies.update_many(presented, {"$pull": {"presented_buyers": {"buyer_id": {"$in": user_ids}}}})
+            await db.properties.update_many(presented, {"$pull": {"presented_buyers": {"buyer_id": {"$in": user_ids}}}})
     if unlinked_count:
         counts["closings.invoice_id"] = unlinked_count
     protected = await _protected_report(db, user_ids)
@@ -183,9 +183,9 @@ async def _protected_report(db, user_ids: list) -> dict:
     protected = await protected_records(db)
     contracts, invoices = [], []
     if protected["contracts"]:
-        test_companies = set(await _ids(db.companies, _any({"is_test": True}, _in("seller_id", user_ids))))
+        test_properties = set(await _ids(db.properties, _any({"is_test": True}, _in("seller_id", user_ids))))
         contracts = [{"id": c["id"], "registry_number": c["registry_number"]} for c in protected["contracts"]
-                     if c.get("company_id") in test_companies]
+                     if c.get("property_id") in test_properties]
     if protected["invoices"]:
         test_closings = set(await _ids(db.closings, _any({"is_test": True}, _in("seller_id", user_ids), _in("buyer_id", user_ids))))
         invoices = [{"id": i["id"], "number": i["number"]} for i in protected["invoices"] if i.get("closing_id") in test_closings]

@@ -29,7 +29,7 @@ export const invoiceStatus = (inv) => {
 
 const debtorText = (inv) => {
   const d = inv.debtor || {};
-  return [d.name, d.company, d.siren ? `SIREN ${d.siren}` : ''].filter(Boolean).join(' · ') || 'Débiteur non renseigné';
+  return [d.name, d.property, d.siren ? `SIREN ${d.siren}` : ''].filter(Boolean).join(' · ') || 'Débiteur non renseigné';
 };
 
 const AdminInvoices = ({ focusId, onEmailBlocked }) => {
@@ -90,7 +90,7 @@ const AdminInvoices = ({ focusId, onEmailBlocked }) => {
   const columns = [
     { key: 'number', label: 'N°', primary: true, nowrap: true, render: (inv) => <span className="font-semibold text-brand-navy">{inv.number || '—'}</span> },
     { key: 'debtor', label: 'Débiteur', wide: true, render: (inv) => <span className="break-words">{debtorText(inv)}</span> },
-    { key: 'company', label: 'Annonce', wide: true, render: (inv) => <span className="break-words">{inv.company_label || inv.company_title || '—'}{inv.sale_object ? ` · ${saleObjectLabel(inv.sale_object)}` : ''}</span> },
+    { key: 'company', label: 'Annonce', wide: true, render: (inv) => <span className="break-words">{inv.property_label || inv.property_title || '—'}{inv.sale_object ? ` · ${saleObjectLabel(inv.sale_object)}` : ''}</span> },
     { key: 'issued_on', label: 'Émise le', nowrap: true, render: (inv) => fmtDate(inv.issued_on) },
     { key: 'due_on', label: 'Échéance', nowrap: true, render: (inv) => fmtDate(inv.due_on) },
     { key: 'total_ht', label: 'HT', align: 'right', render: (inv) => fmtEurCents(inv.total_ht) },

@@ -16,7 +16,7 @@ jest.mock('@radix-ui/primitive/is-development', () => jest.requireActual('@radix
 
 import { axiosInstance as api } from '@/App';
 import AdminDashboard from '@/pages/AdminDashboard';
-import AdminCompanies from '@/components/admin/AdminCompanies';
+import AdminProperties from '@/components/admin/AdminProperties';
 import AdminInvoices from '@/components/admin/AdminInvoices';
 import AdminMetrics, { fmtKpi, kpiStatus, pickWeeks } from '@/components/AdminMetrics';
 import { actionKind } from '@/components/admin/AdminTodo';
@@ -62,10 +62,10 @@ const todo = {
   sections: [
     { key: 'listings_review', title: 'Annonces publiées à relire (48 h)', rows: [
       { type: 'listing_review', id: 'c1', title: 'Entreprise de plomberie-chauffage · Bretagne · 6 salariés', detail: 'Drapeaux : code NAF connexe au bâtiment', since: '2026-10-09T10:00:00Z',
-        ref: { company_id: 'c1', company_name: 'SARL Exemple', siret: '12345678900012', flags: ['naf_connexe'], asking_price: 290000 },
+        ref: { property_id: 'c1', company_name: 'SARL Exemple', siret: '12345678900012', flags: ['naf_connexe'], asking_price: 290000 },
         actions: [
-          { label: 'Valider', method: 'PUT', url: '/api/companies/c1/status?status=published' },
-          { label: 'Retirer avec motif', method: 'PUT', url: '/api/companies/c1/status?status=removed&reason=<motif>&reason_text=<texte>', reasons: { coordonnees: 'x' } },
+          { label: 'Valider', method: 'PUT', url: '/api/properties/c1/status?status=published' },
+          { label: 'Retirer avec motif', method: 'PUT', url: '/api/properties/c1/status?status=removed&reason=<motif>&reason_text=<texte>', reasons: { coordonnees: 'x' } },
         ] },
     ] },
     { key: 'dataroom_unanswered', title: 'Demandes de dossier sans réponse (> 7 j)', rows: [] },
@@ -79,7 +79,7 @@ const todo = {
         ] },
     ] },
     { key: 'closings_declared', title: 'Ventes déclarées ou contestées', rows: [
-      { type: 'closing_declared', id: 'cl1', title: 'Vente déclarée, en attente de confirmation — SARL Exemple', since: '2026-10-08T10:00:00Z', ref: { closing_id: 'cl1', company_id: 'c1' },
+      { type: 'closing_declared', id: 'cl1', title: 'Vente déclarée, en attente de confirmation — SARL Exemple', since: '2026-10-08T10:00:00Z', ref: { closing_id: 'cl1', property_id: 'c1' },
         actions: [
           { label: 'Confirmer', method: 'PUT', url: '/api/admin/closings/cl1/resolve', body: { action: 'confirm' } },
           { label: 'Annuler la déclaration', method: 'PUT', url: '/api/admin/closings/cl1/resolve', body: { action: 'cancel' } },
@@ -88,11 +88,11 @@ const todo = {
   ],
 };
 
-const companies = [
+const properties = [
   { id: 'c1', title: 'Entreprise de plomberie-chauffage · Bretagne · 6 salariés', company_name: 'SARL Exemple', siret: '12345678900012', trades: ['plomberie-chauffage'], region: 'Bretagne', department: '29', staff_count: 6, asking_price: 290000,
     status: 'published', published_at: '2026-10-09T10:00:00Z', views: 12, favorites_count: 0, messages_count: 2,
     moderation: { status: 'pending', flags: ['naf_connexe'], review_until: '2026-10-11T10:00:00Z' },
-    company_checks: { siren_active: true, naf_in_building: false, in_ademe_list: true, dirigeant_match: 'match_exact', duplicate_siren: false },
+    property_checks: { siren_active: true, naf_in_building: false, in_ademe_list: true, dirigeant_match: 'match_exact', duplicate_siren: false },
     seller: { id: 'u1', first_name: null, last_name: null, email: 'michel@exemple.fr', phone: '0612345678' } },
   { id: 'c2', title: 'Entreprise d\'isolation · Occitanie · 3 salariés', company_name: 'SAS Isol', status: 'removed', created_at: '2026-09-01T10:00:00Z', views: 0,
     moderation: { status: 'removed', reason: 'doublon', reason_text: 'Une annonce existe déjà pour cette entreprise' }, seller: { first_name: 'Anne', last_name: 'Martin', email: 'anne@exemple.fr' } },
@@ -122,13 +122,13 @@ beforeEach(() => {
   jest.clearAllMocks();
   api.get.mockImplementation((url) => Promise.resolve({ data: route(url, {
     '/admin/todo': todo,
-    '/admin/stats': { total_companies: 2, published_companies: 1, total_users: 2, invoices_count: 0, total_revenue: 0, paid_revenue: 0 },
-    '/admin/companies': { companies },
+    '/admin/stats': { total_properties: 2, published_properties: 1, total_users: 2, invoices_count: 0, total_revenue: 0, paid_revenue: 0 },
+    '/admin/properties': { properties },
     '/admin/users': users,
     '/admin/kpis': kpis,
     '/admin/costs': { costs: [{ month: '2026-10', amount: 120, note: 'Hébergement, identité' }] },
     '/admin/metrics': { period_days: 30, events: { days: [{ day: '2026-10-09', visitors: 4, events: { page_view: 10, contact_sent: 1 } }, { day: '2026-10-10', visitors: 0, events: { page_view: 0, contact_sent: 0 } }], totals: { page_view: 10, contact_sent: 1 }, paths: [{ path: '/', count: 6 }], names: ['contact_sent', 'page_view'], visitor_days: 4 }, funnel: [{ step: 'Acquéreurs inscrits', count: 1 }] },
-    '/admin/invoices': { invoices: [{ id: 'i1', number: 'FAC-2026-00001', status: 'issued', overdue: true, debtor: { name: 'Michel Dupont', company: 'SARL Exemple', siren: '123456789' }, company_label: 'SARL Exemple', sale_object: 'titres', issued_on: '2026-09-01', due_on: '2026-10-01', total_ht: 4000, total_ttc: 4800, reminders: ['2026-09-16'], pdf_url: '/api/invoices/i1/pdf' }], totals: { issued_ht: 4000, paid_ht: 0, overdue_ttc: 4800 } },
+    '/admin/invoices': { invoices: [{ id: 'i1', number: 'FAC-2026-00001', status: 'issued', overdue: true, debtor: { name: 'Michel Dupont', property: 'SARL Exemple', siren: '123456789' }, property_label: 'SARL Exemple', sale_object: 'titres', issued_on: '2026-09-01', due_on: '2026-10-01', total_ht: 4000, total_ttc: 4800, reminders: ['2026-09-16'], pdf_url: '/api/invoices/i1/pdf' }], totals: { issued_ht: 4000, paid_ht: 0, overdue_ttc: 4800 } },
   }) }));
   api.post.mockResolvedValue({ data: { 'daily:closing': '0' } });
   api.put.mockResolvedValue({ data: { ok: true } });
@@ -148,14 +148,14 @@ describe('helpers', () => {
   });
 
   test('actionKind et callAction (paramètres génériques remplacés)', async () => {
-    expect(actionKind({ method: 'PUT', url: '/api/companies/c1/status?status=removed&reason=<motif>&reason_text=<texte>' })).toBe('remove');
+    expect(actionKind({ method: 'PUT', url: '/api/properties/c1/status?status=removed&reason=<motif>&reason_text=<texte>' })).toBe('remove');
     expect(actionKind({ method: 'PUT', url: '/api/admin/invoices/i1/paid' })).toBe('paid');
     expect(actionKind({ method: 'PUT', url: '/api/admin/closings/x/resolve', body: { action: 'confirm' } })).toBe('resolve');
     expect(actionKind({ method: 'GET', url: '/api/admin/invoices/i1/mise-en-demeure.pdf' })).toBe('pdf');
     expect(actionKind({ method: 'GET', url: '/api/admin/closings?status=in_progress' })).toBe('open');
     expect(actionKind({ method: 'POST', url: '/api/admin/jobs/run' })).toBe('call');
-    await callAction({ method: 'PUT', url: '/api/companies/c1/status?status=removed&reason=<motif>&reason_text=<texte>' }, { params: { reason: 'doublon', reason_text: 'Déjà en ligne' } });
-    expect(api.request).toHaveBeenCalledWith({ method: 'put', url: '/companies/c1/status', params: { status: 'removed', reason: 'doublon', reason_text: 'Déjà en ligne' }, data: undefined });
+    await callAction({ method: 'PUT', url: '/api/properties/c1/status?status=removed&reason=<motif>&reason_text=<texte>' }, { params: { reason: 'doublon', reason_text: 'Déjà en ligne' } });
+    expect(api.request).toHaveBeenCalledWith({ method: 'put', url: '/properties/c1/status', params: { status: 'removed', reason: 'doublon', reason_text: 'Déjà en ligne' }, data: undefined });
   });
 
   test('KPI : format, cible, choix des semaines', () => {
@@ -193,7 +193,7 @@ describe('AdminDashboard', () => {
   test('« Valider » appelle l\'action telle quelle ; « Retirer avec motif » demande le motif', async () => {
     const c = await render(<AdminDashboard user={admin} setUser={jest.fn()} />);
     await click(c.querySelector('[data-testid="todo-action-c1-call"]'));
-    expect(api.request).toHaveBeenCalledWith({ method: 'put', url: '/companies/c1/status', params: { status: 'published' }, data: undefined });
+    expect(api.request).toHaveBeenCalledWith({ method: 'put', url: '/properties/c1/status', params: { status: 'published' }, data: undefined });
     await click(c.querySelector('[data-testid="todo-action-c1-remove"]'));
     const dialog = document.body.querySelector('[data-testid="removal-dialog"]');
     expect(dialog).toBeTruthy();
@@ -203,7 +203,7 @@ describe('AdminDashboard', () => {
     setValue(dialog.querySelector('[data-testid="removal-text"]'), 'Coordonnées dans la description');
     await flush();
     await click(dialog.querySelector('[data-testid="removal-dialog-confirm"]'));
-    expect(api.request).toHaveBeenCalledWith({ method: 'put', url: '/companies/c1/status', params: { status: 'removed', reason: 'autre', reason_text: 'Coordonnées dans la description' }, data: undefined });
+    expect(api.request).toHaveBeenCalledWith({ method: 'put', url: '/properties/c1/status', params: { status: 'removed', reason: 'autre', reason_text: 'Coordonnées dans la description' }, data: undefined });
   });
 
   test('« Marquer payée » envoie {paid_on, amount} ; « Confirmer » envoie le corps avec la note', async () => {
@@ -224,7 +224,7 @@ describe('AdminDashboard', () => {
   });
 
   test('liste vide explicite et bouton « Lancer les tâches »', async () => {
-    api.get.mockImplementation((url) => Promise.resolve({ data: url.startsWith('/admin/todo') ? { total: 0, sections: [] } : url.startsWith('/admin/companies') ? { companies: [] } : url.startsWith('/admin/users') ? [] : {} }));
+    api.get.mockImplementation((url) => Promise.resolve({ data: url.startsWith('/admin/todo') ? { total: 0, sections: [] } : url.startsWith('/admin/properties') ? { properties: [] } : url.startsWith('/admin/users') ? [] : {} }));
     const c = await render(<AdminDashboard user={admin} setUser={jest.fn()} />);
     expect(c.querySelector('[data-testid="todo-empty"]').textContent).toMatch(/Rien à traiter/);
     expect(c.querySelector('[data-testid="todo-count"]')).toBeNull();
@@ -247,10 +247,10 @@ describe('AdminDashboard', () => {
   });
 });
 
-describe('AdminCompanies', () => {
+describe('AdminProperties', () => {
   test('drapeaux libellés, vues réelles, retrait motivé, lien fiche', async () => {
     const onReload = jest.fn();
-    const c = await render(<AdminCompanies companies={companies} loading={false} onReload={onReload} />);
+    const c = await render(<AdminProperties properties={properties} loading={false} onReload={onReload} />);
     expect(c.textContent).toMatch(/12 vues/);
     expect(c.textContent).toMatch(/2 messages/);
     expect(c.textContent).not.toMatch(/0 favori/);
@@ -261,13 +261,13 @@ describe('AdminCompanies', () => {
     expect(c.textContent).toMatch(/Retirée : Une annonce existe déjà/);
     expect(c.textContent).toMatch(/michel@exemple.fr/);
     expect(c.textContent).not.toMatch(/null/);
-    expect(c.querySelector('[data-testid="company-link-c1"]').getAttribute('href')).toBe('/company/c1');
-    await click(c.querySelector('[data-testid="company-remove-c1"]'));
+    expect(c.querySelector('[data-testid="property-link-c1"]').getAttribute('href')).toBe('/property/c1');
+    await click(c.querySelector('[data-testid="property-remove-c1"]'));
     const dialog = document.body.querySelector('[data-testid="removal-dialog"]');
     setValue(dialog.querySelector('[data-testid="removal-reason"]'), 'doublon');
     await flush();
     await click(dialog.querySelector('[data-testid="removal-dialog-confirm"]'));
-    expect(api.put).toHaveBeenCalledWith('/companies/c1/status', null, { params: { status: 'removed', reason: 'doublon', reason_text: '' } });
+    expect(api.put).toHaveBeenCalledWith('/properties/c1/status', null, { params: { status: 'removed', reason: 'doublon', reason_text: '' } });
     expect(onReload).toHaveBeenCalled();
   });
 });

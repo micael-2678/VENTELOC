@@ -40,12 +40,12 @@ const num = (v) => {
 };
 
 // Texte lisible de l'offre, utilisé quand le texte du contrat n'est plus disponible côté navigateur
-export const offerSummaryText = (offer, companyTitle) => {
+export const offerSummaryText = (offer, propertyTitle) => {
   const o = offer || {};
   const f = o.financing && typeof o.financing === 'object' ? o.financing : {};
   const lines = [
     `OFFRE INDICATIVE${o.contract_number ? ` n° ${o.contract_number}` : ''}`,
-    companyTitle ? `Entreprise : ${companyTitle}` : '',
+    propertyTitle ? `Entreprise : ${propertyTitle}` : '',
     `Prix proposé : ${formatPrice(o.amount)}`,
     `Objet : ${SALE_OBJECT_LABELS[o.sale_object] || o.sale_object || ''}`,
     `Financement : ${Object.keys(FINANCING_LABELS).map((k) => `${FINANCING_LABELS[k]} ${formatPrice(f[k] || 0)}`).join(' · ')}`,
@@ -60,11 +60,11 @@ export const offerSummaryText = (offer, companyTitle) => {
 };
 
 // Boîte de signature d'une offre (création ou offre encore « à signer ») : POST /contracts/{id}/sign {otp_code}
-export const OfferSignatureDialog = ({ open, onClose, offer, contractId, documentText, companyTitle, onSigned }) => {
-  const text = documentText || recallOfferText(contractId) || offerSummaryText(offer, companyTitle);
+export const OfferSignatureDialog = ({ open, onClose, offer, contractId, documentText, propertyTitle, onSigned }) => {
+  const text = documentText || recallOfferText(contractId) || offerSummaryText(offer, propertyTitle);
   const sign = async (otpCode) => {
     const res = await axiosInstance.post(`/contracts/${contractId}/sign`, { otp_code: otpCode });
-    trackEvent('offer_signed', { listing: String(offer?.company_id || '') });
+    trackEvent('offer_signed', { listing: String(offer?.property_id || '') });
     forgetOfferText(contractId);
     toast.success('Offre signée et transmise au cédant. Vous serez prévenu par e-mail de sa réponse.', { duration: 8000 });
     if (typeof onSigned === 'function') await onSigned(res.data || {});
@@ -74,7 +74,7 @@ export const OfferSignatureDialog = ({ open, onClose, offer, contractId, documen
       open={open}
       onClose={onClose}
       title="Signer mon offre indicative"
-      subtitle={companyTitle || undefined}
+      subtitle={propertyTitle || undefined}
       contractId={contractId}
       documentText={text}
       acceptLabel="J'ai lu mon offre indicative. Je comprends qu'elle ouvre une négociation sans valoir promesse de vente, et que cette signature électronique a valeur juridique."
@@ -84,11 +84,11 @@ export const OfferSignatureDialog = ({ open, onClose, offer, contractId, documen
   );
 };
 
-const OfferForm = ({ company, onSigned, onCancel }) => {
+const OfferForm = ({ property, onSigned, onCancel }) => {
   const idp = useId();
   const [form, setForm] = useState({
-    amount: company?.asking_price ? String(company.asking_price) : '',
-    sale_object: company?.sale_object === 'fonds' ? 'fonds' : 'titres',
+    amount: property?.asking_price ? String(property.asking_price) : '',
+    sale_object: property?.sale_object === 'fonds' ? 'fonds' : 'titres',
     equity: '',
     loan: '',
     vendor_loan: '',
@@ -137,7 +137,7 @@ const OfferForm = ({ company, onSigned, onCancel }) => {
     setSubmitting(true);
     setServerError(null);
     const payload = {
-      company_id: company.id,
+      property_id: property.id,
       amount,
       sale_object: form.sale_object,
       financing: { equity: num(form.equity), loan: num(form.loan), vendor_loan: num(form.vendor_loan), earn_out: num(form.earn_out) },
@@ -183,7 +183,7 @@ const OfferForm = ({ company, onSigned, onCancel }) => {
             Vous signez votre offre par code reçu par e-mail. Le cédant l&apos;accepte (il la contresigne), la refuse avec un motif ou vous fait une contre-proposition.
             Une offre indicative ouvre la négociation : elle ne vaut pas promesse de vente. {OFFER.payerSentence}
           </p>
-          {company?.asking_price != null && <p className="mt-2">Prix demandé par le cédant : <strong className="tabular">{formatPrice(company.asking_price)}</strong></p>}
+          {property?.asking_price != null && <p className="mt-2">Prix demandé par le cédant : <strong className="tabular">{formatPrice(property.asking_price)}</strong></p>}
         </div>
 
         <div className="grid sm:grid-cols-2 gap-4">
@@ -306,7 +306,7 @@ const OfferForm = ({ company, onSigned, onCancel }) => {
           offer={created.offer}
           contractId={created.contract_id}
           documentText={created.content}
-          companyTitle={company?.title}
+          propertyTitle={property?.title}
           onSigned={async (data) => {
             setCreated(null);
             if (typeof onSigned === 'function') await onSigned({ ...created.offer, status: 'pending', ...data });

@@ -14,13 +14,13 @@ jest.mock('@/components/SecurePdfViewer', () => () => null);
 
 import { axiosInstance as api } from '@/App';
 import { BRAND } from '@/lib/brand';
-import CompanyDetail from '@/pages/CompanyDetail';
+import PropertyDetail from '@/pages/PropertyDetail';
 import CreateListing from '@/pages/CreateListing';
 import SellerDashboard from '@/pages/SellerDashboard';
 import { StepIndicator } from '@/components/seller/FormFields';
 import { STEPS, HELP } from '@/components/seller/listingForm';
 import { Pill } from '@/components/admin/shared';
-import { checkChips, moderationFlagLabels, removalSentence } from '@/components/admin/AdminCompanies';
+import { checkChips, moderationFlagLabels, removalSentence } from '@/components/admin/AdminProperties';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 window.scrollTo = jest.fn();
@@ -45,11 +45,11 @@ const render = async (ui, path = '/', routePath = '*') => {
 };
 const click = async (el) => { await act(async () => { el.dispatchEvent(new MouseEvent('click', { bubbles: true })); }); await flush(); };
 
-const company = {
+const property = {
   id: 'c1', status: 'published', title: 'Entreprise de plomberie-chauffage · Bretagne · 6 salariés', trades: ['plomberie-chauffage'],
   rge_types: ['Pompes à chaleur air/eau'], other_qualifications: [], is_rge: true, rge_validity: '2028-03-15',
   region: 'Bretagne', department: '29', staff_count: 6, ca_n: 780000, ebitda: 100000, asking_price: 380000,
-  company_checks: { in_ademe_list: false, dirigeant_match: 'match_exact' },
+  property_checks: { in_ademe_list: false, dirigeant_match: 'match_exact' },
   commission_info: { payer: 'cedant', terms_version: 'v2' },
 };
 const seller = { id: 'u1', role: 'seller', first_name: 'Michel', last_name: 'Dupont', email: 'michel@exemple.fr', email_verified: true, identity_verified: false };
@@ -76,15 +76,15 @@ afterEach(() => {
 
 describe('Fiche annonce', () => {
   test('annonce RGE : titre de page avec la marque principale, jamais la verticale', async () => {
-    mockGet({ '/companies/c1': company });
-    await render(<CompanyDetail user={null} />, '/company/c1', '/company/:id');
-    expect(document.title).toBe(`${company.title} | ${BRAND.name}`);
+    mockGet({ '/properties/c1': property });
+    await render(<PropertyDetail user={null} />, '/property/c1', '/property/:id');
+    expect(document.title).toBe(`${property.title} | ${BRAND.name}`);
     expect(document.title).not.toContain(BRAND.verticalName);
   });
 
   test('RGE non retrouvé sur la liste ADEME : validité en ton « déclaré », pas en vert', async () => {
-    mockGet({ '/companies/c1': company });
-    const c = await render(<CompanyDetail user={null} />, '/company/c1', '/company/:id');
+    mockGet({ '/properties/c1': property });
+    const c = await render(<PropertyDetail user={null} />, '/property/c1', '/property/:id');
     const badge = c.querySelector('[data-testid="rge-validity-badge"]');
     expect(badge.className).toContain('badge-declared');
     expect(badge.className).not.toContain('badge-verified');
@@ -92,24 +92,24 @@ describe('Fiche annonce', () => {
   });
 
   test('RGE retrouvé sur la liste ADEME : badge vert « Valide jusqu\'au »', async () => {
-    mockGet({ '/companies/c1': { ...company, company_checks: { in_ademe_list: true } } });
-    const c = await render(<CompanyDetail user={null} />, '/company/c1', '/company/:id');
+    mockGet({ '/properties/c1': { ...property, property_checks: { in_ademe_list: true } } });
+    const c = await render(<PropertyDetail user={null} />, '/property/c1', '/property/:id');
     const badge = c.querySelector('[data-testid="rge-validity-badge"]');
     expect(badge.className).toContain('badge-verified');
     expect(badge.textContent).toBe("Valide jusqu'au 15 mars 2028");
   });
 
   test('tuile EBE : multiple lu dans le bon sens (prix = n × EBE)', async () => {
-    mockGet({ '/companies/c1': company });
-    const c = await render(<CompanyDetail user={null} />, '/company/c1', '/company/:id');
+    mockGet({ '/properties/c1': property });
+    const c = await render(<PropertyDetail user={null} />, '/property/c1', '/property/:id');
     expect(c.textContent).not.toMatch(/× le prix/);
     expect(c.querySelector('[data-testid="ebitda-note"]').textContent).toBe("Prix demandé = 3,8 × l'EBE");
   });
 
   test('actions : grille deux colonnes sur mobile, action principale pleine largeur', async () => {
-    mockGet({ '/companies/c1': company });
-    const c = await render(<CompanyDetail user={null} />, '/company/c1', '/company/:id');
-    expect(c.querySelector('[data-testid="company-actions"]').className).toMatch(/grid-cols-2/);
+    mockGet({ '/properties/c1': property });
+    const c = await render(<PropertyDetail user={null} />, '/property/c1', '/property/:id');
+    expect(c.querySelector('[data-testid="property-actions"]').className).toMatch(/grid-cols-2/);
     expect(c.querySelector('[data-testid="contact-seller-btn"]').className).toMatch(/col-span-2/);
   });
 });
@@ -142,8 +142,8 @@ describe('Dépôt d\'annonce', () => {
 
 describe('Espace vendeur', () => {
   test('une seule annonce : pleine largeur, bouton « Suivre cette annonce »', async () => {
-    api.get.mockImplementation((url) => (url === '/companies'
-      ? Promise.resolve({ data: [{ ...company, seller_id: 'u1', mandat_signed: true }] })
+    api.get.mockImplementation((url) => (url === '/properties'
+      ? Promise.resolve({ data: [{ ...property, seller_id: 'u1', mandat_signed: true }] })
       : Promise.reject(Object.assign(new Error('404'), { response: { status: 404, data: {} } }))));
     const c = await render(<SellerDashboard user={seller} setUser={() => {}} />, '/seller/dashboard');
     const card = c.querySelector('[data-testid="listing-c1"]');

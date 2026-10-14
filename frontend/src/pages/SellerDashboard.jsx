@@ -13,7 +13,7 @@ import { listingTitle } from '@/components/shared';
 import { departementLabel, tradeLabel } from '@/lib/referentiels';
 import { mandateStatusSentence, formatDateTimeFr } from '@/lib/mandate';
 import {
-  fetchSellerCompanies, fetchMandateStatus, fetchAccessRequests, fetchOffers, fetchStats, fetchClosings, fetchKyc, fetchConversations, closingStatus,
+  fetchSellerProperties, fetchMandateStatus, fetchAccessRequests, fetchOffers, fetchStats, fetchClosings, fetchKyc, fetchConversations, closingStatus,
 } from '@/components/seller/api';
 import { StatusBadge, BlockingReasons, ModerationFlags } from '@/components/seller/ListingStatusBadge';
 import { badgeClass } from '@/components/seller/listingStatus';
@@ -33,14 +33,14 @@ const TABS = [
 ];
 
 // Statistiques d'une annonce : seuls les compteurs non nuls sont affichés (jamais de « 0 »)
-const StatsPanel = ({ company, stats, closings }) => {
+const StatsPanel = ({ property, stats, closings }) => {
   const items = [
-    { key: 'views', label: 'Vues de l\'annonce', value: Number(stats?.views ?? company.views) || 0, icon: Eye },
+    { key: 'views', label: 'Vues de l\'annonce', value: Number(stats?.views ?? property.views) || 0, icon: Eye },
     { key: 'favorites', label: 'Mises en favori', value: Number(stats?.favorites_count) || 0, icon: Heart },
-    { key: 'contacts', label: 'Repreneurs en contact', value: Number(stats?.unique_contacts ?? company.contacts_count) || 0, icon: Users },
+    { key: 'contacts', label: 'Repreneurs en contact', value: Number(stats?.unique_contacts ?? property.contacts_count) || 0, icon: Users },
     { key: 'offers', label: 'Offres reçues', value: Number(stats?.offers_count) || 0, icon: Euro },
   ].filter((i) => i.value > 0);
-  const mine = (closings || []).filter((c) => c.company_id === company.id);
+  const mine = (closings || []).filter((c) => c.property_id === property.id);
   return (
     <div className="space-y-5" data-testid="stats-panel">
       {items.length ? (
@@ -54,12 +54,12 @@ const StatsPanel = ({ company, stats, closings }) => {
         </dl>
       ) : (
         <p className="text-sm text-gray-600">
-          {company.status === 'published'
+          {property.status === 'published'
             ? 'Aucune consultation enregistrée pour l\'instant : les repreneurs reçoivent les nouvelles annonces chaque semaine et dès qu\'elles correspondent à leurs alertes.'
             : 'Les statistiques apparaissent dès que l\'annonce est en ligne.'}
         </p>
       )}
-      {company.published_at && <p className="text-sm text-gray-500">En ligne depuis le {formatDateTimeFr(company.published_at)}.</p>}
+      {property.published_at && <p className="text-sm text-gray-500">En ligne depuis le {formatDateTimeFr(property.published_at)}.</p>}
       {mine.length > 0 && (
         <div>
           <h3 className="flex items-center gap-2 font-semibold text-brand-navy mb-2"><Handshake className="w-4 h-4" aria-hidden="true" />Étapes de vente</h3>
@@ -87,7 +87,7 @@ const SellerDashboard = ({ user, setUser }) => {
   usePrivateSeo('Espace vendeur');
   const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
-  const [companies, setCompanies] = useState([]);
+  const [properties, setProperties] = useState([]);
   const [mandates, setMandates] = useState({});
   const [requests, setRequests] = useState({});
   const [offers, setOffers] = useState({});
@@ -99,17 +99,17 @@ const SellerDashboard = ({ user, setUser }) => {
   const [tab, setTab] = useState(searchParams.get('onglet') || 'buyers');
 
   const load = useCallback(async () => {
-    const [list, convs, cls, k] = await Promise.all([fetchSellerCompanies(), fetchConversations(user?.id), fetchClosings(), fetchKyc()]);
-    setCompanies(list);
+    const [list, convs, cls, k] = await Promise.all([fetchSellerProperties(), fetchConversations(user?.id), fetchClosings(), fetchKyc()]);
+    setProperties(list);
     setConversations(convs);
     setClosings(cls);
     setKyc(k);
-    const perCompany = await Promise.all(list.map(async (c) => {
+    const perProperty = await Promise.all(list.map(async (c) => {
       const [m, r, o, s] = await Promise.all([fetchMandateStatus(c.id), fetchAccessRequests(c.id), fetchOffers(c.id), fetchStats(c.id)]);
       return [c.id, { m, r, o, s }];
     }));
     const nextM = {}; const nextR = {}; const nextO = {}; const nextS = {};
-    perCompany.forEach(([id, { m, r, o, s }]) => { nextM[id] = m; nextR[id] = r; nextO[id] = o; nextS[id] = s; });
+    perProperty.forEach(([id, { m, r, o, s }]) => { nextM[id] = m; nextR[id] = r; nextO[id] = o; nextS[id] = s; });
     setMandates(nextM);
     setRequests(nextR);
     setOffers(nextO);
@@ -128,7 +128,7 @@ const SellerDashboard = ({ user, setUser }) => {
     setTimeout(() => document.getElementById('listing-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
   };
 
-  const selected = companies.find((c) => c.id === selectedId) || null;
+  const selected = properties.find((c) => c.id === selectedId) || null;
 
   if (loading) {
     return <div className="flex items-center justify-center min-h-screen" role="status" aria-label="Chargement"><div className="spinner" /></div>;
@@ -148,26 +148,26 @@ const SellerDashboard = ({ user, setUser }) => {
           </div>
           <Link to="/seller/create" className="btn-primary shrink-0" data-testid="new-listing">
             <Plus className="w-5 h-5" aria-hidden="true" />
-            {companies.length ? 'Nouvelle annonce' : 'Déposer mon annonce anonyme'}
+            {properties.length ? 'Nouvelle annonce' : 'Déposer mon annonce anonyme'}
           </Link>
         </header>
 
         <TodoBlock
           user={user}
           kyc={kyc}
-          companies={companies}
-          requestsByCompany={requests}
-          offersByCompany={offers}
+          properties={properties}
+          requestsByProperty={requests}
+          offersByProperty={offers}
           conversations={conversations}
           closings={closings}
-          mandatesByCompany={Object.fromEntries(Object.entries(mandates).map(([id, m]) => [id, m?.mandat || null]))}
+          mandatesByProperty={Object.fromEntries(Object.entries(mandates).map(([id, m]) => [id, m?.mandat || null]))}
           onSelect={select}
           onChanged={load}
         />
 
         <section aria-labelledby="listings-title" className="mb-8">
           <h2 id="listings-title" className="font-display text-xl font-bold text-brand-navy mb-3">Mes annonces</h2>
-          {companies.length === 0 ? (
+          {properties.length === 0 ? (
             <div className="card p-6 sm:p-8" data-testid="no-listings">
               <Building2 className="w-10 h-10 text-brand-navy/40 mb-3" aria-hidden="true" />
               <p className="font-semibold text-brand-navy text-lg">Vous n'avez pas encore d'annonce</p>
@@ -179,8 +179,8 @@ const SellerDashboard = ({ user, setUser }) => {
             </div>
           ) : (
             // Deux colonnes seulement à partir de deux annonces : une annonce seule prend toute la largeur
-            <ul className={`grid gap-4 ${companies.length > 1 ? 'lg:grid-cols-2' : ''}`}>
-              {companies.map((c) => {
+            <ul className={`grid gap-4 ${properties.length > 1 ? 'lg:grid-cols-2' : ''}`}>
+              {properties.map((c) => {
                 const st = stats[c.id];
                 const m = mandates[c.id];
                 const pendingReq = (requests[c.id] || []).filter((r) => r.status === 'pending').length;
@@ -200,14 +200,14 @@ const SellerDashboard = ({ user, setUser }) => {
                           {(c.trades || []).map((t) => tradeLabel(t, true)).filter(Boolean).join(', ') || (c.rge_types || []).slice(0, 2).join(', ')}
                         </p>
                       </div>
-                      <StatusBadge company={c} />
+                      <StatusBadge property={c} />
                     </div>
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-700">
                       <span className="font-bold text-brand-navy text-lg tabular">{c.asking_price > 0 ? formatEur(c.asking_price) : 'Prix à renseigner'}</span>
                       {(c.region || c.department) && <span className="flex items-center gap-1"><MapPin className="w-4 h-4" aria-hidden="true" />{[c.region, departementLabel(c.department)].filter(Boolean).join(' · ')}</span>}
                     </div>
-                    <BlockingReasons company={c} compact />
-                    <ModerationFlags company={c} />
+                    <BlockingReasons property={c} compact />
+                    <ModerationFlags property={c} />
                     <p className="text-sm text-gray-600">{mandateStatusSentence(m?.mandat)}</p>
                     {(counters.length > 0 || pendingReq > 0 || pendingOffers > 0) && (
                       <p className="text-sm text-gray-700">
@@ -220,7 +220,7 @@ const SellerDashboard = ({ user, setUser }) => {
                       <Button type="button" onClick={() => select(c.id)} className="rounded-xl bg-brand-navy hover:bg-brand-navy-light text-white" data-testid={`open-${c.id}`}>
                         Suivre cette annonce
                       </Button>
-                      <ListingActions company={c} presentedBuyers={m?.presented_buyers} closings={closings} mandat={m?.mandat} onChanged={load} />
+                      <ListingActions property={c} presentedBuyers={m?.presented_buyers} closings={closings} mandat={m?.mandat} onChanged={load} />
                     </div>
                   </li>
                 );
@@ -234,7 +234,7 @@ const SellerDashboard = ({ user, setUser }) => {
             <div className="border-b border-brand-line px-4 sm:px-6 pt-4">
               <div className="flex items-start justify-between gap-3 mb-3 min-w-0">
                 <h2 id="detail-title" className="font-display text-xl font-bold text-brand-navy break-words min-w-0">{listingTitle(selected)}</h2>
-                <StatusBadge company={selected} />
+                <StatusBadge property={selected} />
               </div>
               <Tabs value={tab} onValueChange={(v) => select(selected.id, v)}>
                 <TabsList className="flex flex-wrap justify-start h-auto gap-1 bg-transparent p-0">
@@ -254,24 +254,24 @@ const SellerDashboard = ({ user, setUser }) => {
                   <TabsContent value="buyers" className="mt-0 space-y-6">
                     <div>
                       <h3 className="font-semibold text-brand-navy mb-2">Demandes de dossier</h3>
-                      <AccessRequests requests={requests[selected.id]} companyId={selected.id} onChanged={load} />
+                      <AccessRequests requests={requests[selected.id]} propertyId={selected.id} onChanged={load} />
                     </div>
                     <div className="text-sm text-gray-600">
                       Les conversations avec les repreneurs sont dans la <Link to="/messages" className="btn-link">messagerie</Link>.
-                      {conversations.filter((cv) => cv.company_id === selected.id).length > 0 && ` ${conversations.filter((cv) => cv.company_id === selected.id).length} conversation(s) pour cette annonce.`}
+                      {conversations.filter((cv) => cv.property_id === selected.id).length > 0 && ` ${conversations.filter((cv) => cv.property_id === selected.id).length} conversation(s) pour cette annonce.`}
                     </div>
                   </TabsContent>
                   <TabsContent value="offers" className="mt-0">
                     <OffersPanel offers={offers[selected.id]} closings={closings} onChanged={load} />
                   </TabsContent>
                   <TabsContent value="mandate" className="mt-0">
-                    <MandatePanel company={selected} mandat={mandates[selected.id]?.mandat || null} presentedBuyers={mandates[selected.id]?.presented_buyers} onChanged={load} />
+                    <MandatePanel property={selected} mandat={mandates[selected.id]?.mandat || null} presentedBuyers={mandates[selected.id]?.presented_buyers} onChanged={load} />
                   </TabsContent>
                   <TabsContent value="dataroom" className="mt-0">
-                    <DataroomPanel companyId={selected.id} />
+                    <DataroomPanel propertyId={selected.id} />
                   </TabsContent>
                   <TabsContent value="stats" className="mt-0">
-                    <StatsPanel company={selected} stats={stats[selected.id]} closings={closings} />
+                    <StatsPanel property={selected} stats={stats[selected.id]} closings={closings} />
                   </TabsContent>
                 </div>
               </Tabs>

@@ -101,7 +101,7 @@ s3.download_file(bucket, sys.argv[1], '/tmp/' + sys.argv[2]); print('télécharg
       let total = 0;
       for (const n of names) { const c = t.getCollection(n).countDocuments(); total += c; print(n + " : " + c); }
       print("collections : " + names.length + ", documents : " + total);
-      if (!names.includes("users") || !names.includes("companies")) { print("ÉCHEC : collections attendues absentes"); t.dropDatabase(); quit(2); }
+      if (!names.includes("users") || !names.includes("properties")) { print("ÉCHEC : collections attendues absentes"); t.dropDatabase(); quit(2); }
       print("RESTAURATION DE TEST OK");
       t.dropDatabase();'
     ;;

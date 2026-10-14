@@ -38,13 +38,13 @@ export const PresentedBuyers = ({ buyers, compact = false }) => {
 };
 
 // Mandat de l'annonce : statut lisible, dates, registre, PDF, résiliation (préavis 15 j), prolongation (code)
-const MandatePanel = ({ company, mandat, presentedBuyers, onChanged }) => {
+const MandatePanel = ({ property, mandat, presentedBuyers, onChanged }) => {
   const [denouncing, setDenouncing] = useState(false);
   const [renewing, setRenewing] = useState(false);
   const d = mandateDates(mandat);
-  const legacy = legacyPayerText(mandat || company);
+  const legacy = legacyPayerText(mandat || property);
   const signed = mandat?.status === 'signed';
-  const needsSignature = !mandat || ['expired', 'void'].includes(mandat.status) || company?.status === 'mandat_en_attente' || mandat.status === 'pending_signature';
+  const needsSignature = !mandat || ['expired', 'void'].includes(mandat.status) || property?.status === 'mandat_en_attente' || mandat.status === 'pending_signature';
 
   const denounce = async () => {
     try {
@@ -94,7 +94,7 @@ const MandatePanel = ({ company, mandat, presentedBuyers, onChanged }) => {
 
       <div className="flex flex-wrap gap-2">
         {needsSignature && (
-          <Link to={`/seller/mandat/${company.id}`} className="btn-primary" data-testid={`sign-mandate-${company.id}`}>
+          <Link to={`/seller/mandat/${property.id}`} className="btn-primary" data-testid={`sign-mandate-${property.id}`}>
             <FileSignature className="w-4 h-4" aria-hidden="true" />
             {mandat && ['expired', 'void', 'denounced'].includes(mandat.status) ? 'Signer un nouveau mandat' : 'Signer le mandat'}
           </Link>

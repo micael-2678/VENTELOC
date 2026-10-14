@@ -14,7 +14,7 @@ jest.mock('@/components/SecurePdfViewer', () => () => null);
 
 import { axiosInstance as api } from '@/App';
 import { trackEvent } from '@/lib/analytics';
-import CompanyDetail from '@/pages/CompanyDetail';
+import PropertyDetail from '@/pages/PropertyDetail';
 import DataroomPage from '@/pages/DataroomPage';
 import BuyerDashboard from '@/pages/BuyerDashboard';
 import ClosingPanel, { closingSentence } from '@/components/closing/ClosingPanel';
@@ -62,20 +62,20 @@ const buyer = {
 };
 const seller = { id: 's1', role: 'seller', first_name: 'Michel', last_name: 'Dupont', email: 'michel@exemple.fr', email_verified: true };
 
-const company = {
+const property = {
   id: 'c1', status: 'published', title: 'Entreprise de plomberie-chauffage · Bretagne · 6 salariés', trades: ['plomberie-chauffage', 'pac-clim-cvc'],
   rge_types: ['Pompes à chaleur air/eau', 'Chaudières gaz/fioul à condensation'], other_qualifications: ['qualibat'], is_rge: true, rge_validity: '2028-03-15',
   qualifications_verified_at: '2026-10-02T10:00:00Z', region: 'Bretagne', department: '29', staff_count: 6, creation_date: '2009-03-02', legal_structure: 'SARL',
   ca_n: 780000, ca_n1: 720000, ca_n2: 650000, ebitda: 95000, margin: 32, debt: 40000, pipeline: 210000, fixed_charges: { salaries: 260000, rent: 18000, insurance: 9000, equipment: 12000 },
   asking_price: 290000, sale_object: 'titres', sale_reason: 'retraite', handover_months: 6, has_maintenance_contracts: true, technical_referent_stays: true, key_staff_stays: false, decennale_ok: true,
   description: 'Entreprise familiale de plomberie et chauffage, clientèle de particuliers et de syndics.', equipment: '3 fourgons, outillage complet', premises: 'Atelier et bureau de 180 m² en location',
-  published_at: '2026-10-01T10:00:00Z', company_checks: { in_ademe_list: true, dirigeant_match: 'match_exact' },
+  published_at: '2026-10-01T10:00:00Z', property_checks: { in_ademe_list: true, dirigeant_match: 'match_exact' },
   commission_info: { payer: 'cedant', rate_percent_ht: '6 %', estimate_ht: 17400, estimate_ttc: 20880, minimum_ht: 4000, terms_version: 'v2' }, views: 12,
 };
 
 const mockGet = (routes) => {
   api.get.mockImplementation((url) => {
-    // Clé la plus longue qui préfixe l'URL (« /companies/c1/transmissibility » avant « /companies/c1 »)
+    // Clé la plus longue qui préfixe l'URL (« /properties/c1/transmissibility » avant « /properties/c1 »)
     const entry = Object.keys(routes).filter((k) => url === k || url.startsWith(k)).sort((a, b) => b.length - a.length)[0];
     if (entry) return Promise.resolve({ data: typeof routes[entry] === 'function' ? routes[entry](url) : routes[entry] });
     return Promise.reject(Object.assign(new Error('404'), { response: { status: 404, data: { detail: 'Introuvable' } } }));
@@ -121,25 +121,25 @@ describe('fonctions pures', () => {
   });
 
   test('normalizeConversations : tableau API.md et dictionnaire historique', () => {
-    expect(normalizeConversations([{ id: 'k1', company_id: 'c1', unread_count: '2' }], 'b1')[0].unread_count).toBe(2);
+    expect(normalizeConversations([{ id: 'k1', property_id: 'c1', unread_count: '2' }], 'b1')[0].unread_count).toBe(2);
     const legacy = normalizeConversations({ c1: [{ sender_id: 's1', receiver_id: 'b1', content: 'Bonjour', created_at: '2026-10-02T10:00:00Z', read: false }] }, 'b1');
-    expect(legacy[0]).toMatchObject({ company_id: 'c1', unread_count: 1, last_message: 'Bonjour', legacy: true });
+    expect(legacy[0]).toMatchObject({ property_id: 'c1', unread_count: 1, last_message: 'Bonjour', legacy: true });
   });
 
   test('buildPipeline : étape la plus avancée par annonce, tri par date', () => {
     const rows = buildPipeline({
-      conversations: [{ id: 'k1', company_id: 'c1', last_at: '2026-10-03T10:00:00Z', unread_count: 1 }, { id: 'k2', company_id: 'c2', last_at: '2026-10-01T10:00:00Z' }],
-      accessByCompany: { c1: normalizeAccessStatus({ access_status: 'pending', request: { created_at: '2026-10-03' } }, buyer), c2: normalizeAccessStatus({ access_granted: true, access_status: 'granted' }, buyer) },
-      offers: [{ id: 'o1', company_id: 'c2', status: 'countered', created_at: '2026-10-05T10:00:00Z' }],
+      conversations: [{ id: 'k1', property_id: 'c1', last_at: '2026-10-03T10:00:00Z', unread_count: 1 }, { id: 'k2', property_id: 'c2', last_at: '2026-10-01T10:00:00Z' }],
+      accessByProperty: { c1: normalizeAccessStatus({ access_status: 'pending', request: { created_at: '2026-10-03' } }, buyer), c2: normalizeAccessStatus({ access_granted: true, access_status: 'granted' }, buyer) },
+      offers: [{ id: 'o1', property_id: 'c2', status: 'countered', created_at: '2026-10-05T10:00:00Z' }],
       closings: [],
-      companies: { c1: company },
+      properties: { c1: property },
     });
-    expect(rows.map((r) => r.companyId)).toEqual(['c2', 'c1']);
+    expect(rows.map((r) => r.propertyId)).toEqual(['c2', 'c1']);
     expect(rows[0].stage).toBe('offer');
     expect(rows[0].detail).toContain('Contre-proposition');
     expect(rows[1].stage).toBe('requested');
     expect(rows[1].unread).toBe(1);
-    expect(rows[1].title).toBe(company.title);
+    expect(rows[1].title).toBe(property.title);
   });
 
   test('alertPayload : critères API.md §8 et intitulé lisible', () => {
@@ -149,7 +149,7 @@ describe('fonctions pures', () => {
   });
 
   test('offerSummaryText : montants fr-FR, aucune variable brute', () => {
-    const text = offerSummaryText({ amount: 250000, sale_object: 'titres', financing: { equity: 100000, loan: 150000 }, conditions: ['Audit satisfaisant'], target_date: '2027-02-01', validity_days: 30 }, company.title);
+    const text = offerSummaryText({ amount: 250000, sale_object: 'titres', financing: { equity: 100000, loan: 150000 }, conditions: ['Audit satisfaisant'], target_date: '2027-02-01', validity_days: 30 }, property.title);
     expect(text).toContain('250');
     expect(text).toContain('Cession de titres');
     expect(text).toContain('Audit satisfaisant');
@@ -166,13 +166,13 @@ describe('fonctions pures', () => {
 });
 
 // ------------------------------------------------------------------------------------------------
-describe('CompanyDetail', () => {
+describe('PropertyDetail', () => {
   test('visiteur : tous les champs, libellés, badges, encart, aucun texte interdit, favori → inscription', async () => {
-    mockGet({ '/companies/c1': company });
-    const c = await render(<CompanyDetail user={null} />, '/company/c1', '/company/:id', <Route path="/register" element={<p data-testid="register-page">Inscription</p>} />);
+    mockGet({ '/properties/c1': property });
+    const c = await render(<PropertyDetail user={null} />, '/property/c1', '/property/:id', <Route path="/register" element={<p data-testid="register-page">Inscription</p>} />);
     const text = c.textContent;
     expectClean(c);
-    expect(text).toContain(company.title);
+    expect(text).toContain(property.title);
     expect(c.querySelector('[data-testid="qualification-badge"]').textContent).toContain('RGE vérifié ADEME');
     expect(text).toContain('Dirigeant vérifié');
     expect(text).toContain('Finistère (29)');
@@ -194,37 +194,37 @@ describe('CompanyDetail', () => {
     expect(c.querySelector('[data-testid="commission-notice"]')).toBeNull();
     expect(c.querySelector('[data-testid="alert-form"]')).not.toBeNull();
     expect(c.querySelector('[data-testid="share-btn"]')).not.toBeNull();
-    expect(document.title).toContain(company.title);
+    expect(document.title).toContain(property.title);
     await click(c.querySelector('[data-testid="favorite-btn"]'));
     expect(c.querySelector('[data-testid="register-page"]')).not.toBeNull();
   });
 
   test('héritage : encadré commission acquéreur seulement pour un mandat v1', async () => {
-    mockGet({ '/companies/c1': { ...company, commission_info: { ...company.commission_info, payer: 'repreneur', terms_version: 'v1' } } });
-    const c = await render(<CompanyDetail user={null} />, '/company/c1', '/company/:id');
+    mockGet({ '/properties/c1': { ...property, commission_info: { ...property.commission_info, payer: 'repreneur', terms_version: 'v1' } } });
+    const c = await render(<PropertyDetail user={null} />, '/property/c1', '/property/:id');
     expect(c.querySelector('[data-testid="commission-notice"]').textContent).toContain('acquéreur');
     expect(c.querySelector('[data-testid="commission-notice"]').textContent).toMatch(/HT \(.*TTC\)/);
   });
 
-  test('repreneur : « Présenter mon projet » → POST /companies/c1/contact {message} → messagerie', async () => {
-    mockGet({ '/companies/c1': company, '/favorites/check/c1': { favorited: false } });
+  test('repreneur : « Présenter mon projet » → POST /properties/c1/contact {message} → messagerie', async () => {
+    mockGet({ '/properties/c1': property, '/favorites/check/c1': { favorited: false } });
     api.post.mockResolvedValue({ data: { conversation_id: 'conv1' } });
-    const c = await render(<CompanyDetail user={buyer} />, '/company/c1', '/company/:id', <Route path="/messages" element={<p data-testid="messages-page">Messagerie</p>} />);
+    const c = await render(<PropertyDetail user={buyer} />, '/property/c1', '/property/:id', <Route path="/messages" element={<p data-testid="messages-page">Messagerie</p>} />);
     expect(c.querySelector('[data-testid="dataroom-link"]').getAttribute('href')).toBe('/dataroom/c1');
     await click(c.querySelector('[data-testid="contact-seller-btn"]'));
     const textarea = c.querySelector('[data-testid="contact-message"]');
     expect(textarea.value).toContain('350');
     expect(textarea.value).toContain('Bretagne');
     await click(c.querySelector('[data-testid="contact-send-btn"]'));
-    expect(api.post).toHaveBeenCalledWith('/companies/c1/contact', { message: expect.stringContaining('Bonjour') });
+    expect(api.post).toHaveBeenCalledWith('/properties/c1/contact', { message: expect.stringContaining('Bonjour') });
     expect(trackEvent).toHaveBeenCalledWith('contact_sent', expect.objectContaining({ source: 'fiche' }));
     expect(c.querySelector('[data-testid="messages-page"]')).not.toBeNull();
   });
 
   test('repreneur : 403 profile_incomplete → message et lien vers le profil', async () => {
-    mockGet({ '/companies/c1': company, '/favorites/check/c1': { favorited: true } });
+    mockGet({ '/properties/c1': property, '/favorites/check/c1': { favorited: true } });
     api.post.mockRejectedValue({ response: { status: 403, data: { detail: { code: 'profile_incomplete', message: 'Complétez votre profil de projet (40 % requis)' } } } });
-    const c = await render(<CompanyDetail user={buyer} />, '/company/c1', '/company/:id');
+    const c = await render(<PropertyDetail user={buyer} />, '/property/c1', '/property/:id');
     expect(c.querySelector('[data-testid="favorite-btn"]').textContent).toContain('Dans mes favoris');
     await click(c.querySelector('[data-testid="contact-seller-side-btn"]'));
     await click(c.querySelector('[data-testid="contact-send-btn"]'));
@@ -234,8 +234,8 @@ describe('CompanyDetail', () => {
   });
 
   test('cédant propriétaire : pas de CTA de contact, lien vers son espace', async () => {
-    mockGet({ '/companies/c1': { ...company, seller_id: 's1', company_name: 'DUPONT SARL' } });
-    const c = await render(<CompanyDetail user={seller} />, '/company/c1', '/company/:id');
+    mockGet({ '/properties/c1': { ...property, seller_id: 's1', company_name: 'DUPONT SARL' } });
+    const c = await render(<PropertyDetail user={seller} />, '/property/c1', '/property/:id');
     expect(c.querySelector('[data-testid="contact-seller-btn"]')).toBeNull();
     expect(c.textContent).not.toContain('DUPONT SARL');
     expect(c.textContent).toContain('Mon espace');
@@ -244,12 +244,12 @@ describe('CompanyDetail', () => {
 
 // ------------------------------------------------------------------------------------------------
 describe('DataroomPage', () => {
-  const base = { '/companies/c1': company, '/kyc/status': { verified: false, status: 'not_started' }, '/offers/my': { offers: [] } };
+  const base = { '/properties/c1': property, '/kyc/status': { verified: false, status: 'not_started' }, '/offers/my': { offers: [] } };
 
   test('sans demande : étape 1 en cours, bouton « Demander le dossier » → POST request-access', async () => {
     mockGet({ ...base, '/dataroom/c1/access-status': { access_granted: false, access_status: null, steps: { identity: false, nda: false, funds: false }, next_step: null, request: null } });
     api.post.mockResolvedValue({ data: { request_id: 'r1', status: 'pending' } });
-    const c = await render(<DataroomPage user={buyer} />, '/dataroom/c1', '/dataroom/:companyId');
+    const c = await render(<DataroomPage user={buyer} />, '/dataroom/c1', '/dataroom/:propertyId');
     expectClean(c);
     expect(c.querySelector('[aria-current="step"]').textContent).toContain('Dossier demandé');
     await click(c.querySelector('[data-testid="request-access-btn"]'));
@@ -258,7 +258,7 @@ describe('DataroomPage', () => {
 
   test('accepté, identité non vérifiée : étape identité en cours avec le bouton Stripe et retour mémorisé', async () => {
     mockGet({ ...base, '/dataroom/c1/access-status': { access_granted: false, access_status: 'accepted', steps: { identity: false, nda: false, funds: false }, next_step: 'identity', request: { id: 'r1', created_at: '2026-10-01', expires_at: '2026-10-11' } } });
-    const c = await render(<DataroomPage user={buyer} />, '/dataroom/c1', '/dataroom/:companyId');
+    const c = await render(<DataroomPage user={buyer} />, '/dataroom/c1', '/dataroom/:propertyId');
     expect(c.querySelector('[aria-current="step"]').textContent).toContain('Identité vérifiée');
     expect(c.textContent).toContain('Vérifier mon identité');
     expect(sessionStorage.getItem('kyc_return_to')).toBe('/dataroom/c1');
@@ -267,10 +267,10 @@ describe('DataroomPage', () => {
   test('accepté, identité vérifiée : « Lire et signer l\'accord » → generate-for-signature puis dialogue de signature', async () => {
     mockGet({ ...base, '/kyc/status': { verified: true }, '/dataroom/c1/access-status': { access_granted: false, access_status: 'accepted', steps: { identity: true, nda: false, funds: false }, next_step: 'nda', request: { id: 'r1' } } });
     api.post.mockResolvedValue({ data: { contract_id: 'nda1', contract_number: 'NDA-1', content: 'ACCORD DE CONFIDENTIALITÉ — texte intégral', terms_date: '10/10/2026' } });
-    const c = await render(<DataroomPage user={{ ...buyer, identity_verified: true }} />, '/dataroom/c1', '/dataroom/:companyId');
+    const c = await render(<DataroomPage user={{ ...buyer, identity_verified: true }} />, '/dataroom/c1', '/dataroom/:propertyId');
     expect(c.querySelector('[aria-current="step"]').textContent).toContain('Accord de confidentialité');
     await click(c.querySelector('[data-testid="nda-btn"]'));
-    expect(api.post).toHaveBeenCalledWith('/contracts/generate-for-signature', { company_id: 'c1', doc_type: 'nda' });
+    expect(api.post).toHaveBeenCalledWith('/contracts/generate-for-signature', { property_id: 'c1', doc_type: 'nda' });
     const dialog = document.querySelector('[data-testid="otp-signature-dialog"]');
     expect(dialog).not.toBeNull();
     expect(dialog.textContent).toContain('texte intégral');
@@ -280,7 +280,7 @@ describe('DataroomPage', () => {
   test('accord signé : formulaire d\'origine des fonds → POST funds-declaration', async () => {
     mockGet({ ...base, '/kyc/status': { verified: true }, '/dataroom/c1/access-status': { access_granted: false, access_status: 'accepted', steps: { identity: true, nda: true, funds: false }, next_step: 'funds', request: { id: 'r1' } } });
     api.post.mockResolvedValue({ data: { access_granted: true } });
-    const c = await render(<DataroomPage user={{ ...buyer, identity_verified: true }} />, '/dataroom/c1', '/dataroom/:companyId');
+    const c = await render(<DataroomPage user={{ ...buyer, identity_verified: true }} />, '/dataroom/c1', '/dataroom/:propertyId');
     expect(c.querySelector('[aria-current="step"]').textContent).toContain('Origine des fonds');
     setValue(c.querySelector('[data-testid="funds-source"]'), 'mixte');
     setValue(c.querySelector('[data-testid="funds-amount"]'), '300000');
@@ -295,9 +295,9 @@ describe('DataroomPage', () => {
       '/kyc/status': { verified: true },
       '/dataroom/c1/access-status': { access_granted: true, access_status: 'granted', steps: { identity: true, nda: true, funds: true }, next_step: null, request: { id: 'r1' } },
       '/dataroom/c1/documents': { documents: [{ id: 'd1', filename: 'bilan-2025.pdf', category: 'financier', uploaded_at: '2026-10-02' }], access_granted: true },
-      '/companies/c1/transmissibility': { ademe: { found: true }, diagnostic: { level: { value: 'elevee', label: 'Transmissibilité élevée', reasons: ['Le référent technique reste dans l\'entreprise.'] }, qualifications: [{ name: 'QualiPAC', organisme_label: 'Qualit\'EnR', date_fin: '2028-03-15', status: 'valide' }], transfer: { titres: { label: 'Cession de titres', summary: 'La société reste la même personne morale.', steps: [] }, fonds: { label: 'Cession du fonds', summary: 'Nouvelle demande.', steps: [] }, chosen: 'titres', recommendation: 'Privilégier la cession de titres.' }, referent: { label: 'Référent technique RGE', text: 'Texte référent.', steps: ['Identifier le référent.'], stays: true }, decennale: { label: 'Assurance décennale', titres: 'Continue.', fonds: 'Ne se transmet pas.', steps: [], ok: true }, checklist: [{ key: 'referent', label: 'Référent technique conservé', status: 'ok', detail: 'Le référent reste.' }], disclaimer: 'Diagnostic indicatif.' } },
+      '/properties/c1/transmissibility': { ademe: { found: true }, diagnostic: { level: { value: 'elevee', label: 'Transmissibilité élevée', reasons: ['Le référent technique reste dans l\'entreprise.'] }, qualifications: [{ name: 'QualiPAC', organisme_label: 'Qualit\'EnR', date_fin: '2028-03-15', status: 'valide' }], transfer: { titres: { label: 'Cession de titres', summary: 'La société reste la même personne morale.', steps: [] }, fonds: { label: 'Cession du fonds', summary: 'Nouvelle demande.', steps: [] }, chosen: 'titres', recommendation: 'Privilégier la cession de titres.' }, referent: { label: 'Référent technique RGE', text: 'Texte référent.', steps: ['Identifier le référent.'], stays: true }, decennale: { label: 'Assurance décennale', titres: 'Continue.', fonds: 'Ne se transmet pas.', steps: [], ok: true }, checklist: [{ key: 'referent', label: 'Référent technique conservé', status: 'ok', detail: 'Le référent reste.' }], disclaimer: 'Diagnostic indicatif.' } },
     });
-    const c = await render(<DataroomPage user={{ ...buyer, identity_verified: true }} />, '/dataroom/c1', '/dataroom/:companyId');
+    const c = await render(<DataroomPage user={{ ...buyer, identity_verified: true }} />, '/dataroom/c1', '/dataroom/:propertyId');
     expectClean(c);
     expect(c.querySelector('[data-testid="dataroom-documents"]').textContent).toContain('bilan-2025.pdf');
     expect(c.querySelector('[data-testid="transmissibility"]').textContent).toContain('Transmissibilité élevée');
@@ -308,7 +308,7 @@ describe('DataroomPage', () => {
     expect(c.querySelector('[data-testid="offer-amount"]').value).toBe('290000');
     api.post.mockResolvedValue({ data: { offer: { id: 'o1', amount: 290000 }, contract_id: 'ctr1', content: 'OFFRE INDICATIVE — texte' } });
     await click(c.querySelector('[data-testid="offer-submit"]'));
-    expect(api.post).toHaveBeenCalledWith('/offers', expect.objectContaining({ company_id: 'c1', amount: 290000, sale_object: 'titres', validity_days: 30, financing: { equity: 0, loan: 0, vendor_loan: 0, earn_out: 0 } }));
+    expect(api.post).toHaveBeenCalledWith('/offers', expect.objectContaining({ property_id: 'c1', amount: 290000, sale_object: 'titres', validity_days: 30, financing: { equity: 0, loan: 0, vendor_loan: 0, earn_out: 0 } }));
     const dialog = document.querySelector('[data-testid="otp-signature-dialog"]');
     expect(dialog).not.toBeNull();
     expect(dialog.textContent).toContain('Signer mon offre');
@@ -317,7 +317,7 @@ describe('DataroomPage', () => {
 
   test('cédant : renvoi vers son espace', async () => {
     mockGet({ ...base, '/dataroom/c1/access-status': { access_granted: true, is_seller: true } });
-    const c = await render(<DataroomPage user={seller} />, '/dataroom/c1', '/dataroom/:companyId');
+    const c = await render(<DataroomPage user={seller} />, '/dataroom/c1', '/dataroom/:propertyId');
     expect(c.textContent).toContain('Vous êtes le cédant');
   });
 });
@@ -325,7 +325,7 @@ describe('DataroomPage', () => {
 // ------------------------------------------------------------------------------------------------
 describe('ClosingPanel', () => {
   const closing = {
-    id: 'cl1', company_id: 'c1', company_title: company.title, seller_id: 's1', buyer_id: 'b1', offer_id: 'o1', offer_amount: 280000, sale_object: 'titres',
+    id: 'cl1', property_id: 'c1', property_title: property.title, seller_id: 's1', buyer_id: 'b1', offer_id: 'o1', offer_amount: 280000, sale_object: 'titres',
     expected_date: '2027-01-15', accepted_at: '2026-10-05T10:00:00Z', redacteur: null, status: 'in_progress', status_label: 'Vente en cours', declaration: null, invoice: null,
     seller_name: 'Michel Dupont', buyer_name: 'Claire Martin', commission_preview: { final_commission_ht: 16800, final_commission_ttc: 20160 },
   };
@@ -385,10 +385,10 @@ describe('BuyerDashboard', () => {
     mockGet({
       '/auth/profile': { ...buyer, profile_score: 30 },
       '/kyc/status': { verified: false },
-      '/messages/conversations': [{ id: 'k1', company_id: 'c1', company_title: company.title, last_at: '2026-10-03T10:00:00Z', unread_count: 2 }],
-      '/offers/my': { offers: [{ id: 'o1', company_id: 'c1', amount: 280000, status: 'countered', counter_amount: 300000, contract_id: 'ctr1', sale_object: 'titres', company: { title: company.title } }] },
+      '/messages/conversations': [{ id: 'k1', property_id: 'c1', property_title: property.title, last_at: '2026-10-03T10:00:00Z', unread_count: 2 }],
+      '/offers/my': { offers: [{ id: 'o1', property_id: 'c1', amount: 280000, status: 'countered', counter_amount: 300000, contract_id: 'ctr1', sale_object: 'titres', property: { title: property.title } }] },
       '/closing/my': { closings: [] },
-      '/favorites': { favorites: [{ company_id: 'c1', company }] },
+      '/favorites': { favorites: [{ property_id: 'c1', property }] },
       '/alerts': { alerts: [{ id: 'a1', trades: ['isolation'], regions: ['Bretagne'], max_price: 300000, rge: true, active: true }] },
       '/dataroom/c1/access-status': { access_granted: false, access_status: 'accepted', steps: { identity: false, nda: false, funds: false }, next_step: 'identity', request: { id: 'r1' } },
     });
@@ -402,7 +402,7 @@ describe('BuyerDashboard', () => {
     expect(c.querySelector('[data-testid="offer-accept-counter-btn"]')).not.toBeNull();
     expect(c.querySelector('[data-testid="offers-todo"]')).not.toBeNull();
     expect(c.querySelector('[data-testid="alert-a1"]').textContent).toContain('Isolation');
-    expect(c.querySelector('[data-testid="favorites-list"]').textContent).toContain(company.title);
+    expect(c.querySelector('[data-testid="favorites-list"]').textContent).toContain(property.title);
     expect(c.querySelector('[data-testid="search-cta"]').getAttribute('href')).toBe('/');
   });
 

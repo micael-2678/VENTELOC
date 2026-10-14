@@ -41,7 +41,7 @@ const AmountField = ({ id, label, value, onChange, hint, required }) => (
   </div>
 );
 
-const BuyerProfileFields = ({ value, onChange, errors = {}, showCompany = true }) => {
+const BuyerProfileFields = ({ value, onChange, errors = {}, showProperty = true }) => {
   const uid = useId();
   const p = value || {};
   const set = (key, v) => onChange({ ...p, [key]: v });
@@ -117,13 +117,13 @@ const BuyerProfileFields = ({ value, onChange, errors = {}, showCompany = true }
         testId="buyer-horizon"
       />
 
-      {showCompany && (
+      {showProperty && (
         <div className="grid sm:grid-cols-2 gap-4">
           <div className="min-w-0">
-            <label htmlFor={`${uid}-company`} className="block text-sm font-semibold text-brand-navy mb-1">
+            <label htmlFor={`${uid}-property`} className="block text-sm font-semibold text-brand-navy mb-1">
               Société qui reprend <span className="font-normal text-gray-500">(facultatif)</span>
             </label>
-            <input id={`${uid}-company`} type="text" value={p.company_name || ''} onChange={(e) => set('company_name', e.target.value)}
+            <input id={`${uid}-property`} type="text" value={p.company_name || ''} onChange={(e) => set('company_name', e.target.value)}
               autoComplete="organization" className={inputClass} placeholder="Nom de votre société ou holding" />
           </div>
           <div className="min-w-0">

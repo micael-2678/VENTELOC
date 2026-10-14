@@ -58,7 +58,7 @@ afterEach(() => {
 const seller = { id: 's1', role: 'seller' };
 const buyer = { id: 'b1', role: 'buyer' };
 const base = {
-  id: 'cl1', company_id: 'c1', company_title: 'Plomberie · Bretagne', seller_id: 's1', buyer_id: 'b1', offer_id: 'o1', offer_amount: 280000,
+  id: 'cl1', property_id: 'c1', property_title: 'Plomberie · Bretagne', seller_id: 's1', buyer_id: 'b1', offer_id: 'o1', offer_amount: 280000,
   sale_object: 'titres', redacteur: null, status: 'in_progress', declaration: null, invoice: null,
 };
 const buyerDeclaration = { declared_by: 'buyer', signed_on: '2026-10-09', final_price: 275000, sale_object: 'titres', confirm_deadline: '2026-10-16T10:00:00Z' };

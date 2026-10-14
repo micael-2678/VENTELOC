@@ -23,7 +23,7 @@ import { Field, NumberInput, TextInput, SelectInput, CheckCard, StepIndicator } 
 import { BlockingReasons } from '@/components/seller/ListingStatusBadge';
 import {
   STEPS, LEGAL_STRUCTURES, SALE_OBJECTS, SALE_REASONS, HANDOVER_OPTIONS, REASSURANCE, BOUNDS, HELP,
-  emptyForm, formFromCompany, applyEstimateToForm, applyLookupToForm, readEstimateSession, clearEstimateSession,
+  emptyForm, formFromProperty, applyEstimateToForm, applyLookupToForm, readEstimateSession, clearEstimateSession,
   validateStep, stepPayload, createPayload, firstIncompleteStep, descriptionIssues, rgeLabelsFromIds, fmtEur,
 } from '@/components/seller/listingForm';
 
@@ -42,14 +42,14 @@ const SectionCard = ({ title, intro, children }) => (
 // Aperçu anonyme : la carte publique elle-même (ListingCard), sans navigation
 const AnonymousPreview = ({ form, lookup }) => {
   const staff = form.staff_count === '' ? null : Number(form.staff_count);
-  const company = {
+  const property = {
     id: 'apercu',
     title: listingTitle({ trades: form.trades, region: form.region, staff_count: staff }),
     trades: form.trades,
     rge_types: rgeLabelsFromIds(form.rge_ids),
     other_qualifications: form.other_qualifications,
     is_rge: form.rge_ids.length > 0,
-    company_checks: { in_ademe_list: lookup?.rge?.found ? true : undefined },
+    property_checks: { in_ademe_list: lookup?.rge?.found ? true : undefined },
     region: form.region,
     department: form.department,
     staff_count: staff,
@@ -64,7 +64,7 @@ const AnonymousPreview = ({ form, lookup }) => {
         <span>Ce que les repreneurs verront : ni nom, ni SIRET, ni coordonnées. Votre identité n'est révélée qu'après accord de confidentialité signé.</span>
       </p>
       <div onClickCapture={(e) => { e.preventDefault(); e.stopPropagation(); }} className="max-w-md">
-        <ListingCard company={company} source="preview" />
+        <ListingCard property={property} source="preview" />
       </div>
     </div>
   );
@@ -79,8 +79,8 @@ const CreateListing = ({ user }) => {
   const lookup = useCompanyLookup();
   const dirigeant = useDirigeantVerification();
 
-  const [companyId, setCompanyId] = useState(editId);
-  const [company, setCompany] = useState(null);
+  const [propertyId, setPropertyId] = useState(editId);
+  const [property, setProperty] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [step, setStep] = useState(1);
   const [maxStep, setMaxStep] = useState(1);
@@ -100,7 +100,7 @@ const CreateListing = ({ user }) => {
   useEffect(() => { if (hasQualifs) setQualifsOpen(true); }, [hasQualifs]);
   const appliedLookup = useRef(null);
 
-  const locked = !!(company && (company.mandat_signed || company.status === 'published'));
+  const locked = !!(property && (property.mandat_signed || property.status === 'published'));
   const verified = isVerifiedUser(user, kyc);
 
   const update = useCallback((patch) => setForm((f) => ({ ...f, ...(typeof patch === 'function' ? patch(f) : patch) })), []);
@@ -114,12 +114,12 @@ const CreateListing = ({ user }) => {
     let cancelled = false;
     axiosInstance.get('/kyc/status').then((r) => { if (!cancelled) setKyc(r.data); }).catch(() => {});
     if (editId) {
-      axiosInstance.get(`/companies/${editId}`)
+      axiosInstance.get(`/properties/${editId}`)
         .then((r) => {
           if (cancelled) return;
           const c = r.data || {};
-          setCompany(c);
-          const f = formFromCompany(c);
+          setProperty(c);
+          const f = formFromProperty(c);
           setForm(f);
           const first = firstIncompleteStep(f);
           setStep(first);
@@ -187,18 +187,18 @@ const CreateListing = ({ user }) => {
     setSaving(true);
     try {
       let saved;
-      if (!companyId) {
-        const res = await axiosInstance.post('/companies', createPayload(form));
+      if (!propertyId) {
+        const res = await axiosInstance.post('/properties', createPayload(form));
         saved = res.data || {};
-        setCompanyId(saved.id);
+        setPropertyId(saved.id);
         trackEvent('listing_created', { step: current });
       } else {
         const payload = stepPayload(current, form);
         if (locked) ['siret', 'company_name', 'rge_types', 'legal_structure', 'creation_date'].forEach((k) => { delete payload[k]; });
-        const res = await axiosInstance.put(`/companies/${companyId}`, payload);
+        const res = await axiosInstance.put(`/properties/${propertyId}`, payload);
         saved = res.data || {};
       }
-      setCompany(saved);
+      setProperty(saved);
       setSavedAt(new Date());
       return saved;
     } catch (error) {
@@ -225,9 +225,9 @@ const CreateListing = ({ user }) => {
       navigate('/seller/dashboard');
       return;
     }
-    try { sessionStorage.setItem('kyc_return_to', `/seller/mandat/${saved.id || companyId}`); } catch (e) { /* stockage indisponible */ }
+    try { sessionStorage.setItem('kyc_return_to', `/seller/mandat/${saved.id || propertyId}`); } catch (e) { /* stockage indisponible */ }
     if (verified) {
-      navigate(`/seller/mandat/${saved.id || companyId}`);
+      navigate(`/seller/mandat/${saved.id || propertyId}`);
       return;
     }
     setDone(true);
@@ -282,7 +282,7 @@ const CreateListing = ({ user }) => {
   );
 
   if (done) {
-    const id = companyId;
+    const id = propertyId;
     const items = [
       { id: 'listing', label: 'Annonce enregistrée', description: 'Vous pouvez la modifier à tout moment depuis votre espace.', state: 'done' },
       {
@@ -329,7 +329,7 @@ const CreateListing = ({ user }) => {
           <Link to="/seller/dashboard" className="btn-link">Aller à mon espace vendeur</Link>
         </main>
         <InvitePresidentModal
-          companyId={id}
+          propertyId={id}
           dirigeants={dirigeant.dirigeantsData?.dirigeants || []}
           president={dirigeant.dirigeantsData?.president}
           isOpen={showInvite}
@@ -353,7 +353,7 @@ const CreateListing = ({ user }) => {
           <p className="text-sm text-gray-600 mt-3">Votre saisie est enregistrée en brouillon à chaque écran : vous pouvez reprendre plus tard depuis votre espace.</p>
         </header>
 
-        {company && <div className="mb-6"><BlockingReasons company={company} onAction={onBlockingAction} /></div>}
+        {property && <div className="mb-6"><BlockingReasons property={property} onAction={onBlockingAction} /></div>}
 
         {locked && (
           <p className="notice-amber flex items-start gap-2 mb-6" data-testid="locked-notice">
@@ -374,14 +374,14 @@ const CreateListing = ({ user }) => {
                   inputProps={{ disabled: locked }}
                   hint="14 chiffres, sur vos devis, factures ou votre extrait Kbis. Obligatoire pour la publication, pas pour enregistrer le brouillon."
                 />
-                {lookup.result?.company?.found && (
+                {lookup.result?.property?.found && (
                   <p className="flex items-start gap-2 text-sm text-gray-700" data-testid="lookup-found">
                     <CheckCircle className="w-4 h-4 mt-0.5 shrink-0 text-brand-green" aria-hidden="true" />
-                    <span><strong>{lookup.result.company.name}</strong>{lookup.result.company.nafLabel ? ` · ${lookup.result.company.nafLabel}` : ''}. Les champs ci-dessous ont été préremplis : vérifiez-les.</span>
+                    <span><strong>{lookup.result.property.name}</strong>{lookup.result.property.nafLabel ? ` · ${lookup.result.property.nafLabel}` : ''}. Les champs ci-dessous ont été préremplis : vérifiez-les.</span>
                   </p>
                 )}
                 <Field label="Dénomination de la société" help="Elle figure sur le mandat, jamais sur l'annonce." optional>
-                  {(p) => <TextInput value={form.company_name} onChange={setField('company_name')} disabled={locked} placeholder="Nom figurant sur le Kbis" testId="company-name-input" {...p} />}
+                  {(p) => <TextInput value={form.company_name} onChange={setField('company_name')} disabled={locked} placeholder="Nom figurant sur le Kbis" testId="property-name-input" {...p} />}
                 </Field>
               </SectionCard>
 

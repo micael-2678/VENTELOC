@@ -93,7 +93,7 @@ const EmbedListingsPage = () => {
         <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="embed-grid">
           {result.items.map((c) => (
             <li key={c.id} className="min-w-0 flex">
-              <ListingCard company={c} compact source="embed" linkTarget="_top" linkQuery={tracking} className="w-full" />
+              <ListingCard property={c} compact source="embed" linkTarget="_top" linkQuery={tracking} className="w-full" />
             </li>
           ))}
         </ul>

@@ -18,7 +18,7 @@ def db_call(client, fn, *args, **kwargs):
 def seller_and_mandate(api, client):
     seller = api.register(uid("cedant"), "seller")
     api.verify_kyc(seller)
-    c = client.post("/api/companies", headers=api.h(seller), json=listing()).json()
+    c = client.post("/api/properties", headers=api.h(seller), json=listing()).json()
     m = api.mandate(seller, c["id"])
     return seller, c, m
 
@@ -62,7 +62,7 @@ def test_code_reserve_au_signataire_verifie(api, client):
     api.verify_kyc(other)
     assert client.post("/api/signatures/request-code", headers=api.h(other), json={"contract_id": m["contract_id"]}).status_code == 404
     unverified = api.register(uid("nonverifie"), "seller")
-    c2 = client.post("/api/companies", headers=api.h(unverified), json=listing()).json()
+    c2 = client.post("/api/properties", headers=api.h(unverified), json=listing()).json()
     # Sans identité vérifiée, le mandat n'est même pas généré (403 identity_required) ; a fortiori aucun code
     assert api.mandate(unverified, c2["id"], expect=403)["detail"]["code"] == "identity_required"
 
@@ -82,21 +82,21 @@ def test_preuve_de_signature_conservee(api, client):
 def test_rattrapage_des_annonces_sans_mandat(api, client, emails):
     seller = api.register(uid("ancien"), "seller")
     legacy_id = str(uuid.uuid4())
-    db_call(client, server.db.companies.insert_one, {**listing(), "id": legacy_id, "seller_id": seller["id"],
+    db_call(client, server.db.properties.insert_one, {**listing(), "id": legacy_id, "seller_id": seller["id"],
                                                      "status": "published", "created_at": datetime.now(timezone.utc).isoformat()})
     # La route admin a disparu : la migration s'exécute en ligne de commande (python -m migrations.mandate_backfill)
     assert client.post("/api/admin/migrations/mandate-backfill", headers=api.h(api.admin())).status_code == 404
     from migrations.mandate_backfill import run_backfill
-    notify = lambda seller_id, company_id: server.email_user(seller_id, "listing_mandate_backfill",  # noqa: E731
-                                                            link=server.site_url(f"/seller/mandat/{company_id}"))
+    notify = lambda seller_id, property_id: server.email_user(seller_id, "listing_mandate_backfill",  # noqa: E731
+                                                            link=server.site_url(f"/seller/mandat/{property_id}"))
     dry = db_call(client, run_backfill, server.db, dry_run=True)
     assert legacy_id in [r["id"] for r in dry["listings"]]
-    assert client.get(f"/api/companies/{legacy_id}").status_code == 200, "le dry-run n'écrit rien"
+    assert client.get(f"/api/properties/{legacy_id}").status_code == 200, "le dry-run n'écrit rien"
 
     applied = db_call(client, run_backfill, server.db, dry_run=False, notify=notify)
     assert legacy_id in [r["id"] for r in applied["listings"]]
-    assert client.get(f"/api/companies/{legacy_id}").status_code == 404, "retirée des résultats publics, pas supprimée"
-    assert db_call(client, server.db.companies.find_one, {"id": legacy_id})["status"] == "mandat_en_attente"
+    assert client.get(f"/api/properties/{legacy_id}").status_code == 404, "retirée des résultats publics, pas supprimée"
+    assert db_call(client, server.db.properties.find_one, {"id": legacy_id})["status"] == "mandat_en_attente"
     assert any(e["to"] == seller["email"] and "mandat" in e["subject"].lower() for e in emails)
 
     again = db_call(client, run_backfill, server.db, dry_run=False)
@@ -104,7 +104,7 @@ def test_rattrapage_des_annonces_sans_mandat(api, client, emails):
 
     back = db_call(client, run_backfill, server.db, dry_run=False, rollback=True)
     assert legacy_id in [r["id"] for r in back["listings"]]
-    assert client.get(f"/api/companies/{legacy_id}").status_code == 200
+    assert client.get(f"/api/properties/{legacy_id}").status_code == 200
 
 
 def test_registre_des_mandats_et_export(api, client):
@@ -122,7 +122,7 @@ def test_registre_des_mandats_et_export(api, client):
 def test_relance_mandat_non_signe(api, client, emails):
     seller, c, _ = seller_and_mandate(api, client)
     old = (datetime.now(timezone.utc) - timedelta(days=4)).isoformat()
-    db_call(client, server.db.companies.update_one, {"id": c["id"]}, {"$set": {"updated_at": old, "mandate_pending_since": old}})
+    db_call(client, server.db.properties.update_one, {"id": c["id"]}, {"$set": {"updated_at": old, "mandate_pending_since": old}})
     db_call(client, server.db.users.update_one, {"id": seller["id"]}, {"$set": {"created_at": old}})
     emails.clear()
     client.post("/api/admin/jobs/run", headers=api.h(api.admin()))

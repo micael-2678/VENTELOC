@@ -37,7 +37,7 @@ def seller_with_listing(api, client, **extra):
     api.verify_kyc(seller)
     # SIRET unique par annonce : un doublon de SIREN déjà publié bloque la publication (SPEC §4.4)
     extra.setdefault("siret", f"{uuid.uuid4().int % 10**9:09d}00011")
-    c = client.post("/api/companies", headers=api.h(seller), json=listing(**extra)).json()
+    c = client.post("/api/properties", headers=api.h(seller), json=listing(**extra)).json()
     return seller, c
 
 
@@ -78,18 +78,18 @@ OFFER = {"amount": 480000, "sale_object": "titres", "financing": {"equity": 1500
 def test_generation_refusee_sans_adresse_ni_objet(api, client):
     seller = api.register(uid("cedant"), "seller")
     api.verify_kyc(seller)
-    c = client.post("/api/companies", headers=api.h(seller), json={**listing(), "sale_object": None}).json()
-    r = client.post("/api/seller/mandat/generate", params={"company_id": c["id"]}, headers=api.h(seller))
+    c = client.post("/api/properties", headers=api.h(seller), json={**listing(), "sale_object": None}).json()
+    r = client.post("/api/seller/mandat/generate", params={"property_id": c["id"]}, headers=api.h(seller))
     assert r.status_code == 400, r.text
     detail = r.json()["detail"]
     assert detail["code"] == "validation" and set(detail["missing"]) == {"mandant_address", "sale_object"}
     assert "adresse postale" in detail["message"]
     # Adresse seule : il manque encore l'objet
-    assert client.put(f"/api/companies/{c['id']}", headers=api.h(seller), json={"mandant_address": "1 rue Haute, 29200 Brest"}).status_code == 200
-    r = client.post("/api/seller/mandat/generate", params={"company_id": c["id"]}, headers=api.h(seller))
+    assert client.put(f"/api/properties/{c['id']}", headers=api.h(seller), json={"mandant_address": "1 rue Haute, 29200 Brest"}).status_code == 200
+    r = client.post("/api/seller/mandat/generate", params={"property_id": c["id"]}, headers=api.h(seller))
     assert r.status_code == 400 and r.json()["detail"]["missing"] == ["sale_object"]
-    assert client.put(f"/api/companies/{c['id']}", headers=api.h(seller), json={"sale_object": "fonds"}).status_code == 200
-    m = client.post("/api/seller/mandat/generate", params={"company_id": c["id"]}, headers=api.h(seller)).json()
+    assert client.put(f"/api/properties/{c['id']}", headers=api.h(seller), json={"sale_object": "fonds"}).status_code == 200
+    m = client.post("/api/seller/mandat/generate", params={"property_id": c["id"]}, headers=api.h(seller)).json()
     assert m["terms_version"] == "v2" and len(m["summary"]) == 5
     assert "la cession du fonds de commerce exploité par la société SECRET ENERGIE SAS" in m["content"]
     assert "1 rue Haute, 29200 Brest" in m["content"]
@@ -197,15 +197,15 @@ def test_denonciation_preavis_et_job_effet(api, client, emails):
     assert client.post(f"/api/seller/mandat/{m['contract_id']}/denounce", headers=api.h(seller)).status_code == 400
     # Avant la date d'effet : l'annonce reste en ligne
     run_jobs(api, client)
-    assert client.get(f"/api/companies/{c['id']}").status_code == 200
+    assert client.get(f"/api/properties/{c['id']}").status_code == 200
     # À la date d'effet : annonce retirée, e-mail avec la liste nominative des présentés
     db_call(client, server.db.generated_contracts.update_one, {"id": m["contract_id"]}, {"$set": {"effective_at": iso(-1)}})
     emails.clear()
     result = run_jobs(api, client)
     assert result["daily:mandate_denounce_effective"] == 1
-    company = db_call(client, server.db.companies.find_one, {"id": c["id"]}, {"_id": 0})
-    assert company["status"] == "withdrawn" and company["mandat_signed"] is False
-    assert client.get(f"/api/companies/{c['id']}").status_code == 404
+    property = db_call(client, server.db.properties.find_one, {"id": c["id"]}, {"_id": 0})
+    assert property["status"] == "withdrawn" and property["mandat_signed"] is False
+    assert client.get(f"/api/properties/{c['id']}").status_code == 404
     mail = last_email(seller["email"], f"Fin de votre mandat n° {signed['registry_number']}")
     assert mail and "Marie Martin" in mail["html"] and "dénoncé" in mail["html"] and "{" not in mail["html"]
     # Idempotent
@@ -253,8 +253,8 @@ def test_expiration_j30_puis_echeance(api, client, emails):
     emails.clear()
     assert run_jobs(api, client)["daily:mandate_expiry"] == 1
     mandat = db_call(client, server.db.generated_contracts.find_one, {"id": m["contract_id"]})
-    company = db_call(client, server.db.companies.find_one, {"id": c["id"]})
-    assert mandat["status"] == "expired" and company["status"] == "mandat_en_attente" and company["mandat_signed"] is False
+    property = db_call(client, server.db.properties.find_one, {"id": c["id"]})
+    assert mandat["status"] == "expired" and property["status"] == "mandat_en_attente" and property["mandat_signed"] is False
     mail = last_email(seller["email"], f"Fin de votre mandat n° {signed['registry_number']}")
     assert mail and "Luc Bernard" in mail["html"] and "échéance" in mail["html"]
     rows = client.get("/api/admin/mandates", headers=api.h(api.admin())).json()["mandates"]
@@ -267,7 +267,7 @@ def test_expiration_j30_puis_echeance(api, client, emails):
 
 def test_mandat_caduc_au_retrait_par_la_moderation(api, client):
     seller, c, m, signed = signed_mandate(api, client)
-    r = client.put(f"/api/companies/{c['id']}/status", params={"status": "removed", "reason": "coordonnees"}, headers=api.h(api.admin()))
+    r = client.put(f"/api/properties/{c['id']}/status", params={"status": "removed", "reason": "coordonnees"}, headers=api.h(api.admin()))
     assert r.status_code == 200
     assert db_call(client, server.db.generated_contracts.find_one, {"id": m["contract_id"]})["status"] == "void"
     assert client.get(f"/api/seller/mandat/status/{c['id']}", headers=api.h(seller)).json()["mandat"]["status"] == "void"
@@ -279,7 +279,7 @@ def test_nda_exige_identite_et_demande_acceptee(api, client, emails):
     seller, c = published(api, client)
     buyer = api.register(uid("repreneur"), "buyer", first="Marie", last="Martin", company_name="Martin Reprise")
     h = api.h(buyer)
-    body = {"company_id": c["id"], "doc_type": "nda"}
+    body = {"property_id": c["id"], "doc_type": "nda"}
     r = client.post("/api/contracts/generate-for-signature", headers=h, json=body)
     assert r.status_code == 403 and r.json()["detail"]["code"] == "identity_required"
     api.verify_kyc(buyer)
@@ -302,7 +302,7 @@ def test_nda_exige_identite_et_demande_acceptee(api, client, emails):
     # Repreneur présenté (nom et société révélés), dataroom_access.identity_revealed, e-mails aux deux parties avec lien PDF
     status = client.get(f"/api/seller/mandat/status/{c['id']}", headers=api.h(seller)).json()
     assert status["presented_buyers"][0] == {**status["presented_buyers"][0], "buyer_id": buyer["id"], "name": "Marie Martin", "company_name": "Martin Reprise"}
-    access = db_call(client, server.db.dataroom_access.find_one, {"company_id": c["id"], "buyer_id": buyer["id"]})
+    access = db_call(client, server.db.dataroom_access.find_one, {"property_id": c["id"], "buyer_id": buyer["id"]})
     assert access["identity_revealed"] is True and access["nda_signed_at"]
     assert last_email(seller["email"], "Un repreneur a signé l'accord de confidentialité")["html"].count("Marie Martin") >= 1
     buyer_mail = last_email(buyer["email"], "Votre accord de confidentialité est signé")
@@ -324,10 +324,10 @@ def test_nda_exige_identite_et_demande_acceptee(api, client, emails):
 def test_offre_creation_signature_acceptation_closing(api, client, emails):
     seller, c = published(api, client)
     buyer = presented_buyer(api, client, seller, c["id"])
-    r = client.post("/api/offers", headers=api.h(buyer), json={"company_id": c["id"], **OFFER, "validity_days": 10})
+    r = client.post("/api/offers", headers=api.h(buyer), json={"property_id": c["id"], **OFFER, "validity_days": 10})
     assert r.status_code == 422, "validité entre 15 et 60 jours"
     emails.clear()
-    created = client.post("/api/offers", headers=api.h(buyer), json={"company_id": c["id"], **OFFER}).json()
+    created = client.post("/api/offers", headers=api.h(buyer), json={"property_id": c["id"], **OFFER}).json()
     offer, contract_id = created["offer"], created["contract_id"]
     assert offer["status"] == "pending_signature" and offer["contract_id"] == contract_id and offer["financing"]["loan"] == 300000
     assert offer["validity_days"] == 30 and offer["conditions"] == OFFER["conditions"] and offer["target_date"] == "2027-03-31"
@@ -338,7 +338,7 @@ def test_offre_creation_signature_acceptation_closing(api, client, emails):
     assert "SECRET ENERGIE SAS" in text and "31/03/2027" in text and "à la charge du Cédant" in text
     # Le cédant ne peut pas répondre avant la signature ; une seconde offre ouverte est refusée
     assert client.put(f"/api/offers/{offer['id']}/respond", headers=api.h(seller), json={"action": "accept"}).status_code == 400
-    assert client.post("/api/offers", headers=api.h(buyer), json={"company_id": c["id"], **OFFER}).status_code == 400
+    assert client.post("/api/offers", headers=api.h(buyer), json={"property_id": c["id"], **OFFER}).status_code == 400
     assert client.get(f"/api/offers/{offer['id']}/pdf", headers=api.h(buyer)).status_code == 400
     # Signature du repreneur → pending, e-mail au cédant
     signed = api.sign_contract(buyer, contract_id).json()
@@ -359,7 +359,7 @@ def test_offre_creation_signature_acceptation_closing(api, client, emails):
     closing = db_call(client, server.db.closings.find_one, {"offer_id": offer["id"]}, {"_id": 0})
     assert closing["status"] == "in_progress" and closing["sale_object"] == "titres" and closing["offer_amount"] == 480000
     mine = client.get("/api/closing/my", headers=api.h(seller)).json()["closings"]
-    assert mine[0]["id"] == closing["id"] and mine[0]["company_title"]
+    assert mine[0]["id"] == closing["id"] and mine[0]["property_title"]
     assert last_email(buyer["email"], "Votre offre de") and last_email(buyer["email"], "Offre acceptée : les prochaines étapes")
     # PDF avec les deux signatures
     pdf = client.get(f"/api/offers/{offer['id']}/pdf", headers=api.h(seller)).json()
@@ -368,14 +368,14 @@ def test_offre_creation_signature_acceptation_closing(api, client, emails):
     docs = client.get(f"/api/documents/{c['id']}/signed", headers=api.h(seller)).json()
     assert [d["doc_type"] for d in docs].count("offer") == 2 and {d["signer_role"] for d in docs if d["doc_type"] == "offer"} == {"buyer", "seller"}
     # Les offres du cédant : repreneur nommé (NDA signé)
-    offers = client.get(f"/api/offers/company/{c['id']}", headers=api.h(seller)).json()["offers"]
+    offers = client.get(f"/api/offers/property/{c['id']}", headers=api.h(seller)).json()["offers"]
     assert offers[0]["buyer_label"] == "Marie Martin" and "buyer_email" not in offers[0]
 
 
 def test_offre_contre_proposition_acceptee_par_code(api, client, emails):
     seller, c = published(api, client)
     buyer = presented_buyer(api, client, seller, c["id"])
-    created = client.post("/api/offers", headers=api.h(buyer), json={"company_id": c["id"], **OFFER}).json()
+    created = client.post("/api/offers", headers=api.h(buyer), json={"property_id": c["id"], **OFFER}).json()
     offer, contract_id = created["offer"], created["contract_id"]
     api.sign_contract(buyer, contract_id)
     assert client.put(f"/api/offers/{offer['id']}/respond", headers=api.h(seller), json={"action": "counter"}).status_code == 400
@@ -402,7 +402,7 @@ def test_offre_contre_proposition_acceptee_par_code(api, client, emails):
 def test_offre_refus_motive_et_expiration(api, client, emails):
     seller, c = published(api, client)
     buyer = presented_buyer(api, client, seller, c["id"])
-    created = client.post("/api/offers", headers=api.h(buyer), json={"company_id": c["id"], **OFFER}).json()
+    created = client.post("/api/offers", headers=api.h(buyer), json={"property_id": c["id"], **OFFER}).json()
     api.sign_contract(buyer, created["contract_id"])
     r = client.put(f"/api/offers/{created['offer']['id']}/respond", headers=api.h(seller), json={"action": "reject"})
     assert r.status_code == 400 and r.json()["detail"]["missing"] == ["reason"]
@@ -411,7 +411,7 @@ def test_offre_refus_motive_et_expiration(api, client, emails):
     assert r.status_code == 200 and r.json()["status"] == "rejected"
     assert "Prix trop éloigné" in last_email(buyer["email"], "Réponse du cédant à votre offre")["html"]
     # Une nouvelle offre est possible après un refus ; elle expire par la tâche quotidienne
-    second = client.post("/api/offers", headers=api.h(buyer), json={"company_id": c["id"], **OFFER, "amount": 500000}).json()
+    second = client.post("/api/offers", headers=api.h(buyer), json={"property_id": c["id"], **OFFER, "amount": 500000}).json()
     api.sign_contract(buyer, second["contract_id"])
     db_call(client, server.db.offers.update_one, {"id": second["offer"]["id"]}, {"$set": {"expires_at": iso(-1)}})
     emails.clear()
@@ -423,7 +423,7 @@ def test_offre_refus_motive_et_expiration(api, client, emails):
     # Sans accès au dossier accordé, pas d'offre
     other = api.register(uid("curieux"), "buyer")
     api.verify_kyc(other)
-    r = client.post("/api/offers", headers=api.h(other), json={"company_id": c["id"], **OFFER})
+    r = client.post("/api/offers", headers=api.h(other), json={"property_id": c["id"], **OFFER})
     assert r.status_code == 403 and r.json()["detail"]["code"] == "not_allowed"
 
 
@@ -432,7 +432,7 @@ def test_offre_refus_motive_et_expiration(api, client, emails):
 def test_chaine_de_preuve_par_utilisateur(api, client):
     seller, c = published(api, client)
     buyer = presented_buyer(api, client, seller, c["id"])
-    created = client.post("/api/offers", headers=api.h(buyer), json={"company_id": c["id"], **OFFER}).json()
+    created = client.post("/api/offers", headers=api.h(buyer), json={"property_id": c["id"], **OFFER}).json()
     api.sign_contract(buyer, created["contract_id"])
     docs = client.get(f"/api/documents/{c['id']}/signed", headers=api.h(buyer)).json()
     assert [d["doc_type"] for d in docs] == ["nda", "offer"], "le repreneur ne voit que ses propres signatures"
@@ -462,23 +462,23 @@ def test_closing_direct_pour_un_repreneur_presente(api, client, emails):
     seller, c = published(api, client)
     buyer = presented_buyer(api, client, seller, c["id"])
     stranger = api.register(uid("inconnu"), "buyer")
-    r = client.post("/api/closing/direct", headers=api.h(seller), json={"company_id": c["id"], "buyer_id": stranger["id"]})
+    r = client.post("/api/closing/direct", headers=api.h(seller), json={"property_id": c["id"], "buyer_id": stranger["id"]})
     assert r.status_code == 400 and r.json()["detail"]["code"] == "validation"
-    assert client.post("/api/closing/direct", headers=api.h(buyer), json={"company_id": c["id"], "buyer_id": buyer["id"]}).status_code == 403
+    assert client.post("/api/closing/direct", headers=api.h(buyer), json={"property_id": c["id"], "buyer_id": buyer["id"]}).status_code == 403
     emails.clear()
-    r = client.post("/api/closing/direct", headers=api.h(seller), json={"company_id": c["id"], "buyer_id": buyer["id"]})
+    r = client.post("/api/closing/direct", headers=api.h(seller), json={"property_id": c["id"], "buyer_id": buyer["id"]})
     assert r.status_code == 200, r.text
     clo = r.json()
-    assert clo["status"] == "in_progress" and clo["buyer_id"] == buyer["id"] and clo["offer_id"] is None and clo["company_title"]
+    assert clo["status"] == "in_progress" and clo["buyer_id"] == buyer["id"] and clo["offer_id"] is None and clo["property_title"]
     assert last_email(buyer["email"], "Offre acceptée : les prochaines étapes")
     # Idempotent pour le même couple ; un second closing direct (autre annonce) ne bloque pas sur l'index offer_id
-    assert client.post("/api/closing/direct", headers=api.h(seller), json={"company_id": c["id"], "buyer_id": buyer["id"]}).json()["id"] == clo["id"]
+    assert client.post("/api/closing/direct", headers=api.h(seller), json={"property_id": c["id"], "buyer_id": buyer["id"]}).json()["id"] == clo["id"]
     seller2, c2 = published(api, client)
     buyer2 = presented_buyer(api, client, seller2, c2["id"], first="Anne", last="Leroy")
-    r = client.post("/api/closing/direct", headers=api.h(seller2), json={"company_id": c2["id"], "buyer_id": buyer2["id"]})
+    r = client.post("/api/closing/direct", headers=api.h(seller2), json={"property_id": c2["id"], "buyer_id": buyer2["id"]})
     assert r.status_code == 200 and r.json()["id"] != clo["id"]
     mine = client.get("/api/closing/my", headers=api.h(buyer)).json()["closings"]
-    assert mine[0]["id"] == clo["id"] and mine[0]["company_title"]
+    assert mine[0]["id"] == clo["id"] and mine[0]["property_title"]
 
 
 # ---------- Gabarits et suppression de la LOI ----------

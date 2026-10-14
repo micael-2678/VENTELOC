@@ -12,7 +12,7 @@ import PipelineList from '@/components/buyer/PipelineList';
 import OffersList from '@/components/buyer/OffersList';
 import AlertsPanel from '@/components/buyer/AlertsPanel';
 import {
-  fetchProfile, fetchKyc, fetchConversations, fetchMyOffers, fetchClosings, fetchFavorites, fetchAlerts, fetchAccessStatus, fetchCompany,
+  fetchProfile, fetchKyc, fetchConversations, fetchMyOffers, fetchClosings, fetchFavorites, fetchAlerts, fetchAccessStatus, fetchProperty,
   buildPipeline,
 } from '@/components/buyer/api';
 
@@ -45,8 +45,8 @@ const BuyerDashboard = ({ user, setUser }) => {
   const [closings, setClosings] = useState([]);
   const [favorites, setFavorites] = useState([]);
   const [alerts, setAlerts] = useState([]);
-  const [accessByCompany, setAccessByCompany] = useState({});
-  const [companies, setCompanies] = useState({});
+  const [accessByProperty, setAccessByProperty] = useState({});
+  const [properties, setProperties] = useState({});
   const [loading, setLoading] = useState(true);
 
   const reloadOffers = useCallback(async () => {
@@ -74,39 +74,39 @@ const BuyerDashboard = ({ user, setUser }) => {
     // Statut d'accès et titre de chaque annonce du pipeline (quelques dossiers par repreneur)
     const ids = [];
     const push = (id) => { if (id && !ids.includes(id) && ids.length < MAX_LOOKUPS) ids.push(id); };
-    conv.forEach((c) => push(c.company_id));
-    o.forEach((x) => push(x.company_id));
-    cl.forEach((x) => push(x.company_id));
+    conv.forEach((c) => push(c.property_id));
+    o.forEach((x) => push(x.property_id));
+    cl.forEach((x) => push(x.property_id));
     const known = {};
-    fav.forEach((f) => { if (f.company?.id) known[f.company.id] = f.company; });
+    fav.forEach((f) => { if (f.property?.id) known[f.property.id] = f.property; });
     const [statuses, details] = await Promise.all([
       Promise.all(ids.map((id) => fetchAccessStatus(id, user).then((s) => [id, s]))),
-      Promise.all(ids.filter((id) => !known[id]).map((id) => fetchCompany(id).then((c) => [id, c]))),
+      Promise.all(ids.filter((id) => !known[id]).map((id) => fetchProperty(id).then((c) => [id, c]))),
     ]);
     const access = {};
     statuses.forEach(([id, s]) => { if (s) access[id] = s; });
     details.forEach(([id, c]) => { if (c) known[id] = c; });
-    setAccessByCompany(access);
-    setCompanies(known);
+    setAccessByProperty(access);
+    setProperties(known);
     setLoading(false);
   }, [user, setUser]);
 
   useEffect(() => { load(); }, [load]);
 
   const pipeline = useMemo(
-    () => buildPipeline({ conversations, accessByCompany, offers, closings, companies }),
-    [conversations, accessByCompany, offers, closings, companies],
+    () => buildPipeline({ conversations, accessByProperty, offers, closings, properties }),
+    [conversations, accessByProperty, offers, closings, properties],
   );
   const score = Number.isFinite(Number(profile?.profile_score)) ? Number(profile.profile_score) : (Number.isFinite(Number(user?.profile_score)) ? Number(user.profile_score) : null);
   const profileIncomplete = score !== null && score < MIN_SCORE_TO_CONTACT;
   const identityVerified = kyc?.verified === true || user?.identity_verified === true;
-  const favoriteCompanies = favorites.map((f) => f.company).filter((c) => c && c.id);
+  const favoriteProperties = favorites.map((f) => f.property).filter((c) => c && c.id);
   const openOffers = offers.filter((o) => ['pending_signature', 'countered'].includes(o.status));
 
-  const removeFavorite = async (companyId) => {
+  const removeFavorite = async (propertyId) => {
     try {
-      await axiosInstance.delete(`/favorites/${companyId}`);
-      setFavorites((list) => list.filter((f) => f.company_id !== companyId && f.company?.id !== companyId));
+      await axiosInstance.delete(`/favorites/${propertyId}`);
+      setFavorites((list) => list.filter((f) => f.property_id !== propertyId && f.property?.id !== propertyId));
       toast.success('Retirée de vos favoris');
     } catch (error) {
       toast.error(apiErrorMessage(error));
@@ -191,14 +191,14 @@ const BuyerDashboard = ({ user, setUser }) => {
             <AlertsPanel alerts={alerts} onChanged={reloadAlerts} />
           </Section>
 
-          <Section id="favoris" title="Mes favoris" icon={Heart} count={favoriteCompanies.length}>
-            {favoriteCompanies.length === 0 ? (
+          <Section id="favoris" title="Mes favoris" icon={Heart} count={favoriteProperties.length}>
+            {favoriteProperties.length === 0 ? (
               <p className="text-sm text-gray-600">Aucun favori. Le cœur sur une annonce la garde ici. <Link to={SEARCH_PATH} className="btn-link text-sm">Parcourir les annonces</Link></p>
             ) : (
               <ul className="space-y-3" data-testid="favorites-list">
-                {favoriteCompanies.map((c) => (
+                {favoriteProperties.map((c) => (
                   <li key={c.id} className="min-w-0">
-                    <ListingCard company={c} compact source="favorites" />
+                    <ListingCard property={c} compact source="favorites" />
                     <button type="button" onClick={() => removeFavorite(c.id)} className="btn-link text-sm mt-1 text-gray-600" aria-label={`Retirer des favoris : ${c.title || 'annonce'}`}>
                       <Trash2 className="w-4 h-4" aria-hidden="true" />Retirer
                     </button>

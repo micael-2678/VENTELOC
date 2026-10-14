@@ -18,7 +18,7 @@ import TransmissibilityPanel from '@/components/buyer/TransmissibilityPanel';
 import OfferForm from '@/components/buyer/OfferForm';
 import { OfferRow } from '@/components/buyer/OffersList';
 import {
-  fetchCompany, fetchAccessStatus, fetchKyc, fetchMyOffers, fetchDataroomDocuments, fetchTransmissibility, asList,
+  fetchProperty, fetchAccessStatus, fetchKyc, fetchMyOffers, fetchDataroomDocuments, fetchTransmissibility, asList,
   isIdentityRequired, isNotAllowed, isProfileIncomplete, badgeClass,
 } from '@/components/buyer/api';
 
@@ -29,9 +29,9 @@ import {
 const OPEN_OFFER_STATUSES = ['pending_signature', 'pending', 'countered', 'accepted'];
 
 const DataroomPage = ({ user, setUser }) => {
-  const { companyId } = useParams();
+  const { propertyId } = useParams();
   usePrivateSeo('Dossier de l\'entreprise');
-  const [company, setCompany] = useState(null);
+  const [property, setProperty] = useState(null);
   const [access, setAccess] = useState(null);
   const [kyc, setKyc] = useState(null);
   const [offers, setOffers] = useState([]);
@@ -49,23 +49,23 @@ const DataroomPage = ({ user, setUser }) => {
   const identityVerified = kyc?.verified === true || access?.steps?.identity === true || user?.identity_verified === true;
 
   const load = useCallback(async () => {
-    const [c, a, k, o] = await Promise.all([fetchCompany(companyId), fetchAccessStatus(companyId, user), fetchKyc(), fetchMyOffers()]);
+    const [c, a, k, o] = await Promise.all([fetchProperty(propertyId), fetchAccessStatus(propertyId, user), fetchKyc(), fetchMyOffers()]);
     if (!c) {
       setNotFound(true);
       setLoading(false);
       return;
     }
-    setCompany(c);
+    setProperty(c);
     setAccess(a);
     setKyc(k);
-    setOffers(asList(o, 'offers').filter((x) => x.company_id === companyId));
+    setOffers(asList(o, 'offers').filter((x) => x.property_id === propertyId));
     if (a?.accessGranted) {
-      const [docs, diag] = await Promise.all([fetchDataroomDocuments(companyId), fetchTransmissibility(companyId)]);
+      const [docs, diag] = await Promise.all([fetchDataroomDocuments(propertyId), fetchTransmissibility(propertyId)]);
       setDocuments(asList(docs, 'documents'));
       setDiagnostic(diag);
     }
     setLoading(false);
-  }, [companyId, user]);
+  }, [propertyId, user]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -74,7 +74,7 @@ const DataroomPage = ({ user, setUser }) => {
     setRequesting(true);
     setStepError('');
     try {
-      const res = await axiosInstance.post(`/dataroom/${companyId}/request-access`, requestMessage.trim() ? { message: requestMessage.trim() } : {});
+      const res = await axiosInstance.post(`/dataroom/${propertyId}/request-access`, requestMessage.trim() ? { message: requestMessage.trim() } : {});
       const status = res.data?.status;
       toast.success(status === 'accepted' ? 'Dossier accepté automatiquement par le cédant.' : 'Demande envoyée au cédant. Nous le relançons à J+2 et J+5 s\'il ne répond pas.', { duration: 7000 });
       await load();
@@ -92,7 +92,7 @@ const DataroomPage = ({ user, setUser }) => {
     setNdaLoading(true);
     setStepError('');
     try {
-      const res = await axiosInstance.post('/contracts/generate-for-signature', { company_id: companyId, doc_type: 'nda' });
+      const res = await axiosInstance.post('/contracts/generate-for-signature', { property_id: propertyId, doc_type: 'nda' });
       const data = res.data || {};
       if (data.already_signed) {
         toast.info('Accord de confidentialité déjà signé.');
@@ -112,7 +112,7 @@ const DataroomPage = ({ user, setUser }) => {
 
   const signNda = async (otpCode) => {
     await axiosInstance.post(`/contracts/${nda.contract_id}/sign`, { otp_code: otpCode });
-    trackEvent('nda_signed', { listing: String(companyId) });
+    trackEvent('nda_signed', { listing: String(propertyId) });
     setNda(null);
     toast.success('Accord de confidentialité signé. Le nom de l\'entreprise vous est révélé ; un exemplaire PDF vous est envoyé par e-mail.', { duration: 8000 });
     await load();
@@ -121,8 +121,8 @@ const DataroomPage = ({ user, setUser }) => {
   // Retour sur cette page après Stripe Identity (KYCCallbackPage lit sessionStorage.kyc_return_to)
   useEffect(() => {
     if (identityVerified) return;
-    try { sessionStorage.setItem('kyc_return_to', `/dataroom/${companyId}`); } catch (e) { /* stockage indisponible */ }
-  }, [identityVerified, companyId]);
+    try { sessionStorage.setItem('kyc_return_to', `/dataroom/${propertyId}`); } catch (e) { /* stockage indisponible */ }
+  }, [identityVerified, propertyId]);
 
   if (loading) {
     return (
@@ -131,9 +131,9 @@ const DataroomPage = ({ user, setUser }) => {
       </div>
     );
   }
-  if (notFound || !company) return <NotFound user={user} />;
+  if (notFound || !property) return <NotFound user={user} />;
 
-  const title = listingTitle(company);
+  const title = listingTitle(property);
   const isSeller = access?.isSeller || user?.role === 'seller';
 
   if (isSeller) {
@@ -228,7 +228,7 @@ const DataroomPage = ({ user, setUser }) => {
       description: steps.funds || granted ? 'Déclaration transmise au cédant.' : 'Origine et montant des fonds mobilisables, partenaire financier éventuel. Transmise au cédant avec votre identité.',
       action: !steps.funds && !granted && steps.nda && a.accepted && (
         <div className="max-w-2xl rounded-xl border border-brand-line bg-white p-4">
-          <FundsDeclarationForm companyId={companyId} defaultAmount={user?.buyer_profile?.budget_max || ''} onDone={async () => { toast.success('Accès au dossier accordé.'); await load(); }} />
+          <FundsDeclarationForm propertyId={propertyId} defaultAmount={user?.buyer_profile?.budget_max || ''} onDone={async () => { toast.success('Accès au dossier accordé.'); await load(); }} />
         </div>
       ),
     },
@@ -241,7 +241,7 @@ const DataroomPage = ({ user, setUser }) => {
   ];
 
   const openOffers = offers.filter((o) => OPEN_OFFER_STATUSES.includes(o.status));
-  const canOffer = granted && openOffers.length === 0 && company.status === 'published';
+  const canOffer = granted && openOffers.length === 0 && property.status === 'published';
 
   return (
     <ConnectedShell
@@ -254,19 +254,19 @@ const DataroomPage = ({ user, setUser }) => {
       wide={granted}
       actions={(
         <>
-          <Link to={`/company/${companyId}`} className="btn-secondary px-4 py-2 text-sm">Voir l&apos;annonce</Link>
-          <Link to={`/messages?conversation=${encodeURIComponent(companyId)}`} className="btn-secondary px-4 py-2 text-sm">
+          <Link to={`/property/${propertyId}`} className="btn-secondary px-4 py-2 text-sm">Voir l&apos;annonce</Link>
+          <Link to={`/messages?conversation=${encodeURIComponent(propertyId)}`} className="btn-secondary px-4 py-2 text-sm">
             <MessageSquare className="w-4 h-4" aria-hidden="true" />
             Messagerie
           </Link>
         </>
       )}
     >
-      {company.company_name && (
-        <p className="mb-4 badge badge-verified" data-testid="revealed-name">Nom révélé après accord de confidentialité : {company.company_name}</p>
+      {property.company_name && (
+        <p className="mb-4 badge badge-verified" data-testid="revealed-name">Nom révélé après accord de confidentialité : {property.company_name}</p>
       )}
-      {company.asking_price != null && (
-        <p className="text-sm text-gray-600 mb-6">Prix demandé : <span className="font-semibold text-brand-navy tabular">{formatPrice(company.asking_price)}</span></p>
+      {property.asking_price != null && (
+        <p className="text-sm text-gray-600 mb-6">Prix demandé : <span className="font-semibold text-brand-navy tabular">{formatPrice(property.asking_price)}</span></p>
       )}
 
       {stepError === 'profile' && (
@@ -297,7 +297,7 @@ const DataroomPage = ({ user, setUser }) => {
           <div className="space-y-6 min-w-0">
             <section className="card p-5 sm:p-6 min-w-0" aria-labelledby="documents-title">
               <h2 id="documents-title" className="font-display text-lg font-bold text-brand-navy mb-3">Documents du cédant</h2>
-              <DataroomDocuments companyId={companyId} documents={documents} />
+              <DataroomDocuments propertyId={propertyId} documents={documents} />
             </section>
 
             <section className="card p-5 sm:p-6 min-w-0" aria-labelledby="offer-title">
@@ -312,15 +312,15 @@ const DataroomPage = ({ user, setUser }) => {
               </div>
               {offers.length > 0 && (
                 <ul className="space-y-3 mb-4">
-                  {offers.map((o) => <OfferRow key={o.id} offer={{ ...o, company: o.company || { title } }} onChanged={load} />)}
+                  {offers.map((o) => <OfferRow key={o.id} offer={{ ...o, property: o.property || { title } }} onChanged={load} />)}
                 </ul>
               )}
               {showOfferForm && canOffer ? (
-                <OfferForm company={{ ...company, title }} onCancel={() => setShowOfferForm(false)} onSigned={async () => { setShowOfferForm(false); await load(); }} />
+                <OfferForm property={{ ...property, title }} onCancel={() => setShowOfferForm(false)} onSigned={async () => { setShowOfferForm(false); await load(); }} />
               ) : (
                 !offers.length && (
                   <p className="text-sm text-gray-600">
-                    Prix, objet (titres ou fonds), plan de financement, conditions et calendrier : l&apos;offre est signée par code et contresignée par le cédant s&apos;il l&apos;accepte. {company.status !== 'published' && 'Cette annonce n\'est plus en ligne : aucune nouvelle offre n\'est possible.'}
+                    Prix, objet (titres ou fonds), plan de financement, conditions et calendrier : l&apos;offre est signée par code et contresignée par le cédant s&apos;il l&apos;accepte. {property.status !== 'published' && 'Cette annonce n\'est plus en ligne : aucune nouvelle offre n\'est possible.'}
                   </p>
                 )
               )}

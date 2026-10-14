@@ -33,7 +33,7 @@ const BuyerDashboard = lazy(() => import("@/pages/BuyerDashboard"));
 const AdminDashboard = lazy(() => import("@/pages/AdminDashboard"));
 const CreateListing = lazy(() => import("@/pages/CreateListing"));
 const MandatePage = lazy(() => import("@/pages/MandatePage"));
-const CompanyDetail = lazy(() => import("@/pages/CompanyDetail"));
+const PropertyDetail = lazy(() => import("@/pages/PropertyDetail"));
 const MessagesPage = lazy(() => import("@/pages/MessagesPage"));
 const DataroomPage = lazy(() => import("@/pages/DataroomPage"));
 const ClosingPage = lazy(() => import("@/pages/ClosingPage"));
@@ -185,7 +185,7 @@ export const AppRoutes = ({ user, setUser, loading }) => (
     {/* Pages publiques */}
     <Route path="/" element={<ListingsPage user={user} />} />
     <Route path="/embed/annonces" element={<EmbedListingsPage />} />
-    <Route path="/company/:id" element={<CompanyDetail user={user} />} />
+    <Route path="/property/:id" element={<PropertyDetail user={user} />} />
     <Route path="/estimer" element={<EstimatePage user={user} />} />
     <Route path="/mentions-legales" element={<MentionsLegalesPage user={user} />} />
     <Route path="/confidentialite" element={<PrivacyPage user={user} />} />
@@ -249,7 +249,7 @@ export const AppRoutes = ({ user, setUser, loading }) => (
       </ProtectedRoute>
     } />
     <Route path="/seller/create-listing" element={<Navigate to="/seller/create" replace />} />
-    <Route path="/seller/mandat/:companyId" element={
+    <Route path="/seller/mandat/:propertyId" element={
       <ProtectedRoute user={user} loading={loading} allowedRoles={["seller"]}>
         <MandatePage user={user} />
       </ProtectedRoute>
@@ -277,7 +277,7 @@ export const AppRoutes = ({ user, setUser, loading }) => (
         <MessagesPage user={user} />
       </ProtectedRoute>
     } />
-    <Route path="/dataroom/:companyId" element={
+    <Route path="/dataroom/:propertyId" element={
       <ProtectedRoute user={user} loading={loading}>
         <DataroomPage user={user} setUser={setUser} />
       </ProtectedRoute>

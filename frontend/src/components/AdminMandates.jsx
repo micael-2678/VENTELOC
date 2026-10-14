@@ -92,7 +92,7 @@ const AdminMandates = ({ focusId }) => {
       wide: true,
       render: (m) => (
         <span className="block break-words">
-          {m.company_label || '—'}
+          {m.property_label || '—'}
           {m.listing_status && LISTING_STATUS[m.listing_status] && <span className="block text-[13px] text-gray-600">Annonce : {LISTING_STATUS[m.listing_status].label.toLowerCase()}</span>}
         </span>
       ),

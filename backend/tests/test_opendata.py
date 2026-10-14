@@ -297,18 +297,18 @@ def test_naf_in_building_reexported():
     assert opendata.naf_in_building("62.01Z") is False
 
 
-def test_company_checks_from(api):
-    company = run(opendata.lookup_siren(SIREN))
+def test_property_checks_from(api):
+    property = run(opendata.lookup_siren(SIREN))
     dirigeant = run(opendata.match_dirigeant(SIREN, "Paul", "Dupont"))
-    checks = opendata.company_checks_from(company, dirigeant, in_ademe_list=True, duplicate_siren=False)
+    checks = opendata.property_checks_from(property, dirigeant, in_ademe_list=True, duplicate_siren=False)
     assert checks["opendata_available"] is True and checks["siren_active"] is True
     assert checks["naf_code"] == "43.22A" and checks["naf_in_building"] is True and checks["naf_status"] == "batiment"
     assert checks["in_ademe_list"] is True and checks["dirigeant_match"] == "match_exact"
     assert checks["duplicate_siren"] is False and checks["checked_at"]
     api["error"] = ConnectionError("panne")
     opendata.clear_cache()
-    company = run(opendata.lookup_siren(SIREN))
-    checks = opendata.company_checks_from(company, None)
+    property = run(opendata.lookup_siren(SIREN))
+    checks = opendata.property_checks_from(property, None)
     assert checks["opendata_available"] is False and checks["siren_active"] is None
     assert checks["naf_in_building"] is None and checks["dirigeant_match"] == "unavailable"
 

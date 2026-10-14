@@ -52,7 +52,7 @@ def published_listing(api, client, **extra):
     seller = api.register(uid("cedant"), "seller")
     api.verify_kyc(seller)
     extra.setdefault("siret", unique_siret())
-    c = client.post("/api/companies", headers=api.h(seller), json=listing(**extra)).json()
+    c = client.post("/api/properties", headers=api.h(seller), json=listing(**extra)).json()
     api.publish(seller, c["id"])
     return seller, c
 
@@ -123,18 +123,18 @@ def test_register_buyer_with_profile_and_seller_siret_prefill(api, client, monke
 def test_contact_requires_profile_and_verified_email(api, client, emails):
     seller, c = published_listing(api, client)
     nobody = api.register(uid("vide"), "buyer", profile=False)
-    r = client.post(f"/api/companies/{c['id']}/contact", headers=api.h(nobody), json={"message": "Bonjour"})
+    r = client.post(f"/api/properties/{c['id']}/contact", headers=api.h(nobody), json={"message": "Bonjour"})
     assert r.status_code == 403 and r.json()["detail"]["code"] == "profile_incomplete" and r.json()["detail"]["profile_score"] == 0
     assert client.post(f"/api/dataroom/{c['id']}/request-access", headers=api.h(nobody)).status_code == 403
     unverified = api.register(uid("nonconfirme"), "buyer", verify_email=False)
-    r = client.post(f"/api/companies/{c['id']}/contact", headers=api.h(unverified), json={"message": "Bonjour"})
+    r = client.post(f"/api/properties/{c['id']}/contact", headers=api.h(unverified), json={"message": "Bonjour"})
     assert r.status_code == 403 and r.json()["detail"].startswith("Confirmez")
     # Profil à 40 : contact possible
     api.buyer_profile(nobody, score_min=40, trades=[], zones=[], horizon=None, apport=None, financing=None)
-    r = client.post(f"/api/companies/{c['id']}/contact", headers=api.h(nobody), json={"message": "Je reprends une entreprise en Bretagne"})
+    r = client.post(f"/api/properties/{c['id']}/contact", headers=api.h(nobody), json={"message": "Je reprends une entreprise en Bretagne"})
     assert r.status_code == 200 and r.json()["conversation_id"] and r.json()["already_contacted"] is False
-    assert client.get(f"/api/companies/{c['id']}/contact", headers=api.h(seller)).status_code == 405
-    assert client.post(f"/api/companies/{c['id']}/contact", headers=api.h(seller), json={"message": "x"}).status_code == 403
+    assert client.get(f"/api/properties/{c['id']}/contact", headers=api.h(seller)).status_code == 405
+    assert client.post(f"/api/properties/{c['id']}/contact", headers=api.h(seller), json={"message": "x"}).status_code == 403
 
 
 def test_conversation_per_pair_cards_and_recipients(api, client, emails):
@@ -142,12 +142,12 @@ def test_conversation_per_pair_cards_and_recipients(api, client, emails):
     buyer = api.register(uid("rep"), "buyer", first="Marie", last="Martin", company_name="Martin Reprise")
     other = api.register(uid("autre"), "buyer")
     emails.clear()
-    r = client.post(f"/api/companies/{c['id']}/contact", headers=api.h(buyer), json={"message": "Mon projet : reprise après 15 ans de chantier. Mon tél 06 11 22 33 44"})
+    r = client.post(f"/api/properties/{c['id']}/contact", headers=api.h(buyer), json={"message": "Mon projet : reprise après 15 ans de chantier. Mon tél 06 11 22 33 44"})
     conv_id = r.json()["conversation_id"]
     # Même couple → même conversation ; autre repreneur → autre conversation
-    again = client.post(f"/api/companies/{c['id']}/contact", headers=api.h(buyer), json={"message": "Relance"}).json()
+    again = client.post(f"/api/properties/{c['id']}/contact", headers=api.h(buyer), json={"message": "Relance"}).json()
     assert again["conversation_id"] == conv_id and again["already_contacted"] is True
-    other_conv = client.post(f"/api/companies/{c['id']}/contact", headers=api.h(other), json={"message": "Bonjour"}).json()["conversation_id"]
+    other_conv = client.post(f"/api/properties/{c['id']}/contact", headers=api.h(other), json={"message": "Bonjour"}).json()["conversation_id"]
     assert other_conv != conv_id
     # E-mail « premier contact » au cédant avec la carte pseudonymisée et l'extrait (coordonnées masquées)
     first = mails_to(emails, seller["email"], "présente son projet")
@@ -158,11 +158,11 @@ def test_conversation_per_pair_cards_and_recipients(api, client, emails):
     # Côté cédant : tableau API.md §3 avec carte pseudonymisée ; côté repreneur : titre de l'annonce, pas de carte
     convs = client.get("/api/messages/conversations", headers=api.h(seller)).json()
     mine = next(x for x in convs if x["id"] == conv_id)
-    assert mine["company_id"] == c["id"] and mine["buyer_id"] == buyer["id"] and mine["seller_id"] == seller["id"]
+    assert mine["property_id"] == c["id"] and mine["buyer_id"] == buyer["id"] and mine["seller_id"] == seller["id"]
     assert mine["unread_count"] == 2 and mine["nda_signed"] is False and mine["identity_revealed"] is False and mine["access_status"] is None
     assert mine["buyer_card"]["label"].startswith("Acquéreur n°") and mine["buyer_card"]["project_type"] == "reprise-individuelle"
     assert "name" not in mine["buyer_card"] and "email" not in str(mine) and "phone" not in str(mine["buyer_card"])
-    assert mine["other_party_label"] == mine["buyer_card"]["label"] and mine["company_title"].startswith("Entreprise de")
+    assert mine["other_party_label"] == mine["buyer_card"]["label"] and mine["property_title"].startswith("Entreprise de")
     buyer_view = client.get("/api/messages/conversations", headers=api.h(buyer)).json()
     assert [x["id"] for x in buyer_view] == [conv_id] and "buyer_card" not in buyer_view[0] and buyer_view[0]["other_party_label"] == "Vendeur"
     assert client.get("/api/messages/conversations", headers=api.h(other)).json()[0]["id"] == other_conv
@@ -200,17 +200,17 @@ def test_legacy_messages_are_grouped_into_conversations(api, client):
     old = ago(3)
     db_call(client, server.db.messages.insert_many, [
         {"id": str(uuid.uuid4()), "sender_id": buyer["id"], "sender_email": buyer["email"], "receiver_id": seller["id"],
-         "company_id": c["id"], "content": "Ancien message", "read": False, "created_at": old},
+         "property_id": c["id"], "content": "Ancien message", "read": False, "created_at": old},
         {"id": str(uuid.uuid4()), "sender_id": seller["id"], "sender_email": seller["email"], "receiver_id": buyer["id"],
-         "company_id": c["id"], "content": "Ancienne réponse", "read": True, "created_at": ago(2)},
+         "property_id": c["id"], "content": "Ancienne réponse", "read": True, "created_at": ago(2)},
     ])
     convs = client.get("/api/messages/conversations", headers=api.h(seller)).json()
-    conv = next(x for x in convs if x["company_id"] == c["id"] and x["buyer_id"] == buyer["id"])
+    conv = next(x for x in convs if x["property_id"] == c["id"] and x["buyer_id"] == buyer["id"])
     assert conv["last_message"] == "Ancienne réponse" and conv["unread_count"] == 1
     thread = client.get("/api/messages", params={"conversation_id": conv["id"]}, headers=api.h(buyer)).json()
     assert [m["content"] for m in thread] == ["Ancien message", "Ancienne réponse"]
-    # L'ancienne forme d'envoi (receiver_id + company_id) rejoint la même conversation
-    r = client.post("/api/messages", headers=api.h(buyer), json={"receiver_id": seller["id"], "company_id": c["id"], "content": "Suite"})
+    # L'ancienne forme d'envoi (receiver_id + property_id) rejoint la même conversation
+    r = client.post("/api/messages", headers=api.h(buyer), json={"receiver_id": seller["id"], "property_id": c["id"], "content": "Suite"})
     assert r.status_code == 200 and r.json()["conversation_id"] == conv["id"]
     assert client.put(f"/api/messages/conversations/{c['id']}/read", headers=api.h(seller)).json()["ok"] is True
 
@@ -219,7 +219,7 @@ def test_legacy_messages_are_grouped_into_conversations(api, client):
 
 def test_dataroom_request_auto_accept_and_steps(api, client, emails):
     seller, c = published_listing(api, client, auto_accept_dataroom=True)
-    assert "auto_accept_dataroom" not in client.get(f"/api/companies/{c['id']}").json()
+    assert "auto_accept_dataroom" not in client.get(f"/api/properties/{c['id']}").json()
     weak = api.register(uid("faible"), "buyer", profile=False)
     api.buyer_profile(weak, score_min=40, trades=[], zones=[], horizon=None, apport=None, financing=None)
     assert weak["profile_score"] == 40
@@ -273,7 +273,7 @@ def test_funds_declared_before_nda_then_granted_at_signature(api, client):
     api.accept_dataroom(seller, buyer, c["id"])
     api.verify_kyc(buyer)
     # Fonds déclarés en base avant le NDA (par exemple ancien parcours) : la signature du NDA ouvre l'accès
-    db_call(client, server.db.dataroom_access.update_one, {"company_id": c["id"], "buyer_id": buyer["id"]},
+    db_call(client, server.db.dataroom_access.update_one, {"property_id": c["id"], "buyer_id": buyer["id"]},
             {"$set": {"funds_declaration": {"source": "fonds-propres", "amount": 200000}}})
     api.sign_nda(buyer, c["id"])
     status = client.get(f"/api/dataroom/{c['id']}/access-status", headers=api.h(buyer)).json()
@@ -285,7 +285,7 @@ def test_dataroom_reminders_and_expiry(api, client, emails):
     buyer = api.register(uid("rep"), "buyer")
     client.post(f"/api/dataroom/{c['id']}/request-access", headers=api.h(buyer))
     # J+3 : relance J+2 du cédant, une seule fois ; un seul e-mail de relance par jour et par personne
-    db_call(client, server.db.dataroom_access.update_one, {"company_id": c["id"], "buyer_id": buyer["id"]},
+    db_call(client, server.db.dataroom_access.update_one, {"property_id": c["id"], "buyer_id": buyer["id"]},
             {"$set": {"requested_at": ago(3), "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()}})
     run_jobs(api, client, emails)
     reminders = mails_to(emails, seller["email"], "attend votre réponse depuis")
@@ -296,7 +296,7 @@ def test_dataroom_reminders_and_expiry(api, client, emails):
     status = client.get(f"/api/dataroom/{c['id']}/access-status", headers=api.h(buyer)).json()
     assert status["access_status"] == "pending"
     # J+10 : expiration, e-mail au repreneur, nouvelle demande possible, ligne admin
-    db_call(client, server.db.dataroom_access.update_one, {"company_id": c["id"], "buyer_id": buyer["id"]},
+    db_call(client, server.db.dataroom_access.update_one, {"property_id": c["id"], "buyer_id": buyer["id"]},
             {"$set": {"requested_at": ago(11), "expires_at": ago(1)}})
     run_jobs(api, client, emails)
     assert mails_to(emails, buyer["email"], "n'a pas répondu")
@@ -327,23 +327,23 @@ def test_buyer_reminders_identity_nda_dataroom(api, client, emails):
     seller, c = published_listing(api, client)
     buyer = api.register(uid("rep"), "buyer")
     api.accept_dataroom(seller, buyer, c["id"])
-    db_call(client, server.db.dataroom_access.update_one, {"company_id": c["id"], "buyer_id": buyer["id"]}, {"$set": {"accepted_at": ago(3)}})
+    db_call(client, server.db.dataroom_access.update_one, {"property_id": c["id"], "buyer_id": buyer["id"]}, {"$set": {"accepted_at": ago(3)}})
     run_jobs(api, client, emails)
     assert mails_to(emails, buyer["email"], "Vérifiez votre identité")
     run_jobs(api, client, emails)
     assert not mails_to(emails, buyer["email"], "Vérifiez votre identité")
     api.verify_kyc(buyer)
-    db_call(client, server.db.dataroom_access.update_one, {"company_id": c["id"], "buyer_id": buyer["id"]}, {"$set": {"accepted_at": ago(8)}})
+    db_call(client, server.db.dataroom_access.update_one, {"property_id": c["id"], "buyer_id": buyer["id"]}, {"$set": {"accepted_at": ago(8)}})
     run_jobs(api, client, emails)
     assert not [e for e in emails if e["to"] == buyer["email"]], "un seul e-mail de relance par jour et par personne"
     run_jobs(api, client, emails, reset_gate=True)
     assert mails_to(emails, buyer["email"], "Signez l'accord de confidentialité")
     api.grant_dataroom(seller, buyer, c["id"])
-    db_call(client, server.db.dataroom_access.update_one, {"company_id": c["id"], "buyer_id": buyer["id"]}, {"$set": {"granted_at": ago(4)}})
+    db_call(client, server.db.dataroom_access.update_one, {"property_id": c["id"], "buyer_id": buyer["id"]}, {"$set": {"granted_at": ago(4)}})
     run_jobs(api, client, emails, reset_gate=True)
     assert mails_to(emails, buyer["email"], "vous attend")
     # Le repreneur qui a refusé les e-mails d'information ne reçoit plus les relances
-    db_call(client, server.db.dataroom_access.update_one, {"company_id": c["id"], "buyer_id": buyer["id"]}, {"$set": {"granted_at": ago(4)}})
+    db_call(client, server.db.dataroom_access.update_one, {"property_id": c["id"], "buyer_id": buyer["id"]}, {"$set": {"granted_at": ago(4)}})
     db_call(client, server.db.job_marks.delete_many, {"kind": "buyer_dataroom_unvisited"})
     client.put("/api/auth/profile", headers=api.h(buyer), json={"notifications_opt_out": True})
     run_jobs(api, client, emails, reset_gate=True)
@@ -356,50 +356,50 @@ def test_public_listing_filters_and_scrub(api, client):
     seller1, c1 = published_listing(api, client, siret="11122233300011", region="Bretagne", department="29", asking_price=300000)
     seller2, c2 = published_listing(api, client, siret="44455566600011", region="Occitanie", department="31", asking_price=900000,
                                     rge_types=[], trades=["maconnerie-gros-oeuvre", "carrelage-sols"])
-    r = client.get("/api/companies", params={"trades": "pac-clim-cvc,isolation"})
+    r = client.get("/api/properties", params={"trades": "pac-clim-cvc,isolation"})
     ids = [x["id"] for x in r.json()]
     assert c1["id"] in ids and c2["id"] not in ids and r.headers["X-Total-Count"] == str(len(ids))
-    occitanie = [x["id"] for x in client.get("/api/companies", params={"region": "Occitanie", "limit": 100}).json()]
+    occitanie = [x["id"] for x in client.get("/api/properties", params={"region": "Occitanie", "limit": 100}).json()]
     assert c2["id"] in occitanie and c1["id"] not in occitanie
-    assert [x["id"] for x in client.get("/api/companies", params={"region": "occitanie", "department": "31", "trades": "carrelage-sols"}).json()] == [c2["id"]]
-    dep29 = [x["id"] for x in client.get("/api/companies", params={"department": "29", "limit": 100}).json()]
+    assert [x["id"] for x in client.get("/api/properties", params={"region": "occitanie", "department": "31", "trades": "carrelage-sols"}).json()] == [c2["id"]]
+    dep29 = [x["id"] for x in client.get("/api/properties", params={"department": "29", "limit": 100}).json()]
     assert c1["id"] in dep29 and c2["id"] not in dep29
-    assert c2["id"] not in [x["id"] for x in client.get("/api/companies", params={"rge": "true"}).json()]
-    non_rge = [x["id"] for x in client.get("/api/companies", params={"rge": "false", "limit": 100}).json()]
+    assert c2["id"] not in [x["id"] for x in client.get("/api/properties", params={"rge": "true"}).json()]
+    non_rge = [x["id"] for x in client.get("/api/properties", params={"rge": "false", "limit": 100}).json()]
     assert c2["id"] in non_rge and c1["id"] not in non_rge
-    priced = [x["id"] for x in client.get("/api/companies", params={"min_price": 800000, "max_price": 1000000, "limit": 100}).json()]
+    priced = [x["id"] for x in client.get("/api/properties", params={"min_price": 800000, "max_price": 1000000, "limit": 100}).json()]
     assert c2["id"] in priced and c1["id"] not in priced
     # Chiffre d'affaires et effectif minimum (page des annonces, MODE-TEST-ET-APP.md §A.3)
-    db_call(client, server.db.companies.update_one, {"id": c1["id"]}, {"$set": {"ca_n": 450000, "staff_count": 3}})
-    db_call(client, server.db.companies.update_one, {"id": c2["id"]}, {"$set": {"ca_n": 2400000, "staff_count": 22}})
-    big = [x["id"] for x in client.get("/api/companies", params={"min_ca": 2000000, "min_staff": 20, "limit": 100}).json()]
+    db_call(client, server.db.properties.update_one, {"id": c1["id"]}, {"$set": {"ca_n": 450000, "staff_count": 3}})
+    db_call(client, server.db.properties.update_one, {"id": c2["id"]}, {"$set": {"ca_n": 2400000, "staff_count": 22}})
+    big = [x["id"] for x in client.get("/api/properties", params={"min_ca": 2000000, "min_staff": 20, "limit": 100}).json()]
     assert c2["id"] in big and c1["id"] not in big
-    small = [x["id"] for x in client.get("/api/companies", params={"min_ca": 400000, "min_staff": 3, "limit": 100}).json()]
+    small = [x["id"] for x in client.get("/api/properties", params={"min_ca": 400000, "min_staff": 3, "limit": 100}).json()]
     assert {c1["id"], c2["id"]} <= set(small)
-    r = client.post("/api/companies/search", json={"min_staff": 20, "department": "31"})
+    r = client.post("/api/properties/search", json={"min_staff": 20, "department": "31"})
     assert [x["id"] for x in r.json()] == [c2["id"]]
-    prices = [x.get("asking_price") or 0 for x in client.get("/api/companies", params={"sort": "price_desc", "limit": 100}).json()]
+    prices = [x.get("asking_price") or 0 for x in client.get("/api/properties", params={"sort": "price_desc", "limit": 100}).json()]
     assert prices == sorted(prices, reverse=True)
-    page = client.get("/api/companies", params={"sort": "recent", "limit": 1, "page": 2})
+    page = client.get("/api/properties", params={"sort": "recent", "limit": 1, "page": 2})
     assert len(page.json()) == 1 and int(page.headers["X-Total-Count"]) >= 2
-    recent = client.get("/api/companies", params={"sort": "recent", "limit": 2}).json()
+    recent = client.get("/api/properties", params={"sort": "recent", "limit": 2}).json()
     assert recent[0]["id"] == c2["id"]
     # Champs publics (API.md §2) : jamais le nom, le SIRET, l'adresse du mandant, le vendeur
-    pub = client.get(f"/api/companies/{c1['id']}").json()
+    pub = client.get(f"/api/properties/{c1['id']}").json()
     for forbidden in ("company_name", "siret", "seller_id", "seller_email", "mandant_address", "mandant_capacity", "presented_buyers", "auto_accept_dataroom", "blocking"):
         assert forbidden not in pub, forbidden
     assert pub["title"].startswith("Entreprise de") and pub["trades"] == ["pac-clim-cvc"] and pub["is_rge"] is True and pub["department"] == "29"
-    assert set(pub["company_checks"]) == {"in_ademe_list", "dirigeant_match"} and pub["commission_info"]["payer"] == "cedant"
-    # POST /companies/search : mêmes filtres, X-Total-Count
-    r = client.post("/api/companies/search", json={"trades": ["maconnerie-gros-oeuvre"], "department": "31", "rge": False})
+    assert set(pub["property_checks"]) == {"in_ademe_list", "dirigeant_match"} and pub["commission_info"]["payer"] == "cedant"
+    # POST /properties/search : mêmes filtres, X-Total-Count
+    r = client.post("/api/properties/search", json={"trades": ["maconnerie-gros-oeuvre"], "department": "31", "rge": False})
     assert [x["id"] for x in r.json()] == [c2["id"]] and r.headers["X-Total-Count"] == "1" and "siret" not in r.json()[0]
-    assert client.post("/api/companies/search", json={"rge_types": ["Pompes à chaleur air/eau"], "limit": 1}).status_code == 200
+    assert client.post("/api/properties/search", json={"rge_types": ["Pompes à chaleur air/eau"], "limit": 1}).status_code == 200
     # Statistiques publiques : uniquement des comptages > 0
     stats = client.get("/api/public/listing-stats").json()
     assert any(d["value"] == "31" and d["label"] == "Haute-Garonne" for d in stats["by_department"])
     assert all(row["count"] > 0 for key in ("by_trade", "by_department", "by_region", "by_rge") for row in stats[key])
     # Le cédant voit ses propres annonces avec tous les champs
-    own = client.get("/api/companies", headers=api.h(seller1)).json()
+    own = client.get("/api/properties", headers=api.h(seller1)).json()
     assert [x["id"] for x in own] == [c1["id"]] and own[0]["company_name"] == "SECRET ENERGIE SAS"
 
 
@@ -410,42 +410,42 @@ def test_seller_status_actions_and_tail_clause(api, client, emails):
     api.accept_dataroom(seller, buyer, c["id"])
     api.sign_nda(buyer, c["id"])
     other = api.register(uid("autrecedant"), "seller")
-    url = f"/api/companies/{c['id']}/status"
+    url = f"/api/properties/{c['id']}/status"
     assert client.put(url, params={"status": "paused"}, headers=api.h(other)).status_code == 403
     assert client.put(url, params={"status": "removed", "reason": "autre"}, headers=api.h(seller)).status_code == 403
     assert client.put(url, params={"status": "paused"}, headers=api.h(seller)).json()["status"] == "paused"
-    assert client.get(f"/api/companies/{c['id']}").status_code == 404
+    assert client.get(f"/api/properties/{c['id']}").status_code == 404
     r = client.put(url, params={"status": "paused"}, headers=api.h(seller))
     assert r.status_code == 400 and r.json()["detail"]["code"] == "validation"
     assert client.put(url, params={"status": "published"}, headers=api.h(seller)).json()["status"] == "published"
-    assert client.get(f"/api/companies/{c['id']}").status_code == 200
+    assert client.get(f"/api/properties/{c['id']}").status_code == 200
     emails.clear()
     assert client.put(url, params={"status": "sold_elsewhere"}, headers=api.h(seller)).json()["status"] == "sold_elsewhere"
     mail = mails_to(emails, seller["email"], "en dehors de la plateforme")
     assert mail and "Marie Martin" in mail[0]["html"] and "clause de suite" in mail[0]["html"].lower()
-    stored = db_call(client, server.db.companies.find_one, {"id": c["id"]})
+    stored = db_call(client, server.db.properties.find_one, {"id": c["id"]})
     assert stored["status"] == "sold_elsewhere" and stored["veille_flag"] is True
     # Vendue autrement → définitif ; une autre annonce peut être retirée
     assert client.put(url, params={"status": "published"}, headers=api.h(seller)).status_code == 400
     seller2, c2 = published_listing(api, client, siret="77788899900011")
-    assert client.put(f"/api/companies/{c2['id']}/status", params={"status": "withdrawn"}, headers=api.h(seller2)).json()["status"] == "withdrawn"
+    assert client.put(f"/api/properties/{c2['id']}/status", params={"status": "withdrawn"}, headers=api.h(seller2)).json()["status"] == "withdrawn"
 
 
-def test_company_update_mandant_address_object_and_price_drop(api, client, emails):
+def test_property_update_mandant_address_object_and_price_drop(api, client, emails):
     seller, c = published_listing(api, client)
     buyer = api.register(uid("fan"), "buyer")
-    client.post("/api/favorites", headers=api.h(buyer), json={"company_id": c["id"]})
-    r = client.put(f"/api/companies/{c['id']}", headers=api.h(seller),
+    client.post("/api/favorites", headers=api.h(buyer), json={"property_id": c["id"]})
+    r = client.put(f"/api/properties/{c['id']}", headers=api.h(seller),
                    json={"mandant_address": {"line1": "1 rue du Port", "postal_code": "29200", "city": "Brest"}, "mandant_capacity": "associe"})
     assert r.status_code == 200 and r.json()["mandant_address"]["city"] == "Brest" and r.json()["mandant_capacity"] == "associe"
     assert server.fmt_address(r.json()["mandant_address"]) == "1 rue du Port, 29200 Brest"
-    assert client.put(f"/api/companies/{c['id']}", headers=api.h(seller), json={"mandant_address": {"line1": "x", "postal_code": "29", "city": "B"}}).status_code == 422
+    assert client.put(f"/api/properties/{c['id']}", headers=api.h(seller), json={"mandant_address": {"line1": "x", "postal_code": "29", "city": "B"}}).status_code == 422
     emails.clear()
-    client.put(f"/api/companies/{c['id']}", headers=api.h(seller), json={"asking_price": 450000})
+    client.put(f"/api/properties/{c['id']}", headers=api.h(seller), json={"asking_price": 450000})
     mail = mails_to(emails, buyer["email"], "Baisse de prix")
     assert mail and "450 000" in plain(mail[0]["html"]) and "Ne plus recevoir" in mail[0]["html"]
     emails.clear()
-    client.put(f"/api/companies/{c['id']}", headers=api.h(seller), json={"asking_price": 460000})
+    client.put(f"/api/properties/{c['id']}", headers=api.h(seller), json={"asking_price": 460000})
     assert not mails_to(emails, buyer["email"], "Baisse de prix"), "hausse : pas d'e-mail"
 
 
@@ -475,7 +475,7 @@ def test_public_alert_confirmation_immediate_send_unsubscribe(api, client, email
     emails.clear()
     seller, c = published_listing(api, client, siret="20020020100011", region="Bretagne", department="56", asking_price=600000)
     mail = mails_to(emails, email, "Nouvelle annonce")
-    assert len(mail) == 1 and f"/company/{c['id']}" in mail[0]["html"] and "Entreprise de" in mail[0]["html"]
+    assert len(mail) == 1 and f"/property/{c['id']}" in mail[0]["html"] and "Entreprise de" in mail[0]["html"]
     unsubscribe = re.search(r"/api/alerts/unsubscribe/([A-Za-z0-9_\-\.]+)", mail[0]["html"]).group(1)
     # Annonce hors critères : rien ; cédant prévenu du nombre de repreneurs servis
     emails.clear()
@@ -511,7 +511,7 @@ def test_account_alert_filters_digest_and_opt_out(api, client, emails):
     # Digest hebdomadaire : une fois par semaine et par alerte
     run_jobs(api, client, emails)
     digest = mails_to(emails, buyer["email"], "cette semaine pour votre alerte")
-    assert len(digest) == 1 and f"/company/{c['id']}" in digest[0]["html"]
+    assert len(digest) == 1 and f"/property/{c['id']}" in digest[0]["html"]
     run_jobs(api, client, emails)
     assert not mails_to(emails, buyer["email"], "cette semaine")
     # Lien de désinscription du compte : préférence notifications_opt_out, alertes désactivées
@@ -533,14 +533,14 @@ def test_account_alert_filters_digest_and_opt_out(api, client, emails):
 
 def test_seller_lifecycle_reminders_and_pause(api, client, emails):
     seller, c = published_listing(api, client)
-    db_call(client, server.db.companies.update_one, {"id": c["id"]}, {"$set": {"published_at": ago(15)}})
+    db_call(client, server.db.properties.update_one, {"id": c["id"]}, {"$set": {"published_at": ago(15)}})
     run_jobs(api, client, emails)
     assert mails_to(emails, seller["email"], "14 jours en ligne")
     # Hebdo cédant (tâche hebdomadaire, une fois par semaine) : jamais de « 0 »
     weekly = mails_to(emails, seller["email"], "Votre semaine")
     assert len(weekly) == 1 and "Ne plus recevoir" in weekly[0]["html"]
     assert not re.search(r"\b0 (vue|favori|contact)", weekly[0]["html"]), "aucun compteur à zéro"
-    db_call(client, server.db.companies.update_one, {"id": c["id"]}, {"$set": {"published_at": ago(31)}})
+    db_call(client, server.db.properties.update_one, {"id": c["id"]}, {"$set": {"published_at": ago(31)}})
     run_jobs(api, client, emails, reset_gate=True)
     mail = mails_to(emails, seller["email"], "30 jours en ligne")
     assert mail and "500 000 €" in plain(mail[0]["html"]) and "fourchette" in mail[0]["html"]
@@ -551,9 +551,9 @@ def test_seller_lifecycle_reminders_and_pause(api, client, emails):
     db_call(client, server.db.users.update_one, {"id": seller["id"]}, {"$set": {"last_activity_at": ago(61)}})
     run_jobs(api, client, emails, reset_gate=True)
     assert mails_to(emails, seller["email"], "est mise en pause")
-    stored = db_call(client, server.db.companies.find_one, {"id": c["id"]})
+    stored = db_call(client, server.db.properties.find_one, {"id": c["id"]})
     assert stored["status"] == "paused" and stored["paused_reason"] == "inactivite"
-    assert client.put(f"/api/companies/{c['id']}/status", params={"status": "published"}, headers=api.h(seller)).status_code == 200
+    assert client.put(f"/api/properties/{c['id']}/status", params={"status": "published"}, headers=api.h(seller)).status_code == 200
     run_jobs(api, client, emails, reset_gate=True)
     assert not mails_to(emails, seller["email"], "Votre semaine"), "un seul récapitulatif par semaine"
 
@@ -561,14 +561,14 @@ def test_seller_lifecycle_reminders_and_pause(api, client, emails):
 def test_mandate_reminders_j1_j4_j10_once_per_day(api, client, emails):
     seller = api.register(uid("cedant"), "seller")
     api.verify_kyc(seller)
-    c = client.post("/api/companies", headers=api.h(seller), json=listing()).json()
+    c = client.post("/api/properties", headers=api.h(seller), json=listing()).json()
     assert c["status"] == "mandat_en_attente"
-    db_call(client, server.db.companies.update_one, {"id": c["id"]}, {"$set": {"mandate_pending_since": ago(1)}})
+    db_call(client, server.db.properties.update_one, {"id": c["id"]}, {"$set": {"mandate_pending_since": ago(1)}})
     run_jobs(api, client, emails)
     j1 = mails_to(emails, seller["email"], "Signez votre mandat")
     # Signature en cours : relance transactionnelle (la page de désinscription promet que les signatures continuent)
     assert len(j1) == 1 and "exclusivité" in j1[0]["html"] and "Ne plus recevoir" not in j1[0]["html"]
-    db_call(client, server.db.companies.update_one, {"id": c["id"]}, {"$set": {"mandate_pending_since": ago(10)}})
+    db_call(client, server.db.properties.update_one, {"id": c["id"]}, {"$set": {"mandate_pending_since": ago(10)}})
     run_jobs(api, client, emails)
     assert not mails_to(emails, seller["email"], "Signez votre mandat"), "une seule relance par jour et par personne"
     db_call(client, server.db.job_marks.delete_many, {"kind": "reminder_day"})
@@ -580,9 +580,9 @@ def test_mandate_reminders_j1_j4_j10_once_per_day(api, client, emails):
 def test_nps_after_confirmed_sale(api, client, emails):
     seller, c = published_listing(api, client)
     buyer = api.register(uid("rep"), "buyer")
-    db_call(client, server.db.closings.insert_one, {"id": str(uuid.uuid4()), "company_id": c["id"], "buyer_id": buyer["id"], "seller_id": seller["id"],
+    db_call(client, server.db.closings.insert_one, {"id": str(uuid.uuid4()), "property_id": c["id"], "buyer_id": buyer["id"], "seller_id": seller["id"],
                                                     "offer_id": "direct:" + uuid.uuid4().hex, "status": "confirmed", "confirmed_at": ago(8),
-                                                    "company_label": "SECRET ENERGIE SAS", "created_at": ago(40), "updated_at": ago(8)})
+                                                    "property_label": "SECRET ENERGIE SAS", "created_at": ago(40), "updated_at": ago(8)})
     run_jobs(api, client, emails)
     mail = mails_to(emails, seller["email"], "Comment s'est passée")
     assert mail and mails_to(emails, buyer["email"], "Comment s'est passée")
@@ -602,7 +602,7 @@ def test_nps_after_confirmed_sale(api, client, emails):
 def test_admin_kpis_and_costs(api, client):
     seller, c = published_listing(api, client)
     buyer = api.register(uid("rep"), "buyer")
-    client.post(f"/api/companies/{c['id']}/contact", headers=api.h(buyer), json={"message": "Bonjour"})
+    client.post(f"/api/properties/{c['id']}/contact", headers=api.h(buyer), json={"message": "Bonjour"})
     assert client.get("/api/admin/kpis", headers=api.h(buyer)).status_code == 403
     month = datetime.now(timezone.utc).strftime("%Y-%m")
     r = client.put("/api/admin/costs", headers=api.h(api.admin()), json={"month": month, "amount": 120.5, "note": "Hébergement + domaine"})
@@ -634,8 +634,8 @@ def test_contact_email_is_sent_once_per_conversation(api, client, emails):
     seller, c = published_listing(api, client)
     buyer = api.register(uid("rep"), "buyer")
     emails.clear()
-    client.post(f"/api/companies/{c['id']}/contact", headers=api.h(buyer), json={"message": "Premier"})
-    client.post("/api/messages", headers=api.h(buyer), json={"receiver_id": seller["id"], "company_id": c["id"], "content": "Deuxième"})
+    client.post(f"/api/properties/{c['id']}/contact", headers=api.h(buyer), json={"message": "Premier"})
+    client.post("/api/messages", headers=api.h(buyer), json={"receiver_id": seller["id"], "property_id": c["id"], "content": "Deuxième"})
     assert len(mails_to(emails, seller["email"], "présente son projet")) == 1
     assert not mails_to(emails, seller["email"], "Nouveau message"), "pas de second e-mail tant que le premier n'est pas lu"
     assert len(sent_emails) >= 2
