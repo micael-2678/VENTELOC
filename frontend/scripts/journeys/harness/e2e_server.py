@@ -6,8 +6,8 @@ Backend de test pour les parcours Playwright (scripts/journeys) : l'API réelle 
   seulement dans ce banc d'essai.
 Lancement (venv du backend) :
   EMAILS_FILE=/tmp/emails.jsonl python frontend/scripts/journeys/harness/e2e_server.py   # port 8001
-Variables : PORT (8001), EMAILS_FILE, SEED_FILE (si défini, seed.py y écrit le jeu de données au démarrage),
-            NOSEED=1 (pas de jeu de données), et toutes celles du backend (TEST_MODE, TEST_PANEL_KEY…).
+Variables : PORT (8001), EMAILS_FILE, et toutes celles du backend (TEST_MODE, TEST_PANEL_KEY…).
+Jeu de données des parcours : node frontend/scripts/journeys/harness/seed.js (écrit SEED_FILE).
 """
 import json
 import os
@@ -62,16 +62,6 @@ async def set_user(email: str, field: str, value: str):
     if not res.matched_count:
         raise HTTPException(404, "compte introuvable")
     return {"ok": True}
-
-
-@server.app.on_event("startup")
-async def _seed():
-    if os.environ.get("NOSEED") == "1" or not os.environ.get("SEED_FILE"):
-        return
-    import seed  # noqa: E402  (harness/seed.py)
-    data = await seed.run(server)
-    with open(os.environ["SEED_FILE"], "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=1)
 
 
 if __name__ == "__main__":

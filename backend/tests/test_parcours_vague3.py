@@ -183,7 +183,8 @@ def test_duplicate_address_flagged_while_first_listing_paused(api, client, email
     todo = client.get("/api/admin/todo", headers=api.h(api.admin())).json()
     row = next(r for s in todo["sections"] if s["key"] == "listings_review" for r in s["rows"] if r["ref"]["property_id"] == c2["id"])
     assert "duplicate_address" in row["ref"]["flags"] and "même adresse" in row["detail"]
-    # Une annonce du même vendeur à la même adresse n'est pas un doublon (republication après retrait)
+    # Une annonce du même vendeur à la même adresse n'est pas un doublon (republication après retrait de l'autre annonce)
+    assert client.put(f"/api/properties/{c2['id']}/status", params={"status": "withdrawn"}, headers=api.h(seller2)).status_code == 200
     c3 = client.post("/api/properties", headers=api.h(seller1), json=listing(address="12 rue des Doublons")).json()
     assert not any(f["code"] == "duplicate_address" for f in c3["flags"])
 
