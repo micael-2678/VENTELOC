@@ -11,7 +11,8 @@ import { badgeClass } from './listingStatus';
 import { accessStatus } from './api';
 import ConfirmDialog from './ConfirmDialog';
 
-// Demande de dossier (API.md §4) : carte repreneur pseudonymisée + message, acceptation en un geste, refus motivé.
+// Demande de dossier du bien (API.md §4) : carte acquéreur pseudonymisée (SPEC §4) + message, acceptation en un geste,
+// refus motivé.
 export const AccessRequestCard = ({ request, propertyId, onChanged, compact = false }) => {
   const [busy, setBusy] = useState(false);
   const [rejecting, setRejecting] = useState(false);
@@ -21,13 +22,13 @@ export const AccessRequestCard = ({ request, propertyId, onChanged, compact = fa
   const createdAt = request.created_at || request.requested_at;
   const expiresIn = pending ? daysUntil(request.expires_at) : null;
   const buyer = request.buyer_card || request.buyer || {};
-  const label = buyer.label || request.buyer_label || 'Repreneur';
+  const label = buyer.label || request.buyer_label || 'Acquéreur';
 
   const accept = async () => {
     setBusy(true);
     try {
       await axiosInstance.put(`/dataroom/${propertyId}/access/${request.id}/validate`);
-      toast.success('Demande acceptée. Le repreneur vérifie son identité, signe l\'accord de confidentialité et déclare l\'origine de ses fonds ; l\'accès s\'ouvre ensuite automatiquement.', { duration: 8000 });
+      toast.success('Demande acceptée. L\'acquéreur vérifie son identité, signe l\'engagement de confidentialité et de non-contournement et déclare l\'origine de ses fonds ; l\'accès au dossier s\'ouvre ensuite automatiquement.', { duration: 8000 });
       onChanged?.();
     } catch (e) {
       toast.error(apiErrorMessage(e, 'La demande n\'a pas pu être acceptée.'));
@@ -57,7 +58,7 @@ export const AccessRequestCard = ({ request, propertyId, onChanged, compact = fa
       </div>
       {pending ? (
         <div className="flex flex-col sm:flex-row gap-2">
-          <Button type="button" onClick={accept} disabled={busy} className="rounded-xl bg-brand-green hover:bg-brand-green-dark text-white flex-1" data-testid={`accept-request-${request.id}`}>
+          <Button type="button" onClick={accept} disabled={busy} className="rounded-xl bg-brand-teal hover:bg-brand-teal-dark text-white flex-1" data-testid={`accept-request-${request.id}`}>
             {busy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <CheckCircle className="w-4 h-4 mr-2" />}
             Accepter
           </Button>
@@ -68,9 +69,9 @@ export const AccessRequestCard = ({ request, propertyId, onChanged, compact = fa
         </div>
       ) : (
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-          {request.status === 'granted' && <Link to={`/dataroom/${propertyId}`} className="btn-link">Voir le dossier partagé</Link>}
+          {request.status === 'granted' && <Link to={`/dataroom/${propertyId}`} className="btn-link">Voir le dossier du bien</Link>}
           {['accepted', 'granted', 'validated', 'loi_pending'].includes(request.status) && (
-            <Link to={`/messages?conversation=${encodeURIComponent(request.conversation_id || propertyId)}`} className="btn-link">Écrire au repreneur</Link>
+            <Link to={`/messages?conversation=${encodeURIComponent(request.conversation_id || propertyId)}`} className="btn-link">Écrire à l'acquéreur</Link>
           )}
         </div>
       )}
@@ -78,7 +79,7 @@ export const AccessRequestCard = ({ request, propertyId, onChanged, compact = fa
         open={rejecting}
         onClose={() => setRejecting(false)}
         title="Refuser cette demande de dossier"
-        description="Le repreneur est prévenu par e-mail. Vous pouvez indiquer un motif (facultatif) : il lui sera transmis tel quel."
+        description="L'acquéreur est prévenu par e-mail. Vous pouvez indiquer un motif (facultatif) : il lui sera transmis tel quel."
         confirmLabel="Refuser la demande"
         tone="danger"
         onConfirm={reject}
@@ -91,8 +92,8 @@ export const AccessRequestCard = ({ request, propertyId, onChanged, compact = fa
           onChange={(e) => setReason(e.target.value)}
           rows={3}
           maxLength={500}
-          className="w-full rounded-xl border border-brand-line px-4 py-3 text-base focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
-          placeholder="Ex. : projet trop éloigné de mon activité, budget insuffisant…"
+          className="w-full rounded-xl border border-brand-line px-4 py-3 text-base focus:border-brand-teal focus:outline-none focus:ring-2 focus:ring-brand-teal/30"
+          placeholder="Ex. : budget insuffisant, financement trop incertain…"
         />
       </ConfirmDialog>
     </BuyerCard>
@@ -105,7 +106,7 @@ const AccessRequests = ({ requests, propertyId, onChanged }) => {
   if (!list.length) {
     return (
       <p className="text-sm text-gray-600" data-testid="no-access-requests">
-        Aucune demande de dossier pour l'instant. Les repreneurs intéressés vous présentent leur projet depuis l'annonce, puis demandent l'accès au dossier.
+        Aucune demande de dossier pour l'instant. Les acquéreurs intéressés vous présentent leur projet depuis l'annonce, puis demandent l'accès au dossier du bien.
       </p>
     );
   }

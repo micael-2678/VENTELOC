@@ -46,7 +46,7 @@ const ConfirmDialog = ({
             type="button"
             onClick={confirm}
             disabled={busy || disabled}
-            className={cn('rounded-xl text-white', tone === 'danger' ? 'bg-red-700 hover:bg-red-800' : tone === 'green' ? 'bg-brand-green hover:bg-brand-green-dark' : 'bg-brand-navy hover:bg-brand-navy-light')}
+            className={cn('rounded-xl text-white', tone === 'danger' ? 'bg-red-700 hover:bg-red-800' : 'bg-brand-teal hover:bg-brand-teal-dark')}
             data-testid={testId ? `${testId}-confirm` : undefined}
           >
             {busy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}

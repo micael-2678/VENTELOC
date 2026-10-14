@@ -23,8 +23,8 @@ export const parseInline = (value) => {
 export const stripInline = (value) => parseInline(value).map((s) => s.text).join('');
 
 // Jetons de marque dans les contenus éditoriaux (src/seo/*.json) : le nom de marque et l'URL ne sont
-// jamais écrits en dur (SPEC §1). {{brand}} = BRAND.name, {{vertical}} = BRAND.verticalName (CessionRGE,
-// verticale RGE conservée), {{legalName}} = AlterEgo SAS, {{contactEmail}}, {{siteHost}}.
+// jamais écrits en dur (SPEC §0.1). {{brand}} = BRAND.name, {{legalName}} = AlterEgo SAS, {{contactEmail}},
+// {{siteHost}}, {{siteUrl}}, {{hoguetArt6}}, {{fondsMention}}, {{carteT}}.
 // Les jetons d'offre ({{commissionSentence}}…) sont remplacés par fillOffer (src/lib/offer.js), avant.
 export const fillBrand = (value, brand) => {
   const b = brand || {};
@@ -33,13 +33,12 @@ export const fillBrand = (value, brand) => {
     fondsMention: b.fondsMention,
     carteT: b.carteT,
     brand: b.name,
-    vertical: b.verticalName,
     legalName: b.legalName,
     contactEmail: b.contactEmail,
     siteHost: b.siteHost,
     siteUrl: b.siteUrl,
   };
-  return String(value == null ? '' : value).replace(/\{\{(brand|vertical|legalName|contactEmail|siteHost|siteUrl|hoguetArt6|fondsMention|carteT)\}\}/g, (m, key) => (map[key] ? String(map[key]) : m));
+  return String(value == null ? '' : value).replace(/\{\{(brand|legalName|contactEmail|siteHost|siteUrl|hoguetArt6|fondsMention|carteT)\}\}/g, (m, key) => (map[key] ? String(map[key]) : m));
 };
 
 const MONTHS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];

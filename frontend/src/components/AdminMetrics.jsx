@@ -19,7 +19,7 @@ export const KPI_GROUPS = [
     { key: 'listings_published', label: 'Annonces publiées', unit: 'count', better: 'up' },
     { key: 'listings_blocked', label: 'Publications bloquées', unit: 'count', better: 'down' },
   ] },
-  { n: 2, title: 'Conversion du parcours cédant', items: [
+  { n: 2, title: 'Conversion du parcours vendeur', items: [
     { key: 'estimates_completed', label: 'Estimations terminées', unit: 'count', better: 'up' },
     { key: 'estimate_to_listing_pct', label: 'Estimation → annonce créée', unit: 'pct', better: 'up' },
     { key: 'listing_to_mandate_pct', label: 'Annonce créée → mandat signé', unit: 'pct', better: 'up' },
@@ -27,25 +27,25 @@ export const KPI_GROUPS = [
   { n: 3, title: 'Autonomie de la publication', items: [
     { key: 'publish_delay_median_h', label: 'Délai dépôt → publication (médiane)', unit: 'hours', better: 'down' },
     { key: 'auto_publish_pct', label: 'Part publiée sans intervention humaine', unit: 'pct', better: 'up' },
+    { key: 'ownership_pending', label: 'Justificatifs de propriété à contrôler', unit: 'count', better: 'down' },
   ] },
   { n: 4, title: 'Santé de la demande', items: [
     { key: 'contacts', label: 'Contacts envoyés', unit: 'count', better: 'up' },
     { key: 'contacts_per_listing_30d', label: 'Contacts par annonce (30 j)', unit: 'ratio', better: 'up' },
-    { key: 'nda_signed', label: 'NDA signés', unit: 'count', better: 'up' },
-    { key: 'nda_per_listing_30d', label: 'NDA par annonce (30 j)', unit: 'ratio', better: 'up' },
-    { key: 'offers', label: 'Offres indicatives', unit: 'count', better: 'up' },
+    { key: 'nda_signed', label: 'Engagements de confidentialité signés', unit: 'count', better: 'up' },
+    { key: 'nda_per_listing_30d', label: 'Engagements par annonce (30 j)', unit: 'ratio', better: 'up' },
+    { key: 'offers', label: 'Offres d\'achat', unit: 'count', better: 'up' },
   ] },
-  { n: 5, title: 'Réactivité des cédants', items: [
-    { key: 'seller_response_48h_pct', label: 'Réponse du cédant sous 48 h', unit: 'pct', better: 'up' },
+  { n: 5, title: 'Réactivité des vendeurs', items: [
+    { key: 'seller_response_48h_pct', label: 'Réponse du vendeur sous 48 h', unit: 'pct', better: 'up' },
     { key: 'requests_expired', label: 'Demandes de dossier expirées sans réponse', unit: 'count', better: 'down' },
   ] },
   { n: 8, title: 'Ventes et encaissement', items: [
-    { key: 'offers_accepted', label: 'Offres acceptées', unit: 'count', better: 'up' },
-    { key: 'sales_declared', label: 'Ventes déclarées', unit: 'count', better: 'up' },
+    { key: 'offers_accepted', label: 'Offres d\'achat acceptées', unit: 'count', better: 'up' },
+    { key: 'sales_declared', label: 'Actes authentiques déclarés', unit: 'count', better: 'up' },
     { key: 'invoices_issued', label: 'Factures émises', unit: 'count', better: 'up' },
     { key: 'invoices_paid', label: 'Factures encaissées', unit: 'count', better: 'up' },
     { key: 'invoices_overdue', label: 'Factures en retard', unit: 'count', better: 'down' },
-    { key: 'bodacc_incidents', label: 'Incidents BODACC sans vente déclarée', unit: 'count', better: 'down' },
   ] },
   { n: 9, title: 'Trésorerie', items: [
     { key: 'costs', label: 'Coûts du mois', unit: 'eur', better: 'down' },
@@ -58,12 +58,12 @@ export const KPI_GROUPS = [
 // Les KPI 6 (e-mailing) et 7 (SEO) se lisent dans les outils gratuits externes ; aucune valeur n'est inventée ici.
 const EXTERNAL_KPIS = [
   { n: 6, title: 'E-mailing (Brevo)', text: 'Réponses ≥ 3 %, réponses positives ≥ 1 %, positives → annonce ≥ 10 %, rebonds < 3 %, plaintes < 0,1 %.' },
-  { n: 7, title: 'SEO (Search Console)', text: 'Clics par semaine en croissance mensuelle ; top 10 à M+9 sur « entreprise RGE à vendre » et 5 requêtes ; pages indexées.' },
+  { n: 7, title: 'SEO (Search Console)', text: 'Clics par semaine en croissance mensuelle ; top 10 à M+9 sur « appartement loué à vendre », « investissement locatif » et 5 requêtes ; pages indexées.' },
 ];
 
 const EVENT_LABELS = {
   page_view: 'Pages vues',
-  hero_cta_seller: 'Clic « Estimer » (accueil)',
+  hero_cta_seller: 'Clic vendeur (accueil)',
   estimate_started: 'Estimations commencées',
   estimate_completed: 'Estimations terminées',
   calc_used: 'Calculateur de commission',
@@ -292,7 +292,7 @@ const AdminMetrics = ({ stats }) => {
             <p className="text-[13px] text-gray-600 mt-3">— : aucun sur la période. Point ambre : cible non atteinte. ▲ ▼ : évolution par rapport à la semaine précédente.</p>
             {weeks.length > 1 && (
               <details className="mt-4">
-                <summary className="cursor-pointer text-sm font-medium text-brand-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue rounded">Les {weeks.length} dernières semaines (annonces, contacts, NDA, offres, factures encaissées)</summary>
+                <summary className="cursor-pointer text-sm font-medium text-brand-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue rounded">Les {weeks.length} dernières semaines (annonces, contacts, engagements, offres, factures encaissées)</summary>
                 <div className="overflow-x-auto -mx-4 sm:mx-0 mt-2">
                   <table className="min-w-full text-sm">
                     <thead>
@@ -345,7 +345,7 @@ const AdminMetrics = ({ stats }) => {
               <label htmlFor="cost-amount" className="block text-sm font-medium text-brand-navy">Montant (euros)</label>
               <Input id="cost-amount" type="number" min="0" step="1" inputMode="numeric" value={costForm.amount} onChange={(e) => setCostForm((f) => ({ ...f, amount: e.target.value }))} className="rounded-xl" data-testid="cost-amount" />
             </div>
-            <Button type="submit" size="sm" className="rounded-xl bg-brand-navy hover:bg-brand-navy-light text-white h-9" disabled={savingCost} data-testid="cost-save">
+            <Button type="submit" size="sm" className="rounded-xl bg-brand-teal hover:bg-brand-teal-dark text-white h-9" disabled={savingCost} data-testid="cost-save">
               {savingCost && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
               Enregistrer
             </Button>
@@ -377,7 +377,7 @@ const AdminMetrics = ({ stats }) => {
         actions={(
           <>
             {PERIODS.map((p) => (
-              <Button key={p} type="button" size="sm" variant={days === p ? 'default' : 'outline'} className={`rounded-xl ${days === p ? 'bg-brand-navy hover:bg-brand-navy-light text-white' : ''}`} onClick={() => setDays(p)} data-testid={`metrics-period-${p}`}>
+              <Button key={p} type="button" size="sm" variant={days === p ? 'default' : 'outline'} className={`rounded-xl ${days === p ? 'bg-brand-teal hover:bg-brand-teal-dark text-white' : ''}`} onClick={() => setDays(p)} data-testid={`metrics-period-${p}`}>
                 {p} jours
               </Button>
             ))}
@@ -442,7 +442,7 @@ const AdminMetrics = ({ stats }) => {
 
             {funnel.length > 0 && (
               <div>
-                <h3 className="font-semibold text-brand-navy mb-2">Entonnoir repreneurs (inscrits sur la période)</h3>
+                <h3 className="font-semibold text-brand-navy mb-2">Entonnoir acquéreurs (inscrits sur la période)</h3>
                 <DataTable
                   columns={[
                     { key: 'step', label: 'Étape', primary: true },

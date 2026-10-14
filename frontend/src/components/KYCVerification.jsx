@@ -15,9 +15,9 @@ import {
   UserCheck, FileText, Camera, ArrowRight, FlaskConical,
 } from 'lucide-react';
 
-// Vérification d'identité par Stripe Identity (SPEC §0.2 et §4.1) : elle est demandée au repreneur au moment de
-// signer l'accord de confidentialité (NDA) et au cédant pour signer le mandat de vente. Elle n'est plus exigée pour
-// contacter un cédant ni pour créer une annonce. Seul le résultat (nom, date de naissance, type de document) est
+// Vérification d'identité par Stripe Identity (SPEC §0.5) : elle est demandée à l'acquéreur avant de signer
+// l'engagement de confidentialité et de non-contournement, et au vendeur avant de signer le mandat de vente. Elle
+// n'est pas exigée pour contacter un vendeur ni pour créer une annonce. Seul le résultat (nom, date de naissance, type de document) est
 // conservé, jamais les images.
 // Mode test (MODE-TEST-ET-APP.md §B.3) : bouton « Simuler la vérification (mode test) » à côté du bouton Stripe
 // → POST /test/identity/simulate, puis profil relu et page rechargée, comme au retour de Stripe (/kyc/callback).
@@ -31,19 +31,19 @@ export const identityPurpose = (role) => {
     return 'Demandée une seule fois, au moment de signer le mandat de vente. Votre identité n\'apparaît jamais sur l\'annonce.';
   }
   if (role === 'buyer') {
-    return 'Demandée au moment de signer l\'accord de confidentialité (NDA), juste avant que le nom de l\'entreprise vous soit révélé. Contacter un cédant ne la nécessite pas.';
+    return 'Demandée avant de signer l\'engagement de confidentialité, juste avant que l\'adresse du bien et l\'identité du vendeur vous soient révélées. Contacter un vendeur ne la nécessite pas.';
   }
-  return 'Demandée avant la signature d\'un document engageant (accord de confidentialité, mandat).';
+  return 'Demandée avant la signature d\'un document engageant (engagement de confidentialité, mandat).';
 };
 
 // Texte d'explication selon l'action demandée (KYCGate)
 const ACTION_TEXTS = {
-  sign_nda: 'Pour signer l\'accord de confidentialité et accéder au nom de l\'entreprise, votre identité doit d\'abord être vérifiée.',
+  sign_nda: 'Pour signer l\'engagement de confidentialité et connaître l\'adresse du bien, votre identité doit d\'abord être vérifiée.',
   sign_mandate: 'Pour signer le mandat de vente, votre identité doit d\'abord être vérifiée.',
   // Anciennes valeurs encore passées par certaines pages
   publish_listing: 'Pour signer le mandat de vente et publier votre annonce, votre identité doit d\'abord être vérifiée.',
-  contact_seller: 'Pour signer l\'accord de confidentialité avec ce cédant, votre identité doit d\'abord être vérifiée.',
-  dataroom: 'Pour accéder au dossier, l\'accord de confidentialité doit être signé, ce qui demande une identité vérifiée.',
+  contact_seller: 'Pour signer l\'engagement de confidentialité avec ce vendeur, votre identité doit d\'abord être vérifiée.',
+  dataroom: 'Pour accéder au dossier du bien, l\'engagement de confidentialité doit être signé, ce qui demande une identité vérifiée.',
 };
 
 // Statut KYC
@@ -211,7 +211,7 @@ export const KYCVerificationButton = ({
               <p className="text-xs text-gray-600 leading-relaxed">
                 <strong>Confidentialité :</strong> la vérification est réalisée par Stripe Identity, dans cet onglet. Nous conservons
                 uniquement le résultat (nom, date de naissance, type et pays du document, date), jamais les images, pendant
-                cinq ans après la fin de la relation. Le cédant ne voit votre identité qu'après la signature de l'accord de confidentialité.
+                cinq ans après la fin de la relation. Le vendeur ne voit votre identité qu'après la signature de l'engagement de confidentialité.
               </p>
             </div>
 
@@ -229,7 +229,7 @@ export const KYCVerificationButton = ({
               </Alert>
             )}
 
-            <Button onClick={initiateVerification} disabled={loading || simulating || simulated} className="w-full bg-brand-navy hover:bg-brand-navy-light rounded-xl">
+            <Button onClick={initiateVerification} disabled={loading || simulating || simulated} className="w-full bg-brand-teal hover:bg-brand-teal-dark rounded-xl">
               {loading ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" aria-hidden="true" />
@@ -303,7 +303,7 @@ export const KYCGate = ({ user, action = 'sign_nda', children, fallback = null }
       <h3 className="text-xl font-semibold mb-2">Identité à vérifier</h3>
       <p className="text-gray-600 mb-2">{ACTION_TEXTS[action] || ACTION_TEXTS.sign_nda}</p>
       <p className="text-sm text-gray-500 mb-6">{identityPurpose(user?.role)}</p>
-      <KYCVerificationButton user={user} className="w-full bg-brand-navy hover:bg-brand-navy-light rounded-xl" />
+      <KYCVerificationButton user={user} className="w-full bg-brand-teal hover:bg-brand-teal-dark rounded-xl" />
     </div>
   );
 };
@@ -387,7 +387,7 @@ export const KYCCallbackPage = ({ user }) => {
             <Loader2 className="w-16 h-16 text-brand-blue mx-auto mb-4 animate-spin" aria-hidden="true" />
             <h2 className="text-xl font-semibold mb-2 text-brand-navy">Traitement en cours</h2>
             <p className="text-gray-600">{message}</p>
-            <Button onClick={checkVerificationResult} className="mt-4 bg-brand-navy hover:bg-brand-navy-light rounded-xl">
+            <Button onClick={checkVerificationResult} className="mt-4 bg-brand-teal hover:bg-brand-teal-dark rounded-xl">
               Vérifier à nouveau
             </Button>
           </>
@@ -407,7 +407,7 @@ export const KYCCallbackPage = ({ user }) => {
             <AlertCircle className="w-16 h-16 text-brand-amber mx-auto mb-4" aria-hidden="true" />
             <h2 className="text-xl font-semibold mb-2">En attente</h2>
             <p className="text-gray-600">{message}</p>
-            <Button onClick={checkVerificationResult} className="mt-4 bg-brand-navy hover:bg-brand-navy-light rounded-xl">
+            <Button onClick={checkVerificationResult} className="mt-4 bg-brand-teal hover:bg-brand-teal-dark rounded-xl">
               Actualiser
             </Button>
           </>

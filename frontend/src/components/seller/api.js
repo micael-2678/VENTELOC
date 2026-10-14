@@ -10,7 +10,10 @@ export const asList = (data, key) => {
 
 const settled = (p) => p.then((r) => r.data).catch(() => null);
 
-export const fetchSellerProperties = () => settled(axiosInstance.get('/properties')).then((d) => asList(d, 'properties'));
+// Annonces du vendeur connecté, tous statuts (API.md §2 : GET /properties/seller/mine)
+export const fetchSellerProperties = () => settled(axiosInstance.get('/properties/seller/mine', { params: { limit: 100 } })).then((d) => asList(d, 'properties'));
+// Justificatif de propriété (API.md §2) : métadonnées {status, doc_type, uploaded_at, filename, note?} ; null si absent
+export const fetchOwnershipProof = (propertyId) => settled(axiosInstance.get(`/properties/${propertyId}/ownership-proof`));
 export const fetchMandateStatus = (propertyId) => settled(axiosInstance.get(`/seller/mandat/status/${propertyId}`));
 export const fetchAccessRequests = (propertyId) => settled(axiosInstance.get(`/dataroom/${propertyId}/access-requests`)).then((d) => asList(d, 'requests'));
 export const fetchOffers = (propertyId) => settled(axiosInstance.get(`/offers/property/${propertyId}`)).then((d) => asList(d, 'offers'));
@@ -37,7 +40,7 @@ export const normalizeConversations = (data, userId) => {
         property_id: propertyId,
         property_title: '',
         buyer_id: other?.sender_id || null,
-        other_party_label: other?.sender_label || 'Repreneur',
+        other_party_label: other?.sender_label || 'Acquéreur',
         last_message: last.content || '',
         last_at: last.created_at || null,
         unread_count: sorted.filter((m) => m.receiver_id === userId && !m.read).length,
@@ -51,22 +54,23 @@ export const normalizeConversations = (data, userId) => {
 };
 export const fetchConversations = (userId) => settled(axiosInstance.get('/messages/conversations')).then((d) => normalizeConversations(d, userId));
 
-// Statuts d'une demande de dossier (API.md §4) ; `validated` / `loi_pending` = acceptée (vague 1)
+// Statuts d'une demande de dossier (API.md §4) ; `validated` / `loi_pending` = acceptée (formes historiques)
+const ACCEPTED = { label: 'Acceptée : identité, engagement de confidentialité et origine des fonds en cours', tone: 'info' };
 export const ACCESS_STATUS = {
   pending: { label: 'À traiter', tone: 'warning' },
-  accepted: { label: 'Acceptée : identité, accord de confidentialité et origine des fonds en cours', tone: 'info' },
-  validated: { label: 'Acceptée : identité, accord de confidentialité et origine des fonds en cours', tone: 'info' },
-  loi_pending: { label: 'Acceptée : identité, accord de confidentialité et origine des fonds en cours', tone: 'info' },
-  granted: { label: 'Accès au dossier accordé', tone: 'success' },
+  accepted: ACCEPTED,
+  validated: ACCEPTED,
+  loi_pending: ACCEPTED,
+  granted: { label: 'Accès au dossier du bien accordé', tone: 'success' },
   rejected: { label: 'Refusée', tone: 'danger' },
   expired: { label: 'Expirée (sans réponse sous 10 jours)', tone: 'info' },
-  // Annonce retirée, vendue ou mise hors ligne : demande close sans e-mail (le repreneur en est informé par message)
+  // Annonce retirée, vendue ou mise hors ligne : demande close sans e-mail (l'acquéreur en est informé par message)
   closed: { label: 'Close (annonce plus en ligne)', tone: 'info' },
 };
 export const accessStatus = (req) => ACCESS_STATUS[req?.status] || { label: String(req?.status || ''), tone: 'info' };
 
 export const OFFER_STATUS = {
-  pending_signature: { label: 'En attente de la signature du repreneur', tone: 'info' },
+  pending_signature: { label: 'En attente de la signature de l\'acquéreur', tone: 'info' },
   pending: { label: 'À traiter', tone: 'warning' },
   accepted: { label: 'Acceptée', tone: 'success' },
   rejected: { label: 'Refusée', tone: 'danger' },
@@ -84,4 +88,5 @@ export const CLOSING_STATUS = {
 };
 export const closingStatus = (closing) => CLOSING_STATUS[closing?.status] || { label: String(closing?.status || ''), tone: 'info' };
 
-export const SALE_OBJECT_LABELS = { titres: 'Cession de titres', fonds: 'Cession du fonds de commerce', indifferent: 'Titres ou fonds' };
+// Objet d'une offre d'achat ou d'une vente (API.md §5 et §7)
+export const SALE_OBJECT_LABELS = { bien: 'Achat du bien', parts: 'Achat des parts de la société', indifferent: 'Bien ou parts' };

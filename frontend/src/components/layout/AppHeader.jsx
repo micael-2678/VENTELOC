@@ -8,15 +8,18 @@ import content from '@/seo/content.json';
 import { useSession, clearStoredSession } from '@/components/layout/session';
 import { BTN_PRIMARY } from '@/components/shared/buttonStyles';
 
-// En-tête unique de l'application (MODE-TEST-ET-APP.md §A.4) : logo → /, « Annonces », « Vendre mon entreprise »,
-// puis « Connexion » / « Créer un compte », ou « Messages » (pastille des non-lus), « Mon espace » et le menu du compte
-// (Profil, Déconnexion). Mobile : menu déroulant. En-tête statique (pas de sticky qui recouvrirait les titres).
+// En-tête unique de l'application : logo → /, « Biens à vendre », « Vendre mon bien » (/vendre), puis « Connexion » /
+// « Créer un compte », ou « Messages » (pastille des non-lus), « Mon espace » et le menu du compte (Profil,
+// Déconnexion). Mobile : menu déroulant. En-tête statique (pas de sticky qui recouvrirait les titres).
 // Le pré-rendu (scripts/prerender.mjs) reproduit le balisage de l'état déconnecté.
 
 const h = content.header;
 
-export const sellPathFor = (user) => (user?.role === 'seller' ? '/seller/create' : '/register?role=seller');
-// « Vendre mon entreprise » : visiteur ou cédant (jamais un repreneur ni un administrateur connecté)
+// Page « vendeur » (docs/venteloc/SPEC.md §5.1) : pourquoi vendre loué, honoraires, FAQ
+export const SELL_PATH = '/vendre';
+// Dépôt d'une annonce : formulaire pour un vendeur connecté, inscription vendeur sinon
+export const depositPathFor = (user) => (user?.role === 'seller' ? '/seller/create' : '/register?role=seller');
+// « Vendre mon bien » : visiteur ou vendeur (jamais un acquéreur ni un administrateur connecté)
 export const canSell = (user) => !user || user.role === 'seller';
 
 // Non-lus : une requête au plus par minute et par compte, partagée entre les pages
@@ -126,10 +129,10 @@ const AppHeader = ({ user: userProp, setUser: setUserProp }) => {
     navigate('/');
   };
 
-  const sellTo = sellPathFor(user);
+  const sellTo = SELL_PATH;
   const space = user ? homePathFor(user) : '/';
-  // Administrateur : ni « Vendre mon entreprise » ni messagerie (il n'a ni annonce ni conversation). Repreneur :
-  // pas de « Vendre mon entreprise » (il faudrait un compte cédant distinct)
+  // Administrateur : ni « Vendre mon bien » ni messagerie (il n'a ni annonce ni conversation). Acquéreur :
+  // pas de « Vendre mon bien » (il faudrait un compte vendeur distinct)
   const isAdmin = user?.role === 'admin';
   const showSell = canSell(user);
 
@@ -186,7 +189,7 @@ const AppHeader = ({ user: userProp, setUser: setUserProp }) => {
         <nav id="menu-mobile" aria-label="Menu" className="md:hidden border-t border-brand-line bg-white px-4 pb-4 pt-2" data-testid="mobile-menu">
           <ul className="space-y-1">
             <li><NavLink to="/" end className={({ isActive }) => `block px-3 py-3 rounded-lg font-medium ${isActive ? 'bg-brand-surface text-brand-navy' : 'text-gray-800 hover:bg-brand-surface'}`}>{h.listings}</NavLink></li>
-            {showSell && <li><Link to={sellTo} className="block px-3 py-3 rounded-lg font-medium text-gray-800 hover:bg-brand-surface">{h.sell}</Link></li>}
+            {showSell && <li><NavLink to={sellTo} className={({ isActive }) => `block px-3 py-3 rounded-lg font-medium ${isActive ? 'bg-brand-surface text-brand-navy' : 'text-gray-800 hover:bg-brand-surface'}`}>{h.sell}</NavLink></li>}
             {user ? (
               <>
                 <li><Link to={space} className="block px-3 py-3 rounded-lg font-medium text-gray-800 hover:bg-brand-surface">{h.space}</Link></li>

@@ -12,7 +12,7 @@ export const NOINDEX = 'noindex, nofollow';
 
 // Espaces privés, module intégrable (/embed, iframe du site WordPress) et panneau du mode test (/test) :
 // jamais indexés, même si la page oublie de le préciser
-const PRIVATE_PREFIXES = ['/buyer', '/seller', '/admin', '/messages', '/profile', '/kyc', '/suivi', '/reset-password', '/login', '/register', '/president',
+const PRIVATE_PREFIXES = ['/buyer', '/seller', '/admin', '/messages', '/profile', '/kyc', '/suivi', '/reset-password', '/login', '/register',
   '/dataroom', '/vente', '/confirmer-email', '/mot-de-passe-oublie', '/embed', '/test'];
 export const isPrivatePath = (path) => PRIVATE_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`));
 

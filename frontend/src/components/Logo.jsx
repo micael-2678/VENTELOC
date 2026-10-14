@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { logoMarkSvg } from '@/seo/brand';
 import { BRAND, splitBrandName } from '@/lib/brand';
 
-// Pictogramme seul (maison + feuille)
+// Pictogramme seul (maison + clé)
 export const LogoMark = ({ size = 32, className = '' }) => (
   <span
     className={`inline-flex shrink-0 ${className}`}
@@ -12,14 +12,14 @@ export const LogoMark = ({ size = 32, className = '' }) => (
   />
 );
 
-// Nom de marque en texte : la partie après la majuscule interne est en vert (« CessionBâtiment »).
-// tone : "dark" (sur fond clair) | "light" (sur fond sombre)
+// Nom de marque en texte : la partie après la majuscule interne est colorée (« Vente » + « Loc » en teal).
+// Le vert reste réservé aux badges de vérification. tone : "dark" (sur fond clair) | "light" (sur fond sombre)
 export const BrandName = ({ name = BRAND.name, tone = 'dark', className = '' }) => {
   const { head, tail } = splitBrandName(name);
   return (
     <span className={className}>
       {head}
-      {tail && <span className={tone === 'light' ? 'text-green-400' : 'text-brand-green'}>{tail}</span>}
+      {tail && <span className={tone === 'light' ? 'text-teal-300' : 'text-brand-teal'}>{tail}</span>}
     </span>
   );
 };

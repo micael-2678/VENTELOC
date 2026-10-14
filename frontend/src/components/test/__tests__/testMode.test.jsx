@@ -9,7 +9,7 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom';
 jest.mock('@/App', () => ({
   axiosInstance: { get: jest.fn(), post: jest.fn(), put: jest.fn(), delete: jest.fn() },
   API: '/api',
-  EMAIL_NOT_VERIFIED_EVENT: 'cession:email-not-verified',
+  EMAIL_NOT_VERIFIED_EVENT: 'venteloc:email-not-verified',
 }));
 jest.mock('@radix-ui/primitive/is-development', () => jest.requireActual('@radix-ui/primitive/dist/internal/is-development.false.js'), { virtual: true });
 jest.mock('@/lib/analytics', () => ({ trackEvent: jest.fn(), trackPageView: jest.fn(), initAnalytics: jest.fn() }));
@@ -19,7 +19,8 @@ jest.mock('@/components/layout/AppLayout', () => function AppLayoutStub({ childr
 const { axiosInstance } = require('@/App');
 const { resetTestModeCache, isTestMode, loadTestMode, captureTestPanelKey, testPanelHeaders, testModeFromConfig } = require('@/lib/testMode');
 const { default: TestModeBanner } = require('@/components/test/TestModeBanner');
-const { default: TestModePage, seedSummary } = require('@/pages/TestModePage');
+const { default: TestModePage, seedSummary, TEST_SCENARIOS } = require('@/pages/TestModePage');
+const { DEMO_PERSONAS } = require('@/components/test/testActions');
 const { purgeRows, protectedRows } = require('@/components/test/TestAdminTools');
 const { default: TestInbox, extractEmailLinks, INBOX_REFRESH_MS } = require('@/components/test/TestInbox');
 const { default: OtpSignatureDialog } = require('@/components/OtpSignatureDialog');
@@ -84,7 +85,7 @@ describe('lib/testMode', () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
     expect(global.fetch.mock.calls[0][0]).toMatch(/\/api\/config$/);
     expect(isTestMode()).toBe(true);
-    expect(JSON.parse(sessionStorage.getItem('cession:test_mode'))).toEqual({ testMode: true, panelAccess: true, panelAdmin: true });
+    expect(JSON.parse(sessionStorage.getItem('venteloc:test_mode'))).toEqual({ testMode: true, panelAccess: true, panelAdmin: true });
   });
 
   test('accès au panneau lu dans /config (clé TEST_PANEL_KEY)', () => {
@@ -98,7 +99,7 @@ describe('lib/testMode', () => {
     const replaceState = jest.fn();
     const fakeWindow = { location: { search: '?cle=secret-42&utm_source=wp', pathname: '/test', hash: '' }, history: { state: null, replaceState } };
     expect(captureTestPanelKey(fakeWindow)).toBe('secret-42');
-    expect(localStorage.getItem('cession:test_panel_key')).toBe('secret-42');
+    expect(localStorage.getItem('venteloc:test_panel_key')).toBe('secret-42');
     expect(replaceState).toHaveBeenCalledWith(null, '', '/test?utm_source=wp');
     expect(testPanelHeaders()).toEqual({ 'X-Test-Key': 'secret-42' });
     serveConfig(true, { test_panel_access: true });
@@ -167,7 +168,7 @@ describe('TestModePage', () => {
     expect(steps[0]).toMatch(/Étape 1 : Préparer la démonstration$/);
     expect(steps[1]).toMatch(/Étape 2 : Choisir un rôle$/);
     expect(steps[2]).toMatch(/Étape 3 : Essayer les parcours$/);
-    expect(c.querySelector('[data-testid="test-seed"]').className).toContain('bg-brand-navy');
+    expect(c.querySelector('[data-testid="test-seed"]').className).toContain('bg-brand-teal');
     expect(c.querySelector('[data-testid="test-login-admin"]')).toBeNull();
     expect(c.querySelector('[data-testid="test-admin-demo-closed"]')).not.toBeNull();
     expect(c.querySelector('[data-testid="test-scenario-review"]')).toBeNull();
@@ -175,19 +176,36 @@ describe('TestModePage', () => {
     expect(c.textContent).not.toContain('valeur par défaut');
   });
 
+  test('personas VenteLoc : vendeur, acquéreur, admin ; scénarios sans vocabulaire hérité', async () => {
+    expect(DEMO_PERSONAS.map((p) => [p.key, p.email, p.role])).toEqual([
+      ['vendeur', 'vendeur.demo@test.local', 'Vendeur'],
+      ['acquereur', 'acquereur.demo@test.local', 'Acquéreur'],
+      ['admin', 'admin.demo@test.local', 'Administration'],
+    ]);
+    expect(TEST_SCENARIOS.every((sc) => sc.persona === null || DEMO_PERSONAS.some((p) => p.key === sc.persona))).toBe(true);
+    serveConfig(true, { test_panel_access: true, test_panel_admin: true });
+    const c = await render(<TestModePage user={null} setUser={jest.fn()} />, '/test', '/test');
+    ['vendeur', 'acquereur', 'admin'].forEach((key) => expect(c.querySelector(`[data-testid="test-persona-${key}"]`)).not.toBeNull());
+    expect(c.querySelector('[data-testid="test-persona-acquereur"]').textContent).toContain('acquereur.demo@test.local');
+    expect(c.querySelector('[data-testid="test-scenario-review"]').textContent).toContain('Justificatifs de propriété à contrôler');
+    expect(c.querySelector('[data-testid="test-step-seed"]').textContent).toContain('huit annonces de biens loués');
+    expect(c.textContent).not.toMatch(/repreneur|cédant|SIRET|entreprise|accord de confidentialité/i);
+  });
+
   test('connexion rapide sans démonstration (404) : comptes créés puis connexion réessayée', async () => {
     serveConfig(true);
-    const account = { id: 'u-demo', email: 'repreneur.demo@test.local', role: 'buyer', email_verified: true, identity_verified: true, is_test: true };
+    const account = { id: 'u-demo', email: 'acquereur.demo@test.local', role: 'buyer', email_verified: true, identity_verified: true, is_test: true };
     axiosInstance.post
       .mockRejectedValueOnce({ response: { status: 404, data: { detail: { code: 'not_found', message: 'Comptes absents' } } } })
       .mockResolvedValueOnce({ data: { accounts_created: 3, listings_created: 8, password: 'Demo-2026!' } })
       .mockResolvedValueOnce({ data: { token: 'jeton', user: account } });
     const c = await render(<TestModePage user={null} setUser={jest.fn()} />, '/test', '/test',
-      <Route path="/buyer/dashboard" element={<p>ESPACE REPRENEUR</p>} />);
-    await click(c.querySelector('[data-testid="test-login-repreneur"]'));
+      <Route path="/buyer/dashboard" element={<p>ESPACE ACQUÉREUR</p>} />);
+    await click(c.querySelector('[data-testid="test-login-acquereur"]'));
     expect(axiosInstance.post.mock.calls.map((call) => call[0])).toEqual(['/test/login-as', '/test/seed', '/test/login-as']);
+    expect(axiosInstance.post).toHaveBeenLastCalledWith('/test/login-as', { persona: 'acquereur' });
     expect(localStorage.getItem('token')).toBe('jeton');
-    expect(c.textContent).toContain('ESPACE REPRENEUR');
+    expect(c.textContent).toContain('ESPACE ACQUÉREUR');
   });
 
   test('scénario : « Commencer » connecte au bon compte et ouvre la page du parcours', async () => {
@@ -220,14 +238,14 @@ describe('TestModePage', () => {
     axiosInstance.post.mockResolvedValueOnce({ data: { token: 'jeton-demo', user: account } });
     const setUser = jest.fn();
     const c = await render(<TestModePage user={null} setUser={setUser} />, '/test', '/test',
-      <Route path="/seller/dashboard" element={<p>ESPACE CÉDANT</p>} />);
+      <Route path="/seller/dashboard" element={<p>ESPACE VENDEUR</p>} />);
     expect(c.querySelector('[data-testid="test-signed-out"]')).not.toBeNull();
     await click(c.querySelector('[data-testid="test-login-vendeur"]'));
     expect(axiosInstance.post).toHaveBeenCalledWith('/test/login-as', { persona: 'vendeur' });
     expect(localStorage.getItem('token')).toBe('jeton-demo');
     expect(JSON.parse(localStorage.getItem('user'))).toEqual(account);
     expect(setUser).toHaveBeenCalledWith(account);
-    expect(c.textContent).toContain('ESPACE CÉDANT');
+    expect(c.textContent).toContain('ESPACE VENDEUR');
   });
 
   test('création des données de démonstration : mot de passe affiché', async () => {
@@ -264,7 +282,7 @@ describe('TestModePage', () => {
     expect(iframe.getAttribute('sandbox')).toBe('');
     expect(iframe.getAttribute('srcdoc')).toContain('Bonjour');
     expect(c.querySelector('[data-testid="test-inbox-preview"] a[href="https://app.exemple.fr/confirmer-email/abc"]')).not.toBeNull();
-    // Pas d'outils d'administration pour un repreneur
+    // Pas d'outils d'administration pour un acquéreur
     expect(c.querySelector('[data-testid="test-admin"]')).toBeNull();
   });
 
@@ -360,7 +378,7 @@ describe('TestInbox — petit écran et relecture automatique', () => {
 describe('OtpSignatureDialog — code de test', () => {
   const openAndRequest = async (response) => {
     axiosInstance.post.mockResolvedValueOnce({ data: response });
-    await render(<OtpSignatureDialog open onClose={() => {}} title="Accord de confidentialité" contractId="k1" onSign={async () => {}} />);
+    await render(<OtpSignatureDialog open onClose={() => {}} title="Engagement de confidentialité" contractId="k1" onSign={async () => {}} />);
     const dialog = document.body.querySelector('[data-testid="otp-signature-dialog"]');
     await click(dialog.querySelector('[data-testid="otp-accept"]'));
     await click(dialog.querySelector('[data-testid="otp-request"]'));

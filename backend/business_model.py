@@ -1,9 +1,9 @@
 """
-Module métier partagé (CessionBâtiment / CessionRGE)
+Module métier partagé de VenteLoc
 - Marque et URL du site (SITE_NAME, SITE_URL, SENDER_EMAIL, SENDER_NAME)
-- Barème de la commission de cession (6 % HT, 3 % HT au-delà d'un million, minimum 4 000 € HT, cédant débiteur)
+- Barème des honoraires (COMMISSION_RATE_PERCENT % HT du prix de vente, minimum COMMISSION_MIN_HT, à la charge du vendeur)
 - Envoi d'e-mails Brevo et gabarits
-- Offres et génération PDF
+- Génération PDF simple
 """
 
 from datetime import datetime, timedelta, timezone
@@ -29,7 +29,7 @@ stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
 
 def site_name() -> str:
     """Nom de marque affiché partout (e-mails, PDF, mentions). Jamais écrit en dur."""
-    return os.environ.get("SITE_NAME", "").strip() or "CessionBâtiment"
+    return os.environ.get("SITE_NAME", "").strip() or "VenteLoc"
 
 def site_url(path: str = "") -> str:
     """URL publique du site (SITE_URL ; FRONTEND_URL conservé pour compatibilité)."""
@@ -37,13 +37,13 @@ def site_url(path: str = "") -> str:
     return base.rstrip("/") + path
 
 def sender_email() -> str:
-    return os.environ.get("SENDER_EMAIL", "").strip() or "contact@cessionbatiment.fr"
+    return os.environ.get("SENDER_EMAIL", "").strip() or "contact@venteloc.fr"
 
 def sender_name() -> str:
     return os.environ.get("SENDER_NAME", "").strip() or site_name()
 
 def seller_commission_enabled() -> bool:
-    """Commission de cession due par le cédant au succès (toujours activée en production ; désactivable pour un test)."""
+    """Honoraires dus par le vendeur à la signature de l'acte authentique (toujours activés ; désactivables pour un essai)."""
     return os.environ.get("FF_SELLER_COMMISSION", "true").strip().lower() not in ("false", "0", "no")
 
 
@@ -80,68 +80,83 @@ def mark_test(doc: dict, *related) -> dict:
     return doc
 
 
-# ============ BARÈME DE LA COMMISSION ============
-# 6 % HT du prix de cession jusqu'à 1 000 000 €, 3 % HT sur la part au-delà, minimum 4 000 € HT (COMMISSION_MIN_HT),
-# TVA 20 %, toujours à la charge du cédant, exigible uniquement à la signature de l'acte de cession.
-COMMISSION_RATE = 0.06
-COMMISSION_RATE_ABOVE = 0.03
-COMMISSION_THRESHOLD = 1_000_000
-COMMISSION_TERMS_VERSION = "v2"
+# ============ BARÈME DES HONORAIRES (docs/venteloc/SPEC.md §0.4, §7.1) ============
+# COMMISSION_RATE_PERCENT % HT du prix de vente (défaut 3 % HT, soit 3,6 % TTC), minimum COMMISSION_MIN_HT (défaut
+# 3 000 € HT, soit 3 600 € TTC), TVA 20 %, toujours à la charge du vendeur, exigibles uniquement à la signature de l'acte
+# authentique et réglés par le notaire sur le prix. Un seul taux, pas de tranche. Rien pour l'acquéreur.
+COMMISSION_TERMS_VERSION = "v1"
 VAT_RATE = 0.20
-COMMISSION_PAYER = "cedant"
+COMMISSION_PAYER = "vendeur"
+DEFAULT_COMMISSION_RATE_PERCENT = 3.0
+DEFAULT_COMMISSION_MIN_HT = 3000.0
+
+def commission_rate_percent() -> float:
+    """Taux HT en % du prix de vente (COMMISSION_RATE_PERCENT, lu à l'appel) : 3 par défaut."""
+    try:
+        value = float(str(os.environ.get("COMMISSION_RATE_PERCENT", "") or DEFAULT_COMMISSION_RATE_PERCENT).replace(",", "."))
+    except ValueError:
+        return DEFAULT_COMMISSION_RATE_PERCENT
+    return value if 0 < value < 100 else DEFAULT_COMMISSION_RATE_PERCENT
 
 def commission_minimum_ht() -> float:
-    """Minimum HT (lu à l'appel pour tenir compte de l'environnement) : 4 000 € par défaut."""
+    """Minimum HT (COMMISSION_MIN_HT, lu à l'appel) : 3 000 € par défaut."""
     try:
-        return float(os.environ.get("COMMISSION_MIN_HT", "4000") or 4000)
+        value = float(str(os.environ.get("COMMISSION_MIN_HT", "") or DEFAULT_COMMISSION_MIN_HT).replace(",", "."))
     except ValueError:
-        return 4000.0
+        return DEFAULT_COMMISSION_MIN_HT
+    return value if value >= 0 else DEFAULT_COMMISSION_MIN_HT
 
-def commission_scale() -> dict:
-    """Barème exposé par GET /config et repris par le front (offer.js)."""
+def _ttc(amount: float) -> float:
+    return round(float(amount) * (1 + VAT_RATE), 2)
+
+def commission_rate_percent_ttc() -> float:
+    return round(commission_rate_percent() * (1 + VAT_RATE), 4)
+
+def fmt_percent_fr(value: float) -> str:
+    """3.6 → « 3,6 % » ; 3 → « 3 % »"""
+    return f"{round(float(value), 2):g}".replace(".", ",") + "\u00a0%"
+
+def commission_config() -> dict:
+    """Bloc `commission` de GET /config (le front calcule avec ces valeurs)."""
+    minimum = commission_minimum_ht()
     return {
-        "mode": "simple",
-        "rate_percent": 6,
-        "rate_percent_above": 3,
-        "threshold": COMMISSION_THRESHOLD,
-        "minimum_ht": commission_minimum_ht(),
+        "rate_percent_ht": commission_rate_percent(),
+        "rate_percent_ttc": commission_rate_percent_ttc(),
+        "minimum_ht": minimum,
+        "minimum_ttc": _ttc(minimum),
         "vat_rate": VAT_RATE,
         "payer": COMMISSION_PAYER,
         "terms_version": COMMISSION_TERMS_VERSION,
     }
 
-# ============ PYDANTIC MODELS ============
+def commission_scale() -> dict:
+    """Barème exposé par GET /config (`commission_scale`, forme historique) : un seul taux."""
+    return {"mode": "simple", "rate_percent": commission_rate_percent(), "rate_percent_ttc": commission_rate_percent_ttc(),
+            "minimum_ht": commission_minimum_ht(), "minimum_ttc": _ttc(commission_minimum_ht()), "vat_rate": VAT_RATE,
+            "payer": COMMISSION_PAYER, "terms_version": COMMISSION_TERMS_VERSION}
 
 # ============ HELPER FUNCTIONS ============
 
 def fmt_eur_fr(amount) -> str:
-    """Montant entier au format fr-FR : 4 000 €"""
+    """Montant entier au format fr-FR : 3 000 €"""
     return f"{round(float(amount or 0)):,}".replace(",", "\u00a0") + "\u00a0€"
 
 def calculate_commission(sale_amount: float) -> dict:
-    """Commission de cession : 6 % HT jusqu'à 1 000 000 €, 3 % HT sur la part au-delà, minimum 4 000 € HT,
-    TVA 20 %. Montants HT, TVA et TTC ; débiteur : le cédant."""
+    """Honoraires de négociation : taux HT × prix de vente, au minimum COMMISSION_MIN_HT, TVA 20 % ; débiteur : le vendeur.
+    → {mode, rate_percent, rate_percent_ttc, final_commission_ht, vat, final_commission_ttc, applied_minimum, payer, …}"""
     sale_amount = float(sale_amount or 0)
-    base_low = min(sale_amount, COMMISSION_THRESHOLD)
-    base_high = max(0.0, sale_amount - COMMISSION_THRESHOLD)
-    breakdown = []
-    if base_low > 0:
-        breakdown.append({"from": 0, "to": COMMISSION_THRESHOLD, "base": round(base_low, 2), "rate": COMMISSION_RATE,
-                          "amount_ht": round(base_low * COMMISSION_RATE, 2)})
-    if base_high > 0:
-        breakdown.append({"from": COMMISSION_THRESHOLD, "to": None, "base": round(base_high, 2), "rate": COMMISSION_RATE_ABOVE,
-                          "amount_ht": round(base_high * COMMISSION_RATE_ABOVE, 2)})
-    computed = round(base_low * COMMISSION_RATE + base_high * COMMISSION_RATE_ABOVE, 2)
+    rate = commission_rate_percent()
+    computed = round(sale_amount * rate / 100, 2)
     minimum = commission_minimum_ht()
     final_ht = round(max(computed, minimum), 2)
     vat = round(final_ht * VAT_RATE, 2)
-    effective_rate = (final_ht / sale_amount) if sale_amount else 0.0
+    breakdown = [{"from": 0, "to": None, "base": round(sale_amount, 2), "rate": rate / 100, "amount_ht": computed}] if sale_amount > 0 else []
     return {
         "sale_amount": sale_amount,
         "mode": "simple",
-        "rate": round(effective_rate, 6),
-        "rate_percent": f"{round(effective_rate * 100, 2):g} %".replace(".", ","),
-        "nominal_rate_percent": "6 %",
+        "rate_percent": rate,
+        "rate_percent_ttc": commission_rate_percent_ttc(),
+        "nominal_rate_percent": fmt_percent_fr(rate),
         "breakdown": breakdown,
         "calculated_commission": computed,
         "minimum_fee": minimum,
@@ -156,10 +171,11 @@ def calculate_commission(sale_amount: float) -> dict:
     }
 
 def commission_scale_text() -> str:
-    """Texte unique du barème (mandat, NDA, pages publiques, e-mails)."""
-    return ("6 % HT du prix de cession (3 % HT sur la part au-delà d'un million d'euros), "
-            f"minimum {fmt_eur_fr(commission_minimum_ht())} HT, TVA en sus, à la charge du cédant, "
-            "exigible uniquement à la signature de l'acte de cession. Rien avant. Rien pour le repreneur.")
+    """Texte unique du barème (mandat, engagement, pages publiques, e-mails) : TTC d'abord, HT entre parenthèses."""
+    minimum = commission_minimum_ht()
+    return (f"{fmt_percent_fr(commission_rate_percent_ttc())} TTC du prix de vente ({fmt_percent_fr(commission_rate_percent())} HT), "
+            f"minimum {fmt_eur_fr(_ttc(minimum))} TTC ({fmt_eur_fr(minimum)} HT), à la charge du vendeur, dus uniquement à la "
+            "signature de l'acte authentique et réglés par le notaire sur le prix. Rien avant. Rien pour l'acquéreur.")
 
 def is_business_day(date: datetime) -> bool:
     """Check if date is a business day (Mon-Fri)"""
@@ -333,6 +349,8 @@ def text_to_pdf(title: str, text: str, footer: str = "") -> bytes:
     return buffer.getvalue()
 
 # ============ EMAIL TEMPLATES ============
+# Gabarits communs (compte, annonce, administration). Les gabarits du parcours sont dans emails_parcours.py, ceux des
+# contrats dans emails_contrats.py ; tous utilisent le vocabulaire de VenteLoc (vendeur, acquéreur, bien, vente).
 
 EMAIL_TEMPLATES = {
     "verify_email": {
@@ -342,7 +360,7 @@ EMAIL_TEMPLATES = {
         <p>Bonjour {name},</p>
         <p>Merci de votre inscription sur {site_name}. Pour activer votre compte, confirmez votre adresse en cliquant sur ce lien (valable 48 heures) :</p>
         <p><a href="{link}">{link}</a></p>
-        <p>Tant que votre adresse n'est pas confirmée, vous pouvez consulter les annonces mais ni contacter un cédant, ni créer une alerte, ni signer ou publier.</p>
+        <p>Tant que votre adresse n'est pas confirmée, vous pouvez consulter les annonces mais ni contacter un vendeur, ni créer une alerte, ni signer ou publier.</p>
         <p>Si vous n'êtes pas à l'origine de cette inscription, ignorez cet e-mail.</p>
         <p>Cordialement,<br>L'équipe {site_name}</p>
         """
@@ -363,27 +381,17 @@ EMAIL_TEMPLATES = {
         <h2>Compte supprimé</h2>
         <p>Bonjour {name},</p>
         <p>Votre compte {site_name} a été supprimé et vos données personnelles anonymisées, conformément à notre politique de confidentialité.</p>
-        <p>Les documents à valeur contractuelle (mandats, accords de confidentialité, factures et leurs preuves de signature) sont conservés pendant la durée légale, sans vos coordonnées.</p>
-        <p>Cordialement,<br>L'équipe {site_name}</p>
-        """
-    },
-    "welcome": {
-        "subject": "Bienvenue sur {site_name} !",
-        "html": """
-        <h2>Bienvenue sur {site_name} !</h2>
-        <p>Bonjour {name},</p>
-        <p>Votre compte a été créé avec succès.</p>
-        <p>{role_message}</p>
+        <p>Les documents à valeur contractuelle (mandats, engagements de confidentialité, offres d'achat, factures et leurs preuves de signature) sont conservés pendant la durée légale, sans vos coordonnées.</p>
         <p>Cordialement,<br>L'équipe {site_name}</p>
         """
     },
     "listing_draft": {
         "subject": "Votre annonce est enregistrée en brouillon",
         "html": """
-        <h2>Encore une étape avant la mise en ligne</h2>
+        <h2>Encore quelques étapes avant la mise en ligne</h2>
         <p>Bonjour {name},</p>
-        <p>Votre annonce est enregistrée en brouillon. Pour protéger les acquéreurs et votre entreprise, elle sera publiée automatiquement dès que vous aurez vérifié votre identité et signé le mandat de vente simple (code reçu par e-mail).</p>
-        <p>La vérification d'identité prend quelques minutes (pièce d'identité + selfie) depuis votre espace vendeur ; la signature du mandat se fait ensuite en ligne, sans frais.</p>
+        <p>Votre annonce est enregistrée en brouillon. Pour protéger les acquéreurs et votre bien, elle sera publiée automatiquement dès que vous aurez déposé le justificatif de propriété, vérifié votre identité et signé le mandat de vente simple (code reçu par e-mail).</p>
+        <p>La vérification d'identité prend quelques minutes (pièce d'identité et selfie) depuis votre espace vendeur ; la signature du mandat se fait ensuite en ligne, sans frais.</p>
         <p>Cordialement,<br>L'équipe {site_name}</p>
         """
     },
@@ -392,32 +400,32 @@ EMAIL_TEMPLATES = {
         "html": """
         <h2>Votre avis nous aide à améliorer {site_name}</h2>
         <p>Bonjour {name},</p>
-        <p>Il y a un mois, vous avez contacté le vendeur d'une entreprise du bâtiment ({property_label}). Où en êtes-vous ? Un seul clic suffit :</p>
+        <p>Il y a un mois, vous avez contacté le vendeur d'un bien loué ({property_label}). Où en êtes-vous ? Un seul clic suffit :</p>
         <p>
           <a href="{link_base}&r=en_discussion">Toujours en discussion</a><br>
-          <a href="{link_base}&r=rencontre">Rencontre prévue ou faite</a><br>
-          <a href="{link_base}&r=accord">Accord ou offre en cours</a><br>
+          <a href="{link_base}&r=rencontre">Visite prévue ou faite</a><br>
+          <a href="{link_base}&r=accord">Accord ou offre d'achat en cours</a><br>
           <a href="{link_base}&r=pas_de_suite">Pas de suite</a>
         </p>
         <p>Merci !<br>L'équipe {site_name}</p>
         """
     },
     "seller_no_listing": {
-        "subject": "Votre annonce de cession en 10 minutes",
+        "subject": "Votre annonce de bien loué en 10 minutes",
         "html": """
-        <h2>Publiez votre annonce anonyme</h2>
+        <h2>Déposez votre annonce</h2>
         <p>Bonjour {name},</p>
-        <p>Vous avez créé votre compte vendeur mais pas encore d'annonce. L'annonce est publiée sans frais : une commission n'est due qu'en cas de vente, à la signature de l'acte.</p>
-        <p>Votre annonce reste anonyme : votre nom et celui de votre entreprise ne sont révélés qu'aux acquéreurs que vous validez, après signature d'un accord de confidentialité.</p>
+        <p>Vous avez créé votre compte vendeur mais pas encore d'annonce. L'annonce est publiée sans frais : les honoraires ne sont dus qu'en cas de vente, à la signature de l'acte authentique chez le notaire.</p>
+        <p>L'adresse exacte de votre bien et votre identité ne sont révélées qu'aux acquéreurs vérifiés qui ont signé un engagement de confidentialité et de non-contournement.</p>
         <p>Cordialement,<br>L'équipe {site_name}</p>
         """
     },
     "seller_draft_reminder": {
-        "subject": "Votre annonce attend deux étapes avant sa publication",
+        "subject": "Votre annonce attend quelques étapes avant sa publication",
         "html": """
-        <h2>Votre annonce est prête : vérification d'identité et mandat</h2>
+        <h2>Votre annonce est prête : justificatif, identité et mandat</h2>
         <p>Bonjour {name},</p>
-        <p>Votre annonce est enregistrée en brouillon. Elle sera publiée automatiquement dès que vous aurez vérifié votre identité (quelques minutes, pièce d'identité + selfie) et signé le mandat de vente simple (code reçu par e-mail), depuis votre espace vendeur.</p>
+        <p>Votre annonce est enregistrée en brouillon. Elle sera publiée automatiquement dès que vous aurez déposé le justificatif de propriété, vérifié votre identité (quelques minutes, pièce d'identité et selfie) et signé le mandat de vente simple (code reçu par e-mail), depuis votre espace vendeur.</p>
         <p>Cordialement,<br>L'équipe {site_name}</p>
         """
     },
@@ -426,29 +434,8 @@ EMAIL_TEMPLATES = {
         "html": """
         <h2>Votre annonce est prête</h2>
         <p>Bonjour {name},</p>
-        <p>Pour la publier, signez votre mandat de vente simple avec AlterEgo SAS (carte professionnelle T). La commission, à votre charge, n'est due que si la vente se fait, à la signature de l'acte.</p>
+        <p>Pour la publier, signez votre mandat de vente simple avec AlterEgo SAS (carte professionnelle T). Les honoraires, à votre charge, ne sont dus que si la vente se fait, à la signature de l'acte authentique.</p>
         <p>La signature se fait en ligne en deux minutes, avec un code reçu par e-mail : <a href="{link}">signer mon mandat</a>.</p>
-        <p>Cordialement,<br>L'équipe {site_name}</p>
-        """
-    },
-    "listing_mandate_backfill": {
-        "subject": "Action requise : signez votre mandat pour garder votre annonce en ligne",
-        "html": """
-        <h2>Votre annonce est suspendue en attendant votre mandat</h2>
-        <p>Bonjour {name},</p>
-        <p>{site_name} est opéré par AlterEgo SAS, titulaire d'une carte professionnelle T. La loi impose un mandat écrit avant toute mise en relation : votre annonce a donc été retirée temporairement des résultats. Rien n'est supprimé.</p>
-        <p>Signez votre mandat en ligne (deux minutes, code reçu par e-mail) et votre annonce reviendra dans le circuit de publication : <a href="{link}">signer mon mandat</a>.</p>
-        <p>La publication reste gratuite ; une commission n'est due qu'en cas de vente.</p>
-        <p>Cordialement,<br>L'équipe {site_name}</p>
-        """
-    },
-    "mandate_signed": {
-        "subject": "Votre mandat n° {registry_number} est signé",
-        "html": """
-        <h2>Mandat signé</h2>
-        <p>Bonjour {name},</p>
-        <p>Votre mandat de vente simple n° {registry_number} ({contract_number}) est signé. Commission à la charge du cédant ({payer}), due uniquement à la signature de l'acte de cession.</p>
-        <p>Le mandat signé est téléchargeable à tout moment depuis votre espace vendeur.</p>
         <p>Cordialement,<br>L'équipe {site_name}</p>
         """
     },
@@ -469,7 +456,7 @@ EMAIL_TEMPLATES = {
         <h2>Annonce non publiée</h2>
         <p>Bonjour {name},</p>
         <p>Après vérification, votre annonce n'a pas pu être publiée en l'état.</p>
-        <p>Répondez à cet email ou contactez-nous pour en connaître la raison et la corriger.</p>
+        <p>Répondez à cet e-mail ou contactez-nous pour en connaître la raison et la corriger.</p>
         <p>Cordialement,<br>L'équipe {site_name}</p>
         """
     },
@@ -493,25 +480,6 @@ EMAIL_TEMPLATES = {
         <p><a href="{link}">Ouvrir l'onglet « À faire »</a></p>
         """
     },
-    "document_signed": {
-        "subject": "Nouvelle signature : {doc_label}",
-        "html": """
-        <h2>Nouvelle signature : {doc_label}</h2>
-        <p>Bonjour {name},</p>
-        <p>Un acquéreur a signé le document suivant pour votre entreprise : <strong>{doc_label}</strong> (n° {contract_number}).</p>
-        <p>{next_step}</p>
-        <p>Cordialement,<br>L'équipe {site_name}</p>
-        """
-    },
-    "listing_modified": {
-        "subject": "Votre annonce a été modifiée",
-        "html": """
-        <h2>Modification de votre annonce</h2>
-        <p>Bonjour {name},</p>
-        <p>Les modifications de votre annonce ont bien été enregistrées.</p>
-        <p>Cordialement,<br>L'équipe {site_name}</p>
-        """
-    },
     "seller_reminder": {
         "subject": "{subject_text}",
         "html": """
@@ -519,7 +487,7 @@ EMAIL_TEMPLATES = {
         <p>Bonjour {name},</p>
         <p>{intro}</p>
         <p><a href="{link}">Répondre depuis votre messagerie</a></p>
-        <p>Même une réponse courte (« pas pour le moment », « parlons-en ») compte : un acquéreur sans nouvelles passe rapidement à une autre entreprise.</p>
+        <p>Même une réponse courte (« pas pour le moment », « parlons-en ») compte : un acquéreur sans nouvelles passe rapidement à un autre bien.</p>
         <p>Cordialement,<br>L'équipe {site_name}</p>
         """
     },
@@ -533,13 +501,14 @@ __all__ = [
     'sender_name',
     'seller_commission_enabled',
     'commission_scale',
+    'commission_config',
     'commission_scale_text',
     'commission_minimum_ht',
+    'commission_rate_percent',
+    'commission_rate_percent_ttc',
     'fmt_eur_fr',
+    'fmt_percent_fr',
     'VAT_RATE',
-    'COMMISSION_RATE',
-    'COMMISSION_RATE_ABOVE',
-    'COMMISSION_THRESHOLD',
     'COMMISSION_TERMS_VERSION',
     'COMMISSION_PAYER',
     'calculate_commission',

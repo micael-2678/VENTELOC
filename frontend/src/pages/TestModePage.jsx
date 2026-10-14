@@ -20,9 +20,9 @@ import {
 // données de démonstration, confirmation d'e-mail et identité simulées, boîte mail de test, outils admin.
 // Hors mode test : message explicite (pas de 404) ; un administrateur garde la purge des données de test.
 
-const PASSWORD_KEY = 'cession:test_demo_password';
+const PASSWORD_KEY = 'venteloc:test_demo_password';
 const inputClass = 'w-full rounded-xl border border-brand-line bg-white px-3 py-2.5 text-brand-navy focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30';
-const ROLE_LABEL = { seller: 'cédant', buyer: 'repreneur', admin: 'administrateur' };
+const ROLE_LABEL = { seller: 'vendeur', buyer: 'acquéreur', admin: 'administrateur' };
 
 const readPassword = () => {
   try {
@@ -61,8 +61,8 @@ const NotEnabled = ({ user, setUser }) => (
   </div>
 );
 
-const SEEDED_KEY = 'cession:test_demo_seeded';
-const SCENARIOS_KEY = 'cession:test_scenarios_done';
+const SEEDED_KEY = 'venteloc:test_demo_seeded';
+const SCENARIOS_KEY = 'venteloc:test_scenarios_done';
 
 const readSession = (key) => {
   try {
@@ -78,24 +78,24 @@ const writeSession = (key, value) => {
 // Parcours proposés à l'étape 3 : chacun se connecte au bon compte de démonstration puis ouvre la bonne page.
 // `admin` : réservé à l'admin démo (affiché seulement si la connexion admin démo est permise).
 export const TEST_SCENARIOS = [
-  { key: 'contact', persona: 'repreneur', path: '/', title: 'Repreneur : présenter son projet',
-    text: 'Ouvrez une annonce puis « Présenter mon projet » : le cédant reçoit votre demande dans sa messagerie.' },
-  { key: 'accept', persona: 'vendeur', path: '/messages', title: 'Cédant : répondre et ouvrir le dossier',
-    text: 'Messages → acceptez la demande du repreneur, puis donnez-lui accès au dossier.' },
-  { key: 'nda', persona: 'repreneur', path: '/buyer/dashboard', title: 'Repreneur : accord de confidentialité et dossier',
-    text: 'Signez l\'accord de confidentialité avec le code affiché à l\'écran, déclarez l\'origine des fonds, consultez le dossier.' },
-  { key: 'offer', persona: 'repreneur', path: '/buyer/dashboard', title: 'Repreneur : faire une offre ; cédant : l\'accepter',
-    text: 'Depuis le dossier, « Faire une offre » ; reconnectez-vous en vendeur démo pour l\'accepter avec le code affiché.' },
-  { key: 'listing', persona: null, path: '/register?role=seller', title: 'Cédant : déposer une nouvelle annonce',
-    text: 'Créez un compte cédant (n\'importe quel SIRET de 14 chiffres), confirmez l\'e-mail et simulez l\'identité depuis le bandeau, signez le mandat avec le code affiché.' },
-  { key: 'review', persona: 'admin', path: '/admin/dashboard', title: 'Admin : relire l\'annonce signalée', admin: true,
-    text: '« À faire » → « Annonces publiées à relire » : une annonce de démonstration porte des signalements de l\'open data ; validez-la ou retirez-la.' },
+  { key: 'contact', persona: 'acquereur', path: '/', title: 'Acquéreur : contacter un vendeur',
+    text: 'Ouvrez une annonce puis « Présenter mon projet au vendeur » : le vendeur reçoit votre demande dans sa messagerie.' },
+  { key: 'accept', persona: 'vendeur', path: '/messages', title: 'Vendeur : répondre et ouvrir le dossier du bien',
+    text: 'Messages → acceptez la demande de l\'acquéreur, puis donnez-lui accès au dossier du bien.' },
+  { key: 'nda', persona: 'acquereur', path: '/buyer/dashboard', title: 'Acquéreur : engagement de confidentialité et dossier',
+    text: 'Signez l\'engagement de confidentialité et de non-contournement avec le code affiché à l\'écran, déclarez l\'origine des fonds, consultez le dossier et la fiche de reprise du bail.' },
+  { key: 'offer', persona: 'acquereur', path: '/buyer/dashboard', title: 'Acquéreur : faire une offre d\'achat ; vendeur : l\'accepter',
+    text: 'Depuis le dossier, « Faire une offre d\'achat » ; reconnectez-vous en vendeur démo pour l\'accepter avec le code affiché, puis suivez l\'étape de vente jusqu\'à l\'acte authentique.' },
+  { key: 'listing', persona: null, path: '/register?role=seller', title: 'Vendeur : déposer une nouvelle annonce',
+    text: 'Créez un compte vendeur, décrivez le bien et sa location, déposez un justificatif de propriété (n\'importe quel PDF), confirmez l\'e-mail et simulez l\'identité depuis le bandeau, signez le mandat avec le code affiché.' },
+  { key: 'review', persona: 'admin', path: '/admin/dashboard', title: 'Admin : contrôler un justificatif de propriété', admin: true,
+    text: '« À faire » → « Justificatifs de propriété à contrôler » : ouvrez le fichier, validez-le ou refusez-le avec un motif ; relisez aussi les annonces signalées.' },
 ];
 
 const StepTitle = ({ n, done, children }) => (
   <span className="flex items-center gap-2">
     <span
-      className={`inline-flex items-center justify-center w-7 h-7 shrink-0 rounded-full text-sm font-bold ${done ? 'bg-brand-green text-white' : 'bg-brand-navy text-white'}`}
+      className={`inline-flex items-center justify-center w-7 h-7 shrink-0 rounded-full text-sm font-bold ${done ? 'bg-brand-teal text-white' : 'bg-brand-navy text-white'}`}
       aria-hidden="true"
     >
       {done ? <CheckCircle2 className="w-4 h-4" /> : n}
@@ -185,8 +185,9 @@ const DemoSteps = ({ user, setUser, panelAdmin }) => {
           <StepTitle n={1} done={seeded}>Préparer la démonstration</StepTitle>
         </h2>
         <p className="text-sm text-gray-600 mt-1 leading-relaxed">
-          Trois comptes (cédant, repreneur, administrateur) et huit annonces publiées et variées, appartenant au vendeur démo.
-          Sans risque si elles existent déjà : elles sont remises en état.
+          Trois comptes (vendeur, acquéreur, administrateur) et huit annonces de biens loués publiées et variées (studio, T2, T3,
+          maison, immeuble, local commercial, parking, résidence étudiante), appartenant au vendeur démo, justificatifs de
+          propriété validés. Sans risque si elles existent déjà : elles sont remises en état.
         </p>
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <button
@@ -200,7 +201,7 @@ const DemoSteps = ({ user, setUser, panelAdmin }) => {
             {seeded ? 'Remettre la démonstration en état' : 'Créer les comptes et annonces de démonstration'}
           </button>
           {seeded && (
-            <p className="flex items-center gap-1.5 text-sm text-brand-green-dark" data-testid="test-seed-done">
+            <p className="flex items-center gap-1.5 text-sm text-brand-teal-dark" data-testid="test-seed-done">
               <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
               Démonstration prête.
             </p>
@@ -221,20 +222,20 @@ const DemoSteps = ({ user, setUser, panelAdmin }) => {
             return (
               <div
                 key={p.key}
-                className={`rounded-xl border p-3 min-w-0 flex flex-col ${current ? 'border-2 border-brand-green bg-brand-green-soft/40' : 'border-brand-line'}`}
+                className={`rounded-xl border p-3 min-w-0 flex flex-col ${current ? 'border-2 border-brand-teal bg-brand-teal-soft' : 'border-brand-line'}`}
                 data-testid={`test-persona-${p.key}`}
               >
                 <div className="flex items-center justify-between gap-2 min-w-0">
                   <p className="font-semibold text-brand-navy">{p.label}</p>
                   {current && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-brand-green px-2 py-0.5 text-xs font-semibold text-white" data-testid="test-persona-current">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-brand-teal px-2 py-0.5 text-xs font-semibold text-white" data-testid="test-persona-current">
                       <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
                       Connecté
                     </span>
                   )}
                 </div>
                 <p className="text-sm text-gray-600 mt-0.5 break-all">{p.email}</p>
-                <p className="text-sm text-gray-500">{p.role}</p>
+                <p className="text-sm text-gray-500">{p.role}{p.hint ? ` · ${p.hint}` : ''}</p>
                 <div className="mt-3">
                   {current ? (
                     <Link to={homePathFor(user)} className={`${BTN_SECONDARY} w-full px-3 py-2.5 text-sm`} data-testid={`test-open-${p.key}`}>
@@ -443,8 +444,8 @@ const AccountTools = ({ user, setUser }) => {
               {identityVerified ? 'Simuler à nouveau' : 'Simuler ma vérification d\'identité'}
             </button>
             <p className="text-sm text-gray-600">
-              Comme si vous aviez passé la vérification d'identité : vos annonces en attente sont envoyées en relecture et les
-              étapes bloquées s'ouvrent.
+              Comme si vous aviez passé la vérification d'identité : le mandat peut être signé, l'engagement de confidentialité
+              aussi, et les étapes bloquées s'ouvrent.
             </p>
           </form>
         </div>

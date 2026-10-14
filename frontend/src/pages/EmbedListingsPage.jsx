@@ -7,14 +7,14 @@ import { useSeo, NOINDEX } from '@/lib/seo';
 import { BRAND } from '@/lib/brand';
 import { content } from '@/seo';
 
-// Module intégrable dans le site WordPress (MODE-TEST-ET-APP.md §A.5, docs/WORDPRESS.md) : /embed/annonces.
+// Module intégrable dans le site WordPress (docs/WORDPRESS.md, docs/venteloc/SPEC.md §5.1) : /embed/annonces.
 // Page minimale sans en-tête ni pied de page : grille compacte de cartes, mêmes filtres d'URL que /, plus `limit`
 // (1 à 24, 6 par défaut), et un lien « Voir toutes les annonces ». Les liens s'ouvrent dans l'onglet parent
 // (target="_top"). À chaque rendu, la hauteur du contenu est envoyée à la page parente :
-// window.parent.postMessage({ type: 'cession-embed-height', height }, '*'). Jamais indexée (noindex).
+// window.parent.postMessage({ type: 'venteloc-embed-height', height }, '*'). Jamais indexée (noindex).
 
 const L = content.listings;
-export const EMBED_MESSAGE_TYPE = 'cession-embed-height';
+export const EMBED_MESSAGE_TYPE = 'venteloc-embed-height';
 export const DEFAULT_EMBED_LIMIT = 6;
 
 // Marqueurs de campagne des liens du module (statistiques : visites venues du site WordPress, module cliqué) ;
@@ -48,7 +48,7 @@ const EmbedListingsPage = () => {
   const [result, setResult] = useState({ status: 'loading', items: [] });
   const rootRef = useRef(null);
 
-  useSeo(`Annonces | ${BRAND.name}`, L.description, { robots: NOINDEX });
+  useSeo(`Biens loués à vendre | ${BRAND.name}`, L.description, { robots: NOINDEX });
 
   useEffect(() => {
     let alive = true;

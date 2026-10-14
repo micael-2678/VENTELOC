@@ -1,7 +1,7 @@
 {
   "header": {
-    "listings": "Annonces",
-    "sell": "Vendre mon entreprise",
+    "listings": "Biens à vendre",
+    "sell": "Vendre mon bien",
     "login": "Connexion",
     "register": "Créer un compte",
     "messages": "Messages",
@@ -36,43 +36,120 @@
     "contact": "Contact"
   },
   "listings": {
-    "title": "Entreprises du bâtiment à vendre | {{brand}}",
-    "description": "Annonces anonymes d'entreprises du bâtiment à reprendre : plomberie, électricité, isolation, RGE. Filtrez par métier, région et prix. Contact gratuit.",
-    "h1": "Entreprises du bâtiment à vendre",
-    "intro": "Annonces anonymes de cédants vérifiés. Contact gratuit pour les repreneurs.",
+    "title": "Biens loués à vendre : investissement locatif | {{brand}}",
+    "description": "Appartements, maisons, immeubles et locaux déjà loués, vendus par leurs propriétaires : loyer, rendement brut et net, bail, DPE. Vendeurs vérifiés, honoraires payés par le vendeur.",
+    "h1": "Biens loués à vendre",
+    "intro": "Investissements locatifs vendus par leurs propriétaires. Vendeurs vérifiés, dossier complet, honoraires payés par le vendeur à la signature chez le notaire.",
     "filtersTitle": "Filtres",
-    "tradesLabel": "Métier",
+    "typesLabel": "Type de bien",
+    "leaseLabel": "Type de bail",
     "regionLabel": "Région",
     "departementLabel": "Département",
-    "rgeLabel": "Qualification RGE",
-    "rgeAny": "Toutes",
-    "rgeYes": "RGE",
-    "rgeHint": "RGE déclaré par le cédant ou vérifié sur la liste ADEME (badge vert).",
-    "rgeNo": "Sans RGE",
     "priceMaxLabel": "Prix maximum",
-    "caMinLabel": "Chiffre d'affaires minimum",
-    "effectifMinLabel": "Effectif minimum",
+    "yieldMinLabel": "Rendement brut minimum",
+    "surfaceMinLabel": "Surface minimum",
     "sortLabel": "Trier par",
     "reset": "Effacer les filtres",
-    "showResults": "Afficher les annonces",
-    "emptyTitle": "Aucune annonce ne correspond pour l'instant",
-    "emptyText": "Élargissez vos critères ou créez une alerte : vous recevez un e-mail dès qu'une entreprise correspondante est publiée.",
+    "showResults": "Afficher les biens",
+    "emptyTitle": "Aucun bien ne correspond pour l'instant",
+    "emptyText": "Élargissez vos critères ou créez une alerte : vous recevez un e-mail dès qu'un bien correspondant est publié.",
     "errorTitle": "Les annonces n'ont pas pu être chargées",
     "errorText": "Vérifiez votre connexion, puis réessayez.",
     "retry": "Réessayer",
-    "alertTitle": "Recevoir les nouvelles annonces",
-    "alertIntro": "Une alerte e-mail sans compte, sur vos métiers, vos régions et votre budget.",
-    "sellerTitle": "Vous vendez ?",
-    "sellerCta": "Déposez une annonce anonyme",
-    "sellerText": "Votre nom n'est révélé qu'aux repreneurs qui ont signé un accord de confidentialité.",
-    "embedAll": "Voir toutes les annonces",
-    "embedEmpty": "Aucune annonce ne correspond pour l'instant."
+    "alertTitle": "Recevoir les nouveaux biens",
+    "alertIntro": "Une alerte e-mail sans compte, sur vos types de biens, vos régions, votre budget et le rendement visé.",
+    "sellerTitle": "Vous vendez un bien loué ?",
+    "sellerCta": "Déposez votre annonce",
+    "sellerText": "Vendez à un investisseur sans donner congé à votre locataire. L'adresse et votre identité ne sont révélées qu'après engagement de confidentialité.",
+    "howTitle": "Comment ça marche",
+    "howSteps": [
+      {
+        "title": "Vous présentez votre projet",
+        "text": "Sans frais, par la messagerie. Le vendeur voit votre budget, votre financement et le rendement que vous visez."
+      },
+      {
+        "title": "Vous recevez le dossier du bien",
+        "text": "Après vérification de votre identité et signature de l'engagement de confidentialité : adresse, bail, quittances, diagnostics, copropriété."
+      },
+      {
+        "title": "Offre d'achat, puis notaire",
+        "text": "Offre d'achat signée en ligne ; le compromis et l'acte authentique sont signés chez le notaire. Rien à payer pour l'acquéreur."
+      }
+    ],
+    "embedAll": "Voir tous les biens",
+    "embedEmpty": "Aucun bien ne correspond pour l'instant."
   },
   "estimate": {
-    "title": "Estimer la valeur de mon entreprise du bâtiment en 2 minutes | {{brand}}",
-    "description": "Estimation indicative et sans compte de la valeur de votre entreprise du bâtiment : votre SIRET, trois chiffres, trois cases, une fourchette de prix et ce qui fait monter la valeur.",
-    "h1": "Estimer mon entreprise en 2 minutes",
-    "intro": "Votre SIRET charge les données publiques de votre entreprise et, le cas échéant, ses qualifications RGE. Trois chiffres (chiffre d'affaires, excédent brut d'exploitation ou résultat, effectif) et trois cases suffisent pour obtenir une fourchette indicative, sans compte ni engagement."
+    "title": "Estimer mon bien loué par le rendement | {{brand}}",
+    "description": "Estimation indicative et sans compte d'un bien déjà loué par la méthode du rendement : type de bien, bail, département et loyer suffisent pour obtenir une fourchette de prix.",
+    "h1": "Estimer mon bien loué",
+    "intro": "Un investisseur achète d'abord un loyer : un bien loué se valorise par son rendement. Indiquez le type de bien, le bail, le département et le loyer : vous obtenez une fourchette de prix indicative en une minute, sans compte ni engagement."
+  },
+  "sell": {
+    "path": "/vendre",
+    "title": "Vendre un bien loué à un investisseur, sans congé au locataire | {{brand}}",
+    "description": "Vendez votre appartement, maison, immeuble ou local déjà loué à un investisseur qualifié : prix fondé sur le rendement, pas de vacance locative, vendeur et acquéreurs vérifiés, honoraires réglés par le notaire à l'acte.",
+    "h1": "Vendez votre bien loué à un investisseur",
+    "intro": "Vous déposez vous-même votre annonce ; nous vérifions le bien et les acquéreurs, encadrons la confidentialité, le dossier et les offres, jusqu'au notaire. Rien à payer avant l'acte authentique.",
+    "whyTitle": "Pourquoi vendre loué",
+    "why": [
+      {
+        "title": "Pas de vacance locative",
+        "text": "Le loyer continue d'être encaissé jusqu'à l'acte : aucun mois sans locataire, aucun logement vide à faire visiter."
+      },
+      {
+        "title": "Un prix fondé sur le rendement",
+        "text": "L'investisseur achète un revenu : un bail en cours, un loyer au marché et un locataire stable se valorisent."
+      },
+      {
+        "title": "Pas de congé à donner",
+        "text": "Le bail continue avec le nouveau propriétaire (art. 1743 du Code civil) : pas de délai de préavis, pas de relogement."
+      }
+    ],
+    "doTitle": "Ce que fait {{brand}}",
+    "do": [
+      "Contrôle de votre justificatif de propriété et de votre identité : badge « Propriétaire vérifié » sur l'annonce.",
+      "Acquéreurs qualifiés : projet, budget, apport et financement déclarés, identité vérifiée et origine des fonds déclarée avant toute révélation de l'adresse.",
+      "Engagement de confidentialité et de non-contournement signé en ligne par chaque acquéreur avant l'accès au dossier.",
+      "Dossier du bien sécurisé : documents filigranés, journal des consultations, données du locataire jamais exposées.",
+      "Offres d'achat signées en ligne, suivi jusqu'à la signature chez le notaire."
+    ],
+    "costTitle": "Ce que vous ne payez pas",
+    "costIntro": "Rien avant la vente : ni frais de publication, ni abonnement, ni exclusivité. Les honoraires ne sont dus qu'à la signature de l'acte authentique, réglés par le notaire sur le prix.",
+    "securityTitle": "Votre sécurité",
+    "security": [
+      "Intermédiaire titulaire de la carte professionnelle T (loi Hoguet) : {{carteT}}.",
+      "Mandat de vente simple, sans exclusivité, 12 mois, résiliable à tout moment avec un préavis de 15 jours ; 14 jours pour vous rétracter si vous êtes un particulier.",
+      "Adresse, nom et dénomination de la SCI révélés seulement aux acquéreurs à l'identité vérifiée qui ont signé l'engagement de confidentialité.",
+      "{{fondsMention}}"
+    ],
+    "faqTitle": "Questions fréquentes",
+    "faq": [
+      {
+        "q": "Mon locataire doit-il être prévenu ?",
+        "a": "Pour une vente à un investisseur, le bail continue : le locataire n'a pas de droit de préemption sur un logement vendu occupé (sauf vente par lot d'un immeuble de plus de cinq logements, ou bail commercial : le notaire purge alors son droit de préférence). Prévenez-le simplement pour organiser les visites : elles se font avec son accord, deux heures au maximum par jour ouvrable (art. 4 de la loi du 6 juillet 1989)."
+      },
+      {
+        "q": "Puis-je vendre un logement classé F ou G ?",
+        "a": "Oui. Le bail en cours continue jusqu'à son terme ; c'est seulement un nouveau bail ou un renouvellement qui est interdit (G depuis le 1er janvier 2025, F à partir de 2028). L'annonce l'indique clairement et l'estimation tient compte des travaux à prévoir."
+      },
+      {
+        "q": "Qui paie les honoraires ?",
+        "a": "{{faqWhoPaysAnswer}}"
+      },
+      {
+        "q": "Et si je trouve un acquéreur moi-même ?",
+        "a": "Le mandat est simple, sans exclusivité : vous restez libre de vendre seul ou par d'autres intermédiaires. Aucun honoraire n'est dû pour un acquéreur que nous ne vous avons pas présenté (seuls les signataires de l'engagement de confidentialité sur votre bien le sont, y compris pendant les 12 mois qui suivent la fin du mandat)."
+      },
+      {
+        "q": "Que devient le dépôt de garantie ?",
+        "a": "Il suit le bail : le nouveau propriétaire devra le restituer au départ du locataire. Le notaire le règle entre vous et l'acquéreur le jour de l'acte (art. 22 de la loi du 6 juillet 1989 pour un logement), en même temps que le prorata des loyers, des charges et de la taxe foncière."
+      }
+    ],
+    "ctaTitle": "Prêt à vendre ?",
+    "ctaText": "Estimez votre bien en une minute, puis déposez votre annonce en trois écrans : le bien, la location, la vente.",
+    "ctaEstimate": "Estimer mon bien",
+    "ctaDeposit": "Déposer mon annonce"
   },
   "legal": {
     "mentions": {
@@ -86,10 +163,13 @@
           "title": "Activité",
           "blocks": [
             {
-              "p": "{{brand}} est une plateforme de mise en relation confidentielle entre dirigeants d'entreprises du bâtiment qui souhaitent céder leur entreprise et repreneurs. Elle permet la publication d'annonces anonymes, la présentation des repreneurs avec leur projet, la vérification d'identité, la signature en ligne de mandats, d'accords de confidentialité et d'offres indicatives, ainsi que la consultation de documents dans un espace sécurisé. {{vertical}} est sa verticale dédiée aux entreprises qualifiées RGE."
+              "p": "{{brand}} est une place de marché d'intermédiation pour la vente de biens immobiliers déjà loués : les propriétaires bailleurs y publient eux-mêmes leurs annonces, et des investisseurs y achètent. La plateforme vérifie le vendeur et son justificatif de propriété, qualifie les acquéreurs, fait signer en ligne le mandat de vente, l'engagement de confidentialité et de non-contournement et les offres d'achat, et met à disposition le dossier du bien dans un espace sécurisé."
             },
             {
-              "p": "L'éditeur exerce l'activité d'intermédiaire en transactions sur fonds de commerce au sens de la loi n° 70-9 du 2 janvier 1970 (loi Hoguet), sous couvert de la carte professionnelle mentionnée ci-dessus. {{hoguetArt6}} L'éditeur ne négocie pas, ne rédige pas les actes et ne fournit pas de conseil juridique, fiscal ou financier. Les informations publiées dans les annonces sont communiquées par les cédants sous leur responsabilité."
+              "p": "L'éditeur exerce l'activité d'intermédiaire en transactions sur immeubles au sens de la loi n° 70-9 du 2 janvier 1970 (loi Hoguet), sous couvert de la carte professionnelle mentionnée ci-dessus. {{hoguetArt6}} L'éditeur ne négocie pas, ne fait pas visiter les biens, ne rédige ni l'avant-contrat ni l'acte authentique (rédigés par le notaire) et ne fournit pas de conseil juridique, fiscal ou financier. Les informations publiées dans les annonces sont communiquées par les vendeurs sous leur responsabilité."
+            },
+            {
+              "p": "Honoraires de négociation : {{commissionSentence}} Les prix affichés dans les annonces s'entendent honoraires inclus."
             }
           ]
         },
@@ -98,7 +178,7 @@
           "title": "Propriété intellectuelle",
           "blocks": [
             {
-              "p": "Les marques {{brand}} et {{vertical}}, les textes, graphismes, logos et la structure du site sont protégés. Toute reproduction ou représentation, totale ou partielle, sans autorisation préalable de l'éditeur est interdite. Les contenus publiés par les utilisateurs (annonces, messages, documents) restent leur propriété ; ils concèdent à l'éditeur le droit de les afficher aux fins du service, dans les conditions prévues par les [conditions générales d'utilisation](/cgu)."
+              "p": "La marque {{brand}}, les textes, graphismes, logos et la structure du site sont protégés. Toute reproduction ou représentation, totale ou partielle, sans autorisation préalable de l'éditeur est interdite. Les contenus publiés par les utilisateurs (annonces, photos, messages, documents) restent leur propriété ; ils concèdent à l'éditeur le droit de les afficher aux fins du service, dans les conditions prévues par les [conditions générales d'utilisation](/cgu)."
             }
           ]
         },
@@ -107,7 +187,7 @@
           "title": "Responsabilité",
           "blocks": [
             {
-              "p": "L'éditeur s'efforce d'assurer l'exactitude des informations diffusées, notamment les données d'entreprises issues des bases publiques (recherche-entreprises, INSEE, ADEME, BODACC), sans pouvoir en garantir l'exhaustivité ni l'actualité. Les estimations et les guides publiés sur le site sont informatifs et ne constituent pas un conseil personnalisé. L'éditeur ne garantit pas la conclusion d'une cession."
+              "p": "L'éditeur s'efforce d'assurer l'exactitude des informations diffusées, notamment les données issues des bases publiques (annuaire des entreprises pour les sociétés propriétaires), sans pouvoir en garantir l'exhaustivité ni l'actualité. Les rendements affichés sont calculés à partir des loyers, charges et taxe foncière déclarés par le vendeur. Les estimations publiées sur le site sont indicatives et ne constituent ni un avis de valeur ni un conseil personnalisé. L'éditeur ne garantit pas la conclusion d'une vente."
             }
           ]
         },
@@ -145,8 +225,8 @@
       "title": "Politique de confidentialité | {{brand}}",
       "description": "Comment {{brand}} collecte et protège vos données personnelles : données traitées, finalités, bases légales, durées de conservation réelles, sous-traitants et droits RGPD.",
       "h1": "Politique de confidentialité",
-      "updated": "2026-10-10",
-      "intro": "La confidentialité est au cœur de {{brand}} : les cédants nous confient des informations sensibles sur leur entreprise, les repreneurs sur leur projet et leur financement. Cette politique explique quelles données personnelles nous traitons, pourquoi, pendant combien de temps et comment exercer vos droits, conformément au Règlement général sur la protection des données (RGPD) et à la loi Informatique et Libertés.",
+      "updated": "2026-10-14",
+      "intro": "La confidentialité est au cœur de {{brand}} : les vendeurs nous confient l'adresse de leur bien, leur identité et les documents de la location, les acquéreurs leur projet et leur financement. Cette politique explique quelles données personnelles nous traitons, pourquoi, pendant combien de temps et comment exercer vos droits, conformément au Règlement général sur la protection des données (RGPD) et à la loi Informatique et Libertés.",
       "sections": [
         {
           "id": "responsable",
@@ -166,12 +246,13 @@
           "blocks": [
             {
               "ul": [
-                "**Compte utilisateur** : nom, prénom, adresse e-mail (confirmée par un lien), téléphone, rôle (cédant ou repreneur), mot de passe (conservé sous forme chiffrée irréversible), préférences de notification.",
-                "**Profil de projet du repreneur** : type de reprise, budget, apport, mode de financement, zones et métiers recherchés, horizon, société et SIREN le cas échéant, expérience. Ces éléments forment la carte repreneur transmise au cédant, sous un pseudonyme avant l'accord de confidentialité.",
+                "**Compte utilisateur** : nom, prénom, adresse e-mail (confirmée par un lien), téléphone, rôle (vendeur ou acquéreur), mot de passe (conservé sous forme chiffrée irréversible), préférences de notification.",
+                "**Profil d'investissement de l'acquéreur** : type de projet, budget, apport, mode de financement, zones et types de biens recherchés, rendement visé, horizon, société et SIREN le cas échéant, expérience. Ces éléments forment la carte acquéreur transmise au vendeur, sous un pseudonyme avant l'engagement de confidentialité.",
                 "**Vérification d'identité** : réalisée par notre prestataire Stripe Identity à partir d'une pièce d'identité. Nous conservons le rapport de vérification (nom, prénom, date de naissance, type et pays du document, résultat, horodatage, identifiant de session) ; les images des pièces d'identité ne sont jamais stockées par nos soins.",
-                "**Informations sur l'entreprise** : SIRET et données publiques associées (dénomination, forme, code NAF, date de création, effectif, dirigeants, publications BODACC), qualifications RGE issues de la base publique de l'ADEME, données de l'annonce (métiers, région, département, indicateurs financiers, prix demandé, description), adresse postale du mandant.",
-                "**Documents de l'espace sécurisé** : documents déposés par les cédants (bilans, contrats, certificats…), journal des consultations (lecteur, date et heure).",
-                "**Échanges et actes** : messages de la messagerie, mandats, accords de confidentialité, offres indicatives et déclarations signés en ligne, avec leur dossier de preuve (empreinte du document, horodatage, adresse IP, navigateur, code utilisé), déclaration d'origine des fonds, étape de vente et factures.",
+                "**Informations sur le bien** : adresse (confidentielle, révélée seulement après l'engagement de confidentialité), caractéristiques, bail, loyers, charges, diagnostics, prix ; justificatif de propriété (titre, attestation notariée, avis de taxe foncière ou statuts et Kbis de la SCI), visible du seul vendeur et de nos équipes ; pour un bien détenu par une société : dénomination, SIRET et données publiques associées ; adresse postale du mandant.",
+                "**Données du locataire** : elles ne sont jamais saisies dans l'annonce. Les vendeurs sont invités à masquer le nom, les coordonnées et les pièces d'identité du locataire dans les documents du dossier ; si des données subsistent, elles ne sont accessibles qu'aux acquéreurs engagés par l'engagement de confidentialité, pour la seule étude de l'acquisition.",
+                "**Documents du dossier du bien** : documents déposés par les vendeurs (bail, quittances, diagnostics, copropriété…), journal des consultations (lecteur, date et heure).",
+                "**Échanges et actes** : messages de la messagerie, mandats, engagements de confidentialité, offres d'achat et déclarations signés en ligne, avec leur dossier de preuve (empreinte du document, horodatage, adresse IP, navigateur, code utilisé), déclaration d'origine des fonds, étape de vente et factures.",
                 "**Estimations et alertes sans compte** : adresse e-mail et critères choisis, activés après confirmation de l'adresse.",
                 "**Signalements** : motif, référence et description transmis depuis la page de signalement, adresse e-mail si vous la fournissez.",
                 "**Données techniques** : journaux de connexion et adresse IP, à des fins de sécurité ; statistiques de fréquentation sans cookie, à partir d'une empreinte journalière qui ne permet pas de retrouver l'adresse IP."
@@ -185,10 +266,10 @@
           "blocks": [
             {
               "ul": [
-                "**Création et gestion du compte, publication des annonces, mise en relation, messagerie, accords de confidentialité, offres, espace documents, étape de vente et facturation** : exécution du contrat (conditions générales d'utilisation et mandat).",
-                "**Vérification d'identité des utilisateurs, déclaration d'origine des fonds, conservation des dossiers de preuve** : obligations légales de l'intermédiaire (loi Hoguet, lutte contre le blanchiment) et intérêt légitime à sécuriser les échanges et à prévenir la fraude.",
-                "**Contrôles sur les bases publiques et veille BODACC** : exécution du mandat et intérêt légitime à vérifier les annonces et le respect de la clause de suite.",
-                "**Journal d'accès et filigrane des documents** : intérêt légitime des cédants et de l'éditeur à protéger la confidentialité des informations partagées.",
+                "**Création et gestion du compte, publication des annonces, mise en relation, messagerie, engagements de confidentialité, offres d'achat, dossier du bien, étape de vente et facturation** : exécution du contrat (conditions générales d'utilisation et mandat).",
+                "**Vérification d'identité, contrôle du justificatif de propriété, déclaration d'origine des fonds, conservation des dossiers de preuve** : obligations légales de l'intermédiaire immobilier (loi Hoguet, lutte contre le blanchiment de capitaux et le financement du terrorisme) et intérêt légitime à sécuriser les échanges et à prévenir la fraude.",
+                "**Contrôles sur les bases publiques** (société propriétaire) : exécution du mandat et intérêt légitime à vérifier les annonces.",
+                "**Journal d'accès et filigrane des documents** : intérêt légitime des vendeurs et de l'éditeur à protéger la confidentialité des informations partagées.",
                 "**E-mails de service** (confirmation d'adresse, contacts, demandes de dossier, codes de signature, offres, relances) : exécution du contrat ; les e-mails non indispensables peuvent être désactivés depuis votre profil.",
                 "**Alertes et estimations sans compte** : consentement, retirable à tout moment par le lien de désinscription.",
                 "**Statistiques de fréquentation et amélioration du service** : intérêt légitime, sans cookie ni suivi individuel.",
@@ -205,9 +286,10 @@
               "ul": [
                 "**Compte et profil** : 3 ans après la dernière connexion, puis suppression ou anonymisation.",
                 "**Mandats, factures et preuves de signature** : 10 ans (obligation comptable), même après suppression du compte, les données personnelles étant alors remplacées dans le compte.",
-                "**Rapport de vérification d'identité** : 5 ans après la fin de la relation (obligations de lutte contre le blanchiment) ; les images des pièces d'identité ne sont jamais stockées.",
+                "**Rapport de vérification d'identité et déclaration d'origine des fonds** : 5 ans après la fin de la relation (obligations de lutte contre le blanchiment) ; les images des pièces d'identité ne sont jamais stockées.",
+                "**Justificatif de propriété** : jusqu'à 3 ans après le retrait ou la vente de l'annonce.",
                 "**Messages** : 3 ans.",
-                "**Documents de l'espace sécurisé** : jusqu'à 3 ans après le retrait ou la vente de l'annonce (fin du mandat), puis suppression automatique ; le cédant peut les supprimer à tout moment. **Journal d'accès** : 3 ans.",
+                "**Documents du dossier du bien** : jusqu'à 3 ans après le retrait ou la vente de l'annonce (fin du mandat), puis suppression automatique ; le vendeur peut les supprimer à tout moment. Les acquéreurs qui n'achètent pas s'engagent à supprimer les données du locataire qu'ils auraient consultées. **Journal d'accès** : 3 ans.",
                 "**Alertes et e-mails non transactionnels** : jusqu'au désabonnement.",
                 "**Estimations** : 7 jours sans confirmation de l'adresse e-mail, 3 ans après confirmation.",
                 "**Journaux techniques de sécurité** : 12 mois.",
@@ -221,7 +303,7 @@
           "title": "Destinataires et sous-traitants",
           "blocks": [
             {
-              "p": "Vos données sont accessibles aux seules personnes habilitées de l'éditeur. Les informations que vous choisissez de partager (carte repreneur, messages, identité et nom de l'entreprise après accord de confidentialité, documents) sont communiquées aux utilisateurs concernés. Les bases publiques consultées (recherche-entreprises, ADEME, BODACC) ne reçoivent que le SIREN ou le SIRET interrogé. Nous faisons appel aux sous-traitants suivants :"
+              "p": "Vos données sont accessibles aux seules personnes habilitées de l'éditeur. Les informations que vous choisissez de partager (carte acquéreur, messages, adresse du bien, identité du vendeur et dénomination de la SCI après l'engagement de confidentialité, documents) sont communiquées aux utilisateurs concernés, puis au notaire chargé de la vente. L'annuaire public des entreprises ne reçoit que le SIREN ou le SIRET interrogé. Nous faisons appel aux sous-traitants suivants :"
             },
             {
               "ul": [
@@ -250,7 +332,7 @@
           "title": "Sécurité",
           "blocks": [
             {
-              "p": "Les échanges sont chiffrés (HTTPS), les mots de passe sont stockés sous forme chiffrée irréversible, l'accès aux documents est réservé aux repreneurs autorisés par le cédant après vérification d'identité et accord de confidentialité, avec filigrane nominatif et journal des consultations. Les sauvegardes sont quotidiennes et conservées 14 jours. L'accès administrateur est protégé par un second facteur."
+              "p": "Les échanges sont chiffrés (HTTPS), les mots de passe sont stockés sous forme chiffrée irréversible, l'accès au dossier du bien est réservé aux acquéreurs acceptés par le vendeur après vérification d'identité, engagement de confidentialité et déclaration d'origine des fonds, avec filigrane nominatif et journal des consultations. Les sauvegardes sont quotidiennes et conservées 14 jours. L'accès administrateur est protégé par un second facteur."
             }
           ]
         },
@@ -283,20 +365,20 @@
     "cgu": {
       "path": "/cgu",
       "title": "Conditions générales d'utilisation | {{brand}}",
-      "description": "Conditions générales d'utilisation de {{brand}} : comptes, annonces anonymes, mandat, repreneurs, contenus publiés, modération, signalement, rémunération et responsabilité.",
+      "description": "Conditions générales d'utilisation de {{brand}} : comptes, annonces de biens loués, justificatif de propriété, mandat, engagement de confidentialité, offres d'achat, modération, honoraires et responsabilité.",
       "h1": "Conditions générales d'utilisation",
-      "updated": "2026-10-10",
-      "intro": "Les présentes conditions régissent l'accès et l'utilisation de la plateforme {{brand}} (et de sa verticale {{vertical}}), éditée par {{legalName}}. En créant un compte ou en utilisant les services sans compte (estimation, alerte, signalement), vous les acceptez. Le mandat de vente signé par les cédants et l'accord de confidentialité signé par les repreneurs complètent ces conditions pour les opérations qu'ils encadrent.",
+      "updated": "2026-10-14",
+      "intro": "Les présentes conditions régissent l'accès et l'utilisation de la plateforme {{brand}}, éditée par {{legalName}}. En créant un compte ou en utilisant les services sans compte (estimation, alerte, signalement), vous les acceptez. Le mandat de vente signé par les vendeurs et l'engagement de confidentialité et de non-contournement signé par les acquéreurs complètent ces conditions pour les opérations qu'ils encadrent.",
       "sections": [
         {
           "id": "objet",
           "title": "1. Objet et rôle de la plateforme",
           "blocks": [
             {
-              "p": "La plateforme met en relation des dirigeants d'entreprises du bâtiment qui souhaitent céder leur entreprise (les cédants) et des personnes ou sociétés qui souhaitent en reprendre une (les repreneurs). Elle publie des annonces anonymes, contrôle les entreprises et les repreneurs sur des bases publiques et des déclarations, fournit une messagerie, un espace documents sécurisé et des outils de signature en ligne, et tient le registre des mandats."
+              "p": "La plateforme met en relation des propriétaires de biens immobiliers déjà loués qui souhaitent les vendre (les vendeurs) et des personnes ou sociétés qui souhaitent les acheter (les acquéreurs). Elle publie les annonces déposées par les vendeurs, contrôle les justificatifs de propriété et l'identité des utilisateurs, qualifie les acquéreurs, fournit une messagerie, un dossier du bien sécurisé et des outils de signature en ligne, et tient le registre des mandats."
             },
             {
-              "p": "L'éditeur agit comme intermédiaire au sens de la loi Hoguet, sous couvert de sa carte professionnelle. Il ne négocie pas pour le compte des parties, ne rédige pas les actes de cession et ne fournit pas de conseil juridique, fiscal ou financier. {{hoguetArt6}}"
+              "p": "L'éditeur agit comme intermédiaire au sens de la loi Hoguet, sous couvert de sa carte professionnelle. Il ne négocie pas pour le compte des parties, ne fait pas visiter les biens, ne rédige ni l'avant-contrat (promesse ou compromis) ni l'acte authentique, confiés au notaire choisi par les parties, et ne fournit pas de conseil juridique, fiscal ou financier. {{hoguetArt6}}"
             }
           ]
         },
@@ -308,8 +390,8 @@
               "ul": [
                 "Un compte est personnel : une personne physique, majeure, agissant pour elle-même ou pour la société qu'elle représente. Un seul compte par personne.",
                 "L'adresse e-mail doit être confirmée. Tant qu'elle ne l'est pas, le compte permet de consulter le site mais pas de contacter, de créer une alerte, de demander un code de signature ni de publier.",
-                "Les informations fournies doivent être exactes et tenues à jour. Le cédant déclare avoir qualité pour engager la société ou le propriétaire du fonds ; le repreneur décrit sincèrement son projet et ses moyens de financement.",
-                "La vérification d'identité est exigée du repreneur pour signer un accord de confidentialité et du cédant pour signer un mandat. Elle est réalisée par un prestataire à partir d'une pièce d'identité.",
+                "Les informations fournies doivent être exactes et tenues à jour. Le vendeur déclare être propriétaire du bien ou avoir qualité pour le vendre (co-indivisaire agissant avec l'accord des autres, gérant de la société propriétaire, mandataire) ; l'acquéreur décrit sincèrement son projet et ses moyens de financement.",
+                "La vérification d'identité est exigée du vendeur pour signer le mandat et de l'acquéreur pour signer l'engagement de confidentialité. Elle est réalisée par un prestataire à partir d'une pièce d'identité.",
                 "Vous êtes responsable de la confidentialité de votre mot de passe et des actions réalisées depuis votre compte. Les codes de signature reçus par e-mail sont strictement personnels.",
                 "Vous pouvez exporter vos données et supprimer votre compte à tout moment depuis votre profil, dans les conditions de la politique de confidentialité."
               ]
@@ -317,32 +399,35 @@
           ]
         },
         {
-          "id": "cedants",
-          "title": "3. Services pour les cédants",
+          "id": "vendeurs",
+          "title": "3. Services pour les vendeurs",
           "blocks": [
             {
-              "p": "Le cédant crée une annonce anonyme décrivant son entreprise (métiers, région et département, effectif, indicateurs financiers, prix demandé, conditions de cession). La publication est subordonnée à la confirmation de l'adresse e-mail, à la vérification de l'identité du signataire, à la signature du mandat de vente simple, à la fourniture du SIRET et à la réussite des contrôles automatiques (SIREN actif, absence de doublon, au moins un métier, prix renseigné)."
+              "p": "Le vendeur dépose une annonce décrivant son bien (type, localisation sans adresse exacte, surface, copropriété, diagnostic de performance énergétique), la location (type de bail, loyer, charges, dates, dépôt de garantie, situation déclarée du locataire) et la vente (prix honoraires inclus, objet, description). Il ne saisit aucune donnée personnelle du locataire. La publication est automatique dès que sont réunis : adresse e-mail confirmée, identité vérifiée, mandat signé, informations obligatoires renseignées, justificatif de propriété déposé et, pour une société, SIRET d'une société non cessée."
             },
             {
-              "p": "Le mandat est simple et non exclusif, d'une durée de 12 mois, résiliable par chacune des parties avec un préavis de 15 jours. Sa rémunération, due uniquement en cas de cession conclue avec un repreneur nommément présenté par la plateforme, est décrite à l'article 9 et dans le mandat lui-même. Le cédant s'engage à signaler toute vente, promesse ou négociation directe avec un repreneur présenté, et à répondre aux demandes dans un délai raisonnable."
+              "p": "Le justificatif de propriété (titre de propriété, attestation notariée, avis de taxe foncière, ou statuts et Kbis de la SCI) est contrôlé par l'éditeur ; il n'est jamais montré aux acquéreurs. Une fois validé, l'annonce porte le badge « Propriétaire vérifié ». Un justificatif refusé doit être remplacé ; l'annonce peut être retirée si aucun justificatif valable n'est fourni."
             },
             {
-              "p": "Le cédant peut mettre son annonce en pause, la retirer, la déclarer vendue via la plateforme ou autrement, résilier ou prolonger son mandat depuis son espace. Une annonce retirée par la modération rend le mandat caduc."
+              "p": "Le mandat de vente est simple et non exclusif, d'une durée de 12 mois renouvelable, résiliable par le vendeur à tout moment avec un préavis de 15 jours. Le vendeur qui agit en tant que consommateur dispose d'un délai de rétractation de 14 jours à compter de la signature : une résiliation dans ce délai vaut rétractation, prend effet immédiatement et ne donne lieu à aucun paiement. Les honoraires, dus uniquement en cas de vente conclue avec un acquéreur nommément présenté par la plateforme, sont décrits à l'article 9 et dans le mandat lui-même."
+            },
+            {
+              "p": "Le vendeur peut mettre son annonce en pause, la retirer, la déclarer vendue via la plateforme ou autrement, résilier ou prolonger son mandat depuis son espace. Il organise les visites avec l'accord du locataire. Une annonce retirée par la modération rend le mandat caduc."
             }
           ]
         },
         {
-          "id": "repreneurs",
-          "title": "4. Services pour les repreneurs",
+          "id": "acquereurs",
+          "title": "4. Services pour les acquéreurs",
           "blocks": [
             {
-              "p": "La recherche, les alertes et la prise de contact sont sans frais. Pour contacter un cédant, le repreneur décrit son projet (type de reprise, budget, apport, financement, zones, métiers, horizon) ; ce profil, pseudonymisé, est transmis au cédant avec le message. Le cédant est libre de répondre ou non."
+              "p": "La recherche, les alertes et la prise de contact sont sans frais. Pour contacter un vendeur, l'acquéreur décrit son projet (type de projet, budget, apport, financement, zones, types de biens, rendement visé, horizon) ; ce profil, pseudonymisé, est transmis au vendeur avec le message. Le vendeur est libre de répondre ou non."
             },
             {
-              "p": "L'accès aux documents d'une entreprise suppose, dans l'ordre, l'accord du cédant, la vérification d'identité du repreneur, la signature par code e-mail de l'accord de confidentialité et une déclaration d'origine des fonds. Le repreneur s'engage à n'utiliser les informations reçues que pour l'étude de la reprise, à ne pas contacter les salariés, clients ou fournisseurs sans l'accord écrit du cédant, et à informer le cédant et l'éditeur de toute négociation directe."
+              "p": "L'accès au dossier du bien suppose, dans l'ordre, l'accord du vendeur, la vérification d'identité de l'acquéreur, la signature par code e-mail de l'engagement de confidentialité et de non-contournement et une déclaration d'origine des fonds. L'adresse du bien, l'identité du vendeur et la dénomination de la société propriétaire sont alors révélées. L'acquéreur s'engage à n'utiliser les informations reçues que pour l'étude de l'acquisition, à ne contacter ni le locataire, ni le syndic, ni l'exploitant et à ne pas se rendre dans le bien sans l'accord du vendeur, et à ne pas acquérir le bien en dehors de la plateforme sans en informer le vendeur et l'éditeur."
             },
             {
-              "p": "Les offres indicatives sont signées en ligne par code. Elles expriment l'intention du repreneur aux conditions qu'elles précisent (montant, objet, financement, conditions, durée de validité) sans constituer une promesse d'achat ; leur acceptation par le cédant ne constitue pas une promesse de vente. Les parties s'engagent seulement à poursuivre de bonne foi la négociation et la rédaction des actes avec leurs conseils ; seul l'acte de cession signé les engage sur la vente. Une offre non acceptée dans son délai de validité est caduque."
+              "p": "Les offres d'achat sont signées en ligne par code. Elles précisent le prix, l'objet (bien ou parts de la société), le financement, l'éventuelle condition suspensive d'obtention de prêt, les autres conditions et leur durée de validité. Une offre, même acceptée par le vendeur, n'emporte pas vente : elle engage seulement les parties à négocier de bonne foi un avant-contrat chez le notaire, qui fixera toutes les conditions ; seul l'acte authentique signé transfère la propriété. L'acquéreur non professionnel d'un logement dispose d'un délai de rétractation de 10 jours à compter de l'avant-contrat (art. L271-1 du Code de la construction et de l'habitation). Une offre non acceptée dans son délai de validité est caduque."
             }
           ]
         },
@@ -351,19 +436,19 @@
           "title": "5. Contenus publiés",
           "blocks": [
             {
-              "p": "Les utilisateurs sont responsables des contenus qu'ils publient (annonces, descriptions, messages, documents, offres). Ils garantissent qu'ils sont exacts, qu'ils disposent des droits nécessaires et qu'ils ne portent atteinte à aucun tiers. Sont notamment interdits :"
+              "p": "Les utilisateurs sont responsables des contenus qu'ils publient (annonces, descriptions, photos, messages, documents, offres). Ils garantissent qu'ils sont exacts, qu'ils disposent des droits nécessaires et qu'ils ne portent atteinte à aucun tiers. Sont notamment interdits :"
             },
             {
               "ul": [
-                "la publication de coordonnées (téléphone, e-mail, adresse, site, réseaux sociaux) ou d'éléments permettant d'identifier l'entreprise dans une annonce anonyme ou dans un message avant l'accord de confidentialité ; ces éléments sont masqués automatiquement et leur contournement répété entraîne la suspension du compte ;",
-                "les informations fausses, trompeuses ou obsolètes sur l'entreprise, ses chiffres, ses qualifications ou le projet du repreneur ;",
-                "les annonces d'entreprises hors du périmètre du bâtiment, les annonces en double, ou publiées par une personne sans qualité pour le faire ;",
+                "la publication de coordonnées (téléphone, e-mail, site, réseaux sociaux), de l'adresse exacte du bien ou de toute donnée personnelle du locataire dans une annonce ou dans un message avant l'engagement de confidentialité ; ces éléments sont masqués automatiquement et leur contournement répété entraîne la suspension du compte ;",
+                "les informations fausses, trompeuses ou obsolètes sur le bien, le bail, les loyers, les charges, le diagnostic de performance énergétique, la copropriété ou le projet de l'acquéreur ;",
+                "les annonces de biens non loués, les annonces en double, ou publiées par une personne sans qualité pour vendre ;",
                 "tout usage de la plateforme à des fins de fraude, de blanchiment, de démarchage ou de collecte de données ;",
                 "tout contenu illicite, diffamatoire ou contraire aux bonnes mœurs."
               ]
             },
             {
-              "p": "Les utilisateurs concèdent à l'éditeur, pour la durée du service, le droit d'afficher, d'adapter (anonymisation, titre généré, filigrane) et de transmettre leurs contenus aux utilisateurs autorisés. L'éditeur peut refuser, modifier la présentation ou retirer tout contenu contraire aux présentes conditions."
+              "p": "Les utilisateurs concèdent à l'éditeur, pour la durée du service, le droit d'afficher, d'adapter (titre généré, recadrage des photos, filigrane) et de transmettre leurs contenus aux utilisateurs autorisés. L'éditeur peut refuser, modifier la présentation ou retirer tout contenu contraire aux présentes conditions."
             }
           ]
         },
@@ -372,13 +457,10 @@
           "title": "6. Modération",
           "blocks": [
             {
-              "p": "La publication d'une annonce est automatique dès que les conditions de l'article 3 sont remplies. Chaque annonce publiée peut faire l'objet d'une relecture par l'éditeur et de contrôles sur les bases publiques : cohérence du dirigeant déclaré, code NAF, présence des qualifications RGE déclarées dans la liste de l'ADEME. Un écart est signalé sur l'annonce ou donne lieu à une demande de précision ; il ne bloque pas la publication."
+              "p": "La publication d'une annonce est automatique dès que les conditions de l'article 3 sont remplies. Chaque annonce publiée peut faire l'objet d'une relecture par l'éditeur : contrôle du justificatif de propriété, concordance du gérant déclaré pour une société, décence énergétique, impayés déclarés, doublon probable. Un écart donne lieu à une demande de précision ; il ne bloque pas la publication tant qu'il n'est pas confirmé."
             },
             {
-              "p": "L'éditeur peut retirer une annonce, avec un motif notifié à son auteur (coordonnées visibles, hors périmètre, informations inexactes, dirigeant non confirmé, doublon, autre motif précisé). Le cédant peut corriger et soumettre à nouveau son annonce ; le mandat attaché à une annonce retirée est caduc. Il peut aussi contester le retrait en répondant à l'e-mail qui le lui notifie ou en écrivant à {{contactEmail}} : l'éditeur réexamine la décision et lui répond avec un motif ; à défaut d'accord, il conserve ses recours devant le médiateur de la consommation lorsqu'il est consommateur et devant les juridictions compétentes (article 17 du règlement (UE) 2022/2065 sur les services numériques). Les annonces dont le mandat expire ou est dénoncé sont dépubliées à la date d'effet."
-            },
-            {
-              "p": "Une veille des publications légales (BODACC) est exercée sur les sociétés sous mandat, pendant le mandat et la période de la clause de suite ; une publication de cession ou de changement de dirigeant non déclarée donne lieu à une demande d'explication au cédant."
+              "p": "L'éditeur peut retirer une annonce, avec un motif notifié à son auteur (justificatif de propriété manquant ou refusé, informations inexactes, doublon, bien non loué, contenu interdit, autre motif précisé). Le vendeur peut corriger et soumettre à nouveau son annonce ; le mandat attaché à une annonce retirée est caduc. Il peut aussi contester le retrait en répondant à l'e-mail qui le lui notifie ou en écrivant à {{contactEmail}} : l'éditeur réexamine la décision et lui répond avec un motif ; à défaut d'accord, il conserve ses recours devant le médiateur de la consommation lorsqu'il est consommateur et devant les juridictions compétentes (article 17 du règlement (UE) 2022/2065 sur les services numériques). Les annonces dont le mandat expire, est dénoncé ou fait l'objet d'une rétractation sont dépubliées à la date d'effet."
             }
           ]
         },
@@ -396,19 +478,19 @@
           "title": "8. Confidentialité et loyauté",
           "blocks": [
             {
-              "p": "Les informations échangées sur la plateforme sont confidentielles. Les parties s'interdisent de contourner la plateforme pour éluder la rémunération prévue au mandat : le cédant informe l'éditeur de toute négociation directe avec un repreneur présenté ; le repreneur informe le cédant et l'éditeur de toute négociation directe engagée après un accord de confidentialité. Les repreneurs présentés sont inscrits sur une liste nominative communiquée au cédant en fin de mandat."
+              "p": "Les informations échangées sur la plateforme sont confidentielles. Les parties s'interdisent de contourner la plateforme pour éluder la rémunération prévue au mandat : le vendeur informe l'éditeur de toute négociation directe avec un acquéreur présenté ; l'acquéreur informe le vendeur et l'éditeur de toute négociation directe engagée après l'engagement de confidentialité. Les acquéreurs présentés sont inscrits sur une liste nominative communiquée au vendeur en fin de mandat."
             }
           ]
         },
         {
           "id": "remuneration",
-          "title": "9. Rémunération",
+          "title": "9. Honoraires",
           "blocks": [
             {
               "p": "{{commissionSentence}}"
             },
             {
-              "p": "La commission est prévue dans le mandat simple signé par le cédant. Elle n'est due que si la cession (titres ou fonds, totale ou partielle, y compris par une société liée au repreneur) est conclue avec un repreneur nommément présenté par la plateforme, pendant le mandat ou dans les 18 mois qui suivent sa fin, et elle est exigible à la signature de l'acte définitif. Rien n'est demandé au repreneur, à aucune étape. {{hoguetArt6}}"
+              "p": "Les honoraires sont prévus dans le mandat simple signé par le vendeur ; les prix affichés dans les annonces s'entendent honoraires inclus. Ils ne sont dus que si la vente du bien ou la cession des parts de la société propriétaire est conclue avec un acquéreur nommément présenté par la plateforme, y compris par une personne ou société interposée, pendant le mandat ou dans les 12 mois qui suivent sa fin. Ils sont exigibles à la signature de l'acte authentique et réglés par le notaire sur le prix. Rien n'est demandé à l'acquéreur, à aucune étape. {{hoguetArt6}}"
             }
           ]
         },
@@ -417,7 +499,7 @@
           "title": "10. Responsabilité",
           "blocks": [
             {
-              "p": "L'éditeur fournit la plateforme, les contrôles et les outils décrits ci-dessus ; il ne garantit ni l'exactitude des informations fournies par les utilisateurs, ni la conclusion d'une cession, ni le résultat des estimations. Les décisions d'achat, de vente, de prix et de financement relèvent des seules parties, assistées de leurs conseils. L'éditeur n'est pas partie aux actes de cession."
+              "p": "L'éditeur fournit la plateforme, les contrôles et les outils décrits ci-dessus ; il ne garantit ni l'exactitude des informations fournies par les utilisateurs, ni la solvabilité du locataire, ni la conclusion d'une vente, ni le résultat des estimations. Les décisions d'achat, de vente, de prix et de financement relèvent des seules parties, assistées de leurs conseils et du notaire. L'éditeur n'est pas partie aux actes de vente."
             },
             {
               "p": "L'éditeur s'efforce d'assurer la disponibilité du service mais ne garantit pas l'absence d'interruption. Sa responsabilité, lorsqu'elle est engagée, est limitée aux dommages directs et prévisibles, et au montant de la rémunération perçue pour l'opération concernée."
@@ -429,7 +511,7 @@
           "title": "11. Suspension et résiliation",
           "blocks": [
             {
-              "p": "L'éditeur peut suspendre ou clôturer un compte en cas de manquement aux présentes conditions, notamment contournement des règles d'anonymat, informations fausses, fraude, signalements fondés ou usage abusif, après information de l'utilisateur sauf urgence. L'utilisateur peut supprimer son compte à tout moment. La suspension ou la clôture n'affecte pas les droits et obligations nés d'un mandat, d'un accord de confidentialité ou d'une offre déjà signés."
+              "p": "L'éditeur peut suspendre ou clôturer un compte en cas de manquement aux présentes conditions, notamment contournement des règles de confidentialité, informations fausses, fraude, signalements fondés ou usage abusif, après information de l'utilisateur sauf urgence. L'utilisateur peut supprimer son compte à tout moment. La suspension ou la clôture n'affecte pas les droits et obligations nés d'un mandat, d'un engagement de confidentialité ou d'une offre déjà signés."
             }
           ]
         },
@@ -447,7 +529,7 @@
           "title": "13. Droit applicable, médiation, litiges",
           "blocks": [
             {
-              "p": "Les présentes conditions sont soumises au droit français. En cas de litige avec un consommateur, celui-ci peut recourir au médiateur de la consommation mentionné dans les [mentions légales](/mentions-legales) lorsqu'il est désigné. À défaut d'accord amiable, les litiges relèvent des tribunaux compétents du siège de l'éditeur, le tribunal de commerce de Versailles pour les litiges entre professionnels."
+              "p": "Les présentes conditions sont soumises au droit français. En cas de litige avec un consommateur, celui-ci peut recourir au médiateur de la consommation mentionné dans les [mentions légales](/mentions-legales) lorsqu'il est désigné. À défaut d'accord amiable, les litiges relèvent des tribunaux compétents, sous réserve des règles protectrices du consommateur ; le tribunal de commerce de Versailles pour les litiges entre professionnels."
             },
             {
               "p": "L'éditeur peut modifier les présentes conditions ; la version applicable est celle en vigueur à la date d'utilisation, identifiée par la date figurant en haut de cette page. Les utilisateurs disposant d'un compte sont informés des modifications substantielles par e-mail."
@@ -461,19 +543,19 @@
       "title": "Signaler un contenu | {{brand}}",
       "description": "Signalez une annonce ou un contenu inexact, trompeur, contenant des coordonnées ou contraire aux conditions d'utilisation de {{brand}}. Signalement examiné et traité avec un motif notifié.",
       "h1": "Signaler un contenu",
-      "intro": "Une annonce contient des coordonnées, paraît inexacte ou hors périmètre, un message vous semble frauduleux ? Décrivez le problème : le signalement est enregistré et examiné. Vous pouvez aussi nous écrire directement par e-mail.",
+      "intro": "Une annonce contient des coordonnées ou des données du locataire, paraît inexacte, porte sur un bien qui n'est pas loué, un message vous semble frauduleux ? Décrivez le problème : le signalement est enregistré et examiné. Vous pouvez aussi nous écrire directement par e-mail.",
       "reasons": [
         {
           "value": "coordonnees",
-          "label": "Coordonnées ou identité visibles dans une annonce ou un message"
+          "label": "Coordonnées, adresse ou données du locataire visibles"
         },
         {
           "value": "inexact",
-          "label": "Informations inexactes ou trompeuses"
+          "label": "Informations inexactes ou trompeuses (loyer, DPE, copropriété…)"
         },
         {
           "value": "hors_perimetre",
-          "label": "Entreprise hors du bâtiment ou annonce en double"
+          "label": "Bien non loué ou annonce en double"
         },
         {
           "value": "fraude",
@@ -490,7 +572,7 @@
       ],
       "reasonLabel": "Motif",
       "referenceLabel": "Référence du contenu",
-      "referenceHelp": "Adresse de la page ou code de l'annonce (ex. /property/…).",
+      "referenceHelp": "Adresse de la page ou code de l'annonce (ex. /annonce/…).",
       "descriptionLabel": "Description",
       "descriptionHelp": "Ce que vous avez constaté, en quelques phrases.",
       "emailLabel": "Votre adresse e-mail (facultative)",
@@ -503,7 +585,7 @@
       "errorText": "Le signalement n'a pas pu être enregistré. Écrivez-nous directement par e-mail : votre message est prérempli.",
       "afterTitle": "Ce qui se passe ensuite",
       "after": [
-        "Le signalement est examiné : relecture de l'annonce ou du message et contrôles sur les bases publiques.",
+        "Le signalement est examiné : relecture de l'annonce ou du message, contrôle du justificatif de propriété si nécessaire.",
         "Selon la gravité, le contenu est corrigé, retiré avec un motif notifié à son auteur, ou conservé.",
         "Les signalements fondés peuvent entraîner la suspension du compte concerné, conformément aux [conditions générales d'utilisation](/cgu)."
       ]
@@ -516,15 +598,15 @@
     "links": [
       {
         "to": "/",
-        "label": "Voir les annonces"
+        "label": "Voir les biens à vendre"
+      },
+      {
+        "to": "/vendre",
+        "label": "Vendre un bien loué"
       },
       {
         "to": "/estimer",
-        "label": "Estimer mon entreprise"
-      },
-      {
-        "to": "/register?role=seller",
-        "label": "Déposer une annonce"
+        "label": "Estimer mon bien"
       },
       {
         "to": "/login",

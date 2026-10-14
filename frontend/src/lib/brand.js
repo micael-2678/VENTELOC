@@ -1,8 +1,8 @@
 // Marque et entité juridique. Le nom de marque et l'URL ne sont jamais écrits en dur dans les pages :
 // importer BRAND (nom, URL, e-mail) et LEGAL (AlterEgo SAS, carte T, mentions obligatoires).
 //
-// Variables de build (CRA) : REACT_APP_BRAND_NAME (défaut « CessionBâtiment »),
-// REACT_APP_SITE_URL (défaut https://cessionbatiment.fr), REACT_APP_CONTACT_EMAIL
+// Variables de build (CRA) : REACT_APP_BRAND_NAME (défaut « VenteLoc »),
+// REACT_APP_SITE_URL (défaut https://venteloc.fr), REACT_APP_CONTACT_EMAIL
 // (défaut contact@<domaine du site>). Les mêmes variables sont lues par scripts/prerender.mjs.
 //
 // Pas d'import : ce fichier est aussi chargé sans bundler par le pré-rendu (bac à sable node:vm
@@ -13,23 +13,21 @@ const clean = (value, fallback) => {
   return s || fallback;
 };
 
-const siteUrl = clean(process.env.REACT_APP_SITE_URL, 'https://cessionbatiment.fr').replace(/\/+$/, '');
+const siteUrl = clean(process.env.REACT_APP_SITE_URL, 'https://venteloc.fr').replace(/\/+$/, '');
 const siteHost = siteUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
 
 export const BRAND = {
   // Nom commercial affiché (logo, titres, e-mails côté front)
-  name: clean(process.env.REACT_APP_BRAND_NAME, 'CessionBâtiment'),
+  name: clean(process.env.REACT_APP_BRAND_NAME, 'VenteLoc'),
   // Entité qui opère la plateforme (carte T) ; aucune personne physique n'apparaît sur le site
   legalName: 'AlterEgo SAS',
   siteUrl,
   siteHost,
-  tagline: 'Cession d\'entreprises du bâtiment, en toute confidentialité',
-  // Verticale historique conservée (pages /…-rge, hub RGE)
-  verticalName: 'CessionRGE',
+  tagline: 'Biens loués à vendre, de propriétaire à investisseur',
   contactEmail: clean(process.env.REACT_APP_CONTACT_EMAIL, `contact@${siteHost}`),
 };
 
-// « CessionBâtiment » → { head: 'Cession', tail: 'Bâtiment' } : la partie après la première majuscule
+// « VenteLoc » → { head: 'Vente', tail: 'Loc' } : la partie après la première majuscule
 // interne est mise en couleur par le logo. Sans majuscule interne : { head: nom, tail: '' }.
 export const splitBrandName = (name) => {
   const s = String(name || '');
@@ -61,7 +59,7 @@ export const LEGAL = {
   fondsMention: 'AlterEgo SAS déclare ne recevoir ni détenir d\'autres fonds, effets ou valeurs que ceux '
     + 'représentatifs de sa rémunération.',
   // Art. 6 loi Hoguet : aucune somme n'est due avant la conclusion de l'opération
-  hoguetArt6: 'Aucune somme d\'argent n\'est exigible avant la signature de l\'acte de cession '
+  hoguetArt6: 'Aucune somme d\'argent n\'est exigible avant la signature de l\'acte authentique de vente '
     + '(art. 6, loi n° 70-9 du 2 janvier 1970).',
   tribunal: 'Tribunal de commerce de Versailles',
   rcProFallback: 'RC professionnelle souscrite conformément à la loi Hoguet',
@@ -72,5 +70,5 @@ export const rcProText = (value) => clean(value, LEGAL.rcProFallback);
 // Médiateur de la consommation : rien n'est affiché s'il n'est pas renseigné (LEGAL_MEDIATEUR)
 export const mediateurText = (value) => clean(value, '');
 
-// Signature courte pour pieds de page et e-mails : « CessionBâtiment · AlterEgo SAS »
+// Signature courte pour pieds de page et e-mails : « VenteLoc · AlterEgo SAS »
 export const brandSignature = () => `${BRAND.name} · ${BRAND.legalName}`;

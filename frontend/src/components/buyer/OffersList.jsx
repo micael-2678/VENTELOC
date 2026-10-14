@@ -7,10 +7,10 @@ import OtpSignatureDialog from '@/components/OtpSignatureDialog';
 import { formatPrice, formatDateFr } from '@/components/shared/formatters';
 import { downloadOfferPdf } from '@/lib/offerPdf';
 import { daysUntil } from '@/lib/mandate';
-import { offerStatus, badgeClass, SALE_OBJECT_LABELS, FINANCING_LABELS } from './api';
-import { OfferSignatureDialog } from './OfferForm';
+import { offerStatus, badgeClass, propertyPath, SALE_OBJECT_LABELS, FINANCING_LABELS } from './api';
+import { OfferSignatureDialog, loanConditionText } from './OfferForm';
 
-// Suivi des offres indicatives du repreneur (API.md §5) : statut, signature d'une offre encore « à signer »,
+// Suivi des offres d'achat de l'acquéreur (API.md §5) : statut, signature d'une offre encore « à signer »,
 // acceptation d'une contre-proposition par code, PDF signé, lien vers l'étape de vente.
 
 const financingText = (financing) => {
@@ -19,23 +19,24 @@ const financingText = (financing) => {
 };
 
 const counterText = (offer, propertyTitle) => [
-  'ACCEPTATION DE LA CONTRE-PROPOSITION DU CÉDANT',
-  propertyTitle ? `Entreprise : ${propertyTitle}` : '',
-  `Offre initiale : ${formatPrice(offer.initial_amount || offer.amount)}`,
-  `Contre-proposition du cédant : ${formatPrice(offer.counter_amount)}`,
-  offer.counter_message ? `Message du cédant :\n${offer.counter_message}` : '',
+  'ACCEPTATION DE LA CONTRE-PROPOSITION DU VENDEUR',
+  propertyTitle ? `Bien : ${propertyTitle}` : '',
+  `Offre d'achat initiale : ${formatPrice(offer.initial_amount || offer.amount)}`,
+  `Contre-proposition du vendeur : ${formatPrice(offer.counter_amount)}`,
+  offer.counter_message ? `Message du vendeur :\n${offer.counter_message}` : '',
   '',
-  `En signant, vous acceptez le prix de ${formatPrice(offer.counter_amount)} en lieu et place de ${formatPrice(offer.initial_amount || offer.amount)}, les autres conditions de votre offre demeurant inchangées. L'offre devient acceptée et l'étape de vente s'ouvre.`,
+  `En signant, vous acceptez le prix de ${formatPrice(offer.counter_amount)} en lieu et place de ${formatPrice(offer.initial_amount || offer.amount)}, les autres conditions de votre offre demeurant inchangées. L'offre devient acceptée et l'étape de vente s'ouvre : l'avant-contrat puis l'acte authentique sont préparés par le notaire.`,
 ].filter((l) => l !== '').join('\n');
 
 export const OfferRow = ({ offer, onChanged }) => {
   const [signing, setSigning] = useState(false);
   const [acceptingCounter, setAcceptingCounter] = useState(false);
   const st = offerStatus(offer);
-  const title = offer.property?.title || offer.property_title || 'Annonce';
+  const title = offer.property?.title || offer.property_title || 'Bien';
   const expiresIn = daysUntil(offer.expires_at);
   const conditions = Array.isArray(offer.conditions) ? offer.conditions.filter(Boolean) : [];
   const financing = financingText(offer.financing);
+  const loanCondition = offer.loan_condition ? loanConditionText(offer.loan_condition) : '';
   const canSign = offer.status === 'pending_signature' && offer.contract_id;
   const canAcceptCounter = offer.status === 'countered' && offer.counter_amount && offer.contract_id;
   const hasPdf = offer.status !== 'pending_signature' && (offer.contract_id || offer.status === 'accepted');
@@ -52,10 +53,10 @@ export const OfferRow = ({ offer, onChanged }) => {
       <div className="flex flex-wrap items-start justify-between gap-2 min-w-0">
         <div className="min-w-0">
           <p className="font-display font-bold text-brand-navy leading-snug break-words">
-            <Link to={`/property/${offer.property_id}`} className="hover:underline underline-offset-2">{title}</Link>
+            <Link to={propertyPath(offer.property_id)} className="hover:underline underline-offset-2">{title}</Link>
           </p>
           <p className="text-sm text-gray-600 mt-0.5">
-            {SALE_OBJECT_LABELS[offer.sale_object] || ''}{offer.created_at ? ` · déposée le ${formatDateFr(offer.created_at)}` : ''}
+            {SALE_OBJECT_LABELS[offer.sale_object] || SALE_OBJECT_LABELS.bien}{offer.created_at ? ` · déposée le ${formatDateFr(offer.created_at)}` : ''}
           </p>
         </div>
         <span className={`${badgeClass(st.tone)} shrink-0`}>{st.label}</span>
@@ -68,13 +69,13 @@ export const OfferRow = ({ offer, onChanged }) => {
         </div>
         {offer.counter_amount != null && (
           <div className="min-w-0">
-            <dt className="text-xs text-gray-500">Contre-proposition du cédant</dt>
+            <dt className="text-xs text-gray-500">Contre-proposition du vendeur</dt>
             <dd className="font-semibold text-brand-navy tabular">{formatPrice(offer.counter_amount)}</dd>
           </div>
         )}
         {offer.target_date && (
           <div className="min-w-0">
-            <dt className="text-xs text-gray-500">Signature visée</dt>
+            <dt className="text-xs text-gray-500">Avant-contrat souhaité vers le</dt>
             <dd className="text-gray-800">{formatDateFr(offer.target_date)}</dd>
           </div>
         )}
@@ -82,6 +83,12 @@ export const OfferRow = ({ offer, onChanged }) => {
           <div className="min-w-0 sm:col-span-3">
             <dt className="text-xs text-gray-500">Financement</dt>
             <dd className="text-gray-800 break-words">{financing}</dd>
+          </div>
+        )}
+        {loanCondition && (
+          <div className="min-w-0 sm:col-span-3">
+            <dt className="text-xs text-gray-500">Prêt</dt>
+            <dd className="text-gray-800 break-words" data-testid="offer-loan-text">{loanCondition}</dd>
           </div>
         )}
         {conditions.length > 0 && (
@@ -93,10 +100,10 @@ export const OfferRow = ({ offer, onChanged }) => {
       </dl>
 
       {offer.status === 'rejected' && offer.rejection_reason && (
-        <p className="mt-3 text-sm text-gray-700 rounded-xl bg-brand-surface border border-brand-line px-3 py-2 break-words">Motif du cédant : {offer.rejection_reason}</p>
+        <p className="mt-3 text-sm text-gray-700 rounded-xl bg-brand-surface border border-brand-line px-3 py-2 break-words">Motif du vendeur : {offer.rejection_reason}</p>
       )}
       {offer.status === 'countered' && offer.counter_message && (
-        <p className="mt-3 text-sm text-gray-700 rounded-xl bg-brand-surface border border-brand-line px-3 py-2 break-words whitespace-pre-line">Message du cédant : {offer.counter_message}</p>
+        <p className="mt-3 text-sm text-gray-700 rounded-xl bg-brand-surface border border-brand-line px-3 py-2 break-words whitespace-pre-line">Message du vendeur : {offer.counter_message}</p>
       )}
       {(offer.status === 'pending' || offer.status === 'countered') && expiresIn !== null && (
         <p className="mt-3 flex items-center gap-1.5 text-sm text-gray-600">
@@ -120,7 +127,7 @@ export const OfferRow = ({ offer, onChanged }) => {
         )}
         {offer.status === 'countered' && (
           <Link to={`/messages?conversation=${encodeURIComponent(offer.conversation_id || offer.property_id)}`} className="btn-secondary px-4 py-2 text-sm">
-            Répondre au cédant
+            Répondre au vendeur
           </Link>
         )}
         {hasPdf && (
@@ -152,7 +159,7 @@ export const OfferRow = ({ offer, onChanged }) => {
           subtitle={title}
           contractId={offer.contract_id}
           documentText={counterText(offer, title)}
-          acceptLabel={`J'accepte le prix de ${formatPrice(offer.counter_amount)} proposé par le cédant. Je comprends que cette signature électronique a valeur juridique.`}
+          acceptLabel={`J'accepte le prix de ${formatPrice(offer.counter_amount)} proposé par le vendeur. Je comprends que cette signature électronique a valeur juridique.`}
           signLabel="Accepter et signer"
           onSign={acceptCounter}
         />
@@ -161,7 +168,7 @@ export const OfferRow = ({ offer, onChanged }) => {
   );
 };
 
-const OffersList = ({ offers, onChanged, emptyText = 'Aucune offre pour le moment. Vous pourrez en déposer une depuis le dossier d\'une entreprise, une fois l\'accès accordé.' }) => {
+const OffersList = ({ offers, onChanged, emptyText = 'Aucune offre d\'achat pour le moment. Vous pourrez en déposer une depuis le dossier d\'un bien, une fois l\'accès accordé.' }) => {
   const list = Array.isArray(offers) ? offers : [];
   if (!list.length) return <p className="text-sm text-gray-600" data-testid="offers-empty">{emptyText}</p>;
   return (

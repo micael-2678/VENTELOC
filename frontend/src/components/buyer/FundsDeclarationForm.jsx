@@ -5,8 +5,9 @@ import { Field, NumberInput, TextInput, SelectInput } from '@/components/seller/
 import { apiErrorMessage, isEmailNotVerifiedError } from '@/components/account/errors';
 import { FUNDS_SOURCES } from './api';
 
-// Déclaration d'origine des fonds (SPEC §4.3 point 5 c, API.md §4) : POST /dataroom/{id}/funds-declaration
-// {source, amount, financing_partner?} → {access_granted:true}. Dernière étape avant l'accès aux documents.
+// Déclaration d'origine des fonds (SPEC §5.3, API.md §4 ; LCB-FT : l'agent immobilier est assujetti) :
+// POST /dataroom/{id}/funds-declaration {source, amount, financing_partner?} → {access_granted:true}.
+// Dernière étape avant l'accès au dossier du bien.
 
 const num = (v) => {
   const n = Number(String(v == null ? '' : v).replace(/\s/g, '').replace(',', '.'));
@@ -51,8 +52,8 @@ const FundsDeclarationForm = ({ propertyId, defaultAmount = '', onDone }) => {
   return (
     <form onSubmit={submit} noValidate className="space-y-4 min-w-0" data-testid="funds-form">
       <p className="text-sm text-gray-700 leading-relaxed">
-        Avant d&apos;ouvrir les documents de l&apos;entreprise, le cédant doit savoir avec quels moyens vous envisagez la reprise.
-        Cette déclaration lui est transmise avec votre identité vérifiée ; elle n&apos;engage pas le montant final de votre offre.
+        Avant d&apos;ouvrir le dossier du bien, le vendeur doit savoir avec quels moyens vous envisagez l&apos;achat.
+        Cette déclaration lui est transmise avec votre identité vérifiée ; elle n&apos;engage pas le montant de votre offre d&apos;achat.
       </p>
       <div className="grid sm:grid-cols-2 gap-4">
         <Field label="Origine principale des fonds" required error={errors.source} htmlFor={`${idp}-source`}>
@@ -62,13 +63,13 @@ const FundsDeclarationForm = ({ propertyId, defaultAmount = '', onDone }) => {
           {(p) => <NumberInput value={amount} onChange={setAmount} min={1} step={1000} testId="funds-amount" {...p} />}
         </Field>
       </div>
-      <Field label="Partenaire financier" optional hint="Banque, société de financement, investisseur ou holding." htmlFor={`${idp}-partner`}>
+      <Field label="Partenaire financier" optional hint="Banque, courtier, associés de la SCI ou société qui achète." htmlFor={`${idp}-partner`}>
         {(p) => <TextInput value={partner} onChange={setPartner} maxLength={200} placeholder="Nom de l'établissement ou de la société" testId="funds-partner" {...p} />}
       </Field>
       <div className="flex items-start gap-3">
         <input id={`${idp}-attest`} type="checkbox" checked={attest} onChange={(e) => setAttest(e.target.checked)} className="mt-1 h-4 w-4 rounded border-gray-300 text-brand-navy focus:ring-brand-blue" data-testid="funds-attest" />
         <label htmlFor={`${idp}-attest`} className="text-sm text-gray-800 leading-snug">
-          J&apos;atteste que ces fonds ont une origine licite et que je peux en justifier à la demande du cédant ou de la plateforme (obligations de lutte contre le blanchiment).
+          J&apos;atteste que ces fonds ont une origine licite et que je peux en justifier à la demande de la plateforme ou du notaire (obligations de lutte contre le blanchiment des capitaux).
         </label>
       </div>
       {errors.attest && <p role="alert" className="text-sm text-red-700">{errors.attest}</p>}

@@ -10,22 +10,35 @@ import { usePrivateSeo } from '@/lib/seo';
 import AppHeader from '@/components/layout/AppHeader';
 import PageBar from '@/components/layout/PageBar';
 import OtpSignatureDialog from '@/components/OtpSignatureDialog';
-import { computeCommission, formatEuros, COMMISSION, OFFER } from '@/lib/offer';
+import { computeCommission, formatEuros, COMMISSION, commissionSentenceFor } from '@/lib/offer';
+import { useCommission } from '@/lib/useCommission';
 import { formatEur } from '@/lib/format';
-import { downloadMandatePdf, formatDateTimeFr, legacyPayerText, MANDATE_NOTICE_DAYS } from '@/lib/mandate';
+import {
+  downloadMandatePdf, formatDateTimeFr, MANDATE_NOTICE_DAYS, MANDATE_DURATION_MONTHS, MANDATE_TAIL_MONTHS, MANDATE_WITHDRAWAL_DAYS,
+} from '@/lib/mandate';
+import { SALE_OBJECTS } from '@/lib/referentiels';
 import { trackEvent } from '@/lib/analytics';
 import { listingTitle } from '@/components/shared';
 import { KYCVerificationButton } from '@/components/KYCVerification';
 import { apiErrorMessage, apiErrorCode, isEmailNotVerifiedError } from '@/components/account/errors';
 import { Field, TextInput, SelectInput } from '@/components/seller/FormFields';
 import { BlockingReasons } from '@/components/seller/ListingStatusBadge';
-import { SALE_OBJECTS } from '@/components/seller/listingForm';
+import { isCompanyOwner } from '@/components/seller/listingForm';
 
-const CAPACITIES = [
-  { value: 'dirigeant', label: 'Dirigeant de la société (gérant, président)' },
-  { value: 'associe', label: 'Associé' },
-  { value: 'mandataire', label: 'Mandataire des associés (avec pouvoir)' },
+// Qualité du signataire (SPEC §3.3 `mandant_capacity`, mandat art. 1)
+export const CAPACITIES = [
+  { value: 'proprietaire', label: 'Propriétaire du bien' },
+  { value: 'coindivisaire', label: 'Co-indivisaire, avec l\'accord de tous les indivisaires' },
+  { value: 'gerant', label: 'Gérant de la société propriétaire' },
+  { value: 'mandataire', label: 'Mandataire du propriétaire (avec pouvoir écrit)' },
 ];
+// Qualités cohérentes avec le type de propriétaire déclaré dans l'annonce
+export const capacitiesFor = (ownerType) => {
+  if (isCompanyOwner(ownerType)) return CAPACITIES.filter((c) => ['gerant', 'mandataire'].includes(c.value));
+  if (ownerType === 'indivision') return CAPACITIES.filter((c) => ['coindivisaire', 'mandataire'].includes(c.value));
+  if (ownerType === 'personne-physique') return CAPACITIES.filter((c) => ['proprietaire', 'mandataire'].includes(c.value));
+  return CAPACITIES;
+};
 
 const emptyAddress = { line1: '', line2: '', postal_code: '', city: '' };
 
@@ -42,7 +55,7 @@ const addressToString = (a) => [a.line1, a.line2, `${a.postal_code} ${a.city}`].
 
 // Écran de fin : mandat signé (juste après la signature ou déjà signé auparavant)
 const SignedSummary = ({ mandate, property, propertyId }) => {
-  const legacy = legacyPayerText(mandate);
+  const withdrawalEnds = formatDateTimeFr(mandate.withdrawal_ends_at);
   return (
     <section className="card p-5 sm:p-8" data-testid="mandate-signed">
       <div className="flex items-start gap-3 mb-6">
@@ -73,13 +86,13 @@ const SignedSummary = ({ mandate, property, propertyId }) => {
         {mandate.contract_number && (
           <div className="rounded-xl bg-brand-surface p-4 sm:col-span-2">
             <dt className="text-xs uppercase tracking-wide text-gray-500">Référence</dt>
-            <dd className="font-semibold text-gray-800 break-words">{mandate.contract_number}{legacy ? ` · ${legacy}` : ''}</dd>
+            <dd className="font-semibold text-gray-800 break-words">{mandate.contract_number}</dd>
           </div>
         )}
       </dl>
 
       {mandate.id && (
-        <Button onClick={() => downloadMandatePdf(mandate.id)} className="w-full sm:w-auto rounded-xl bg-brand-navy hover:bg-brand-navy-light text-white mb-6" data-testid="mandate-pdf">
+        <Button onClick={() => downloadMandatePdf(mandate.id)} className="w-full sm:w-auto rounded-xl bg-brand-teal hover:bg-brand-teal-dark text-white mb-6" data-testid="mandate-pdf">
           <Download className="w-4 h-4 mr-2" />
           Télécharger le mandat signé (PDF)
         </Button>
@@ -87,8 +100,9 @@ const SignedSummary = ({ mandate, property, propertyId }) => {
 
       <NextStep property={property} propertyId={propertyId} />
 
-      <p className="text-sm text-gray-600 mt-6">
-        Résiliable à tout moment depuis votre espace vendeur, avec un préavis de {MANDATE_NOTICE_DAYS} jours. Sans exclusivité : vous restez libre de vendre par vous-même.
+      <p className="text-sm text-gray-600 mt-6" data-testid="mandate-withdrawal-info">
+        {withdrawalEnds ? `Vous pouvez vous rétracter sans motif jusqu'au ${withdrawalEnds} (${MANDATE_WITHDRAWAL_DAYS} jours) depuis votre espace vendeur : la rétractation est immédiate et rien n'est dû. ` : ''}
+        Résiliable ensuite à tout moment, avec un préavis de {MANDATE_NOTICE_DAYS} jours. Sans exclusivité : vous restez libre de vendre par vous-même.
       </p>
     </section>
   );
@@ -102,31 +116,31 @@ const NextStep = ({ property, propertyId }) => {
         <Globe className="w-5 h-5 text-brand-green-dark mt-0.5 shrink-0" aria-hidden="true" />
         <div className="text-sm text-gray-800 min-w-0">
           <p className="font-semibold text-brand-navy">Votre annonce est publiée immédiatement</p>
-          <p className="mt-1">Elle est visible dès maintenant par les repreneurs, de façon anonyme, et envoyée aux repreneurs dont les critères correspondent. Vous serez prévenu par e-mail à chaque contact, accord de confidentialité et offre.</p>
+          <p className="mt-1">Elle est visible dès maintenant, sans adresse ni nom, et envoyée aux acquéreurs dont les critères correspondent. Vous serez prévenu par e-mail à chaque contact, engagement de confidentialité et offre d'achat.</p>
           <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
-            <Link to={`/property/${propertyId}`} className="font-medium underline">Voir mon annonce</Link>
+            <Link to={`/annonce/${propertyId}`} className="font-medium underline">Voir mon annonce</Link>
             <Link to="/seller/dashboard" className="font-medium underline">Aller à mon espace vendeur</Link>
           </div>
         </div>
       </div>
     );
   }
-  if (status === 'draft' && (property?.blocking?.length || property?.blocked_reason)) {
+  if (['draft', 'mandat_en_attente'].includes(status) && property?.blocking?.length) {
     return (
       <div className="space-y-3" data-testid="mandate-next">
         <BlockingReasons property={property} />
-        <p className="text-sm text-gray-700">Dès que ces points sont réglés, votre annonce est soumise à nouveau et publiée automatiquement : rien d'autre à faire de votre côté.</p>
+        <p className="text-sm text-gray-700">Dès que ces points sont réglés (par exemple le dépôt du justificatif de propriété), votre annonce est publiée automatiquement : rien d'autre à faire de votre côté.</p>
         <Link to={`/seller/edit/${propertyId}`} className="btn-link">Compléter mon annonce</Link>
       </div>
     );
   }
   return (
-    <div className="flex items-start gap-3 rounded-xl border border-blue-200 bg-brand-blue-soft p-4" data-testid="mandate-next">
-      <Info className="w-5 h-5 text-brand-blue mt-0.5 shrink-0" aria-hidden="true" />
+    <div className="flex items-start gap-3 rounded-xl border border-brand-teal-line bg-brand-teal-soft p-4" data-testid="mandate-next">
+      <Info className="w-5 h-5 text-brand-teal mt-0.5 shrink-0" aria-hidden="true" />
       <div className="text-sm text-gray-800">
         <p className="font-semibold">Prochaine étape</p>
         <p className="mt-1">Retrouvez l'état de votre annonce et les actions à mener dans votre espace vendeur.</p>
-        <Link to="/seller/dashboard" className="inline-block font-medium text-brand-blue underline mt-2">Aller à mon espace vendeur</Link>
+        <Link to="/seller/dashboard" className="inline-block font-medium text-brand-teal underline mt-2">Aller à mon espace vendeur</Link>
       </div>
     </div>
   );
@@ -135,6 +149,7 @@ const NextStep = ({ property, propertyId }) => {
 const MandatePage = ({ user }) => {
   usePrivateSeo('Mandat de vente');
   const { propertyId } = useParams();
+  const commission = useCommission();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [property, setProperty] = useState(null);
@@ -163,7 +178,7 @@ const MandatePage = ({ user }) => {
       setProperty(c);
       setAddress(addressFromProperty(c.mandant_address));
       setCapacity(c.mandant_capacity || '');
-      setSaleObject(c.sale_object || (c.sale_type === 'parts' ? 'titres' : c.sale_type === 'fonds' ? 'fonds' : ''));
+      setSaleObject(c.sale_object || (isCompanyOwner(c.owner_type) ? '' : 'bien'));
       const mandat = statusRes.status === 'fulfilled' ? statusRes.value.data?.mandat : null;
       if (mandat && mandat.status === 'signed') setSigned(mandat);
     } catch (e) {
@@ -176,15 +191,18 @@ const MandatePage = ({ user }) => {
   useEffect(() => { load(); }, [load]);
 
   const price = Number(property?.asking_price) || 0;
-  const estimate = price > 0 ? computeCommission(price) : null;
-  const estimateText = estimate ? `${formatEuros(estimate.ht)} HT (${formatEuros(estimate.ttc)} TTC)` : '';
+  const estimate = price > 0 ? computeCommission(price, commission) : null;
+  const estimateText = estimate ? `${formatEuros(estimate.ttc)} TTC (${formatEuros(estimate.ht)} HT)` : '';
+  const company = isCompanyOwner(property?.owner_type);
+  const saleObjects = SALE_OBJECTS.filter((o) => company || o.id === 'bien');
+  const capacities = capacitiesFor(property?.owner_type);
 
   const validateForm = () => {
     const errs = {};
     if (!address.line1.trim()) errs.line1 = 'Indiquez la voie (numéro et rue).';
     if (!/^\d{5}$/.test(address.postal_code.trim())) errs.postal_code = 'Code postal à 5 chiffres.';
     if (!address.city.trim()) errs.city = 'Indiquez la ville.';
-    if (!saleObject) errs.sale_object = 'Indiquez l\'objet de la cession.';
+    if (!saleObject) errs.sale_object = 'Indiquez l\'objet de la vente.';
     if (!capacity) errs.capacity = 'Indiquez en quelle qualité vous signez.';
     return errs;
   };
@@ -224,7 +242,7 @@ const MandatePage = ({ user }) => {
       const code = apiErrorCode(err);
       const detail = err?.response?.data?.detail;
       if (err?.response?.status === 400 && code === 'validation' && Array.isArray(detail?.missing)) {
-        const map = { mandant_address: 'line1', sale_object: 'sale_object', company_name: 'property', siret: 'property' };
+        const map = { mandant_address: 'line1', mandant_capacity: 'capacity', sale_object: 'sale_object', company_name: 'property', siret: 'property', address: 'property', asking_price: 'property' };
         const next = {};
         detail.missing.forEach((m) => { next[map[m] || m] = detail.message || 'Champ manquant'; });
         setFieldErrors(next);
@@ -251,6 +269,7 @@ const MandatePage = ({ user }) => {
       signed_at: data.signed_at || new Date().toISOString(),
       ends_at: data.ends_at,
       tail_ends_at: data.tail_ends_at,
+      withdrawal_ends_at: data.withdrawal_ends_at,
       terms_version: data.terms_version || contract.terms_version,
       pdf_url: data.pdf_url,
     });
@@ -271,11 +290,17 @@ const MandatePage = ({ user }) => {
         <dd className="font-medium text-gray-900 break-words">{listingTitle(property)}</dd>
       </div>
       <div className="min-w-0">
-        <dt className="text-gray-500">Société</dt>
-        <dd className={`font-medium break-words ${property.company_name ? 'text-gray-900' : 'text-brand-amber'}`}>{property.company_name || 'Dénomination à renseigner sur l\'annonce'}</dd>
+        <dt className="text-gray-600">Adresse du bien</dt>
+        <dd className={`font-medium break-words ${property.address ? 'text-gray-900' : 'text-brand-amber'}`}>{property.address ? `${property.address}, ${property.postal_code || ''} ${property.city || ''}` : 'Adresse à renseigner sur l\'annonce'}</dd>
       </div>
+      {company && (
+        <div className="min-w-0">
+          <dt className="text-gray-600">Société propriétaire</dt>
+          <dd className={`font-medium break-words ${property.company_name ? 'text-gray-900' : 'text-brand-amber'}`}>{property.company_name || 'Dénomination à renseigner sur l\'annonce'}</dd>
+        </div>
+      )}
       <div>
-        <dt className="text-gray-500">Prix demandé</dt>
+        <dt className="text-gray-600">Prix de vente (honoraires inclus)</dt>
         <dd className="font-medium text-gray-900 tabular">{price > 0 ? formatEur(price) : 'À renseigner sur l\'annonce'}</dd>
       </div>
     </dl>
@@ -294,7 +319,7 @@ const MandatePage = ({ user }) => {
             <AlertCircle className="w-10 h-10 text-red-500 mx-auto mb-3" aria-hidden="true" />
             <p className="text-gray-800 mb-4">{loadError}</p>
             <div className="flex flex-col sm:flex-row gap-3 justify-center">
-              <Button onClick={load} className="rounded-xl bg-brand-navy hover:bg-brand-navy-light text-white">Réessayer</Button>
+              <Button onClick={load} className="rounded-xl bg-brand-teal hover:bg-brand-teal-dark text-white">Réessayer</Button>
               <Link to="/seller/dashboard"><Button variant="outline" className="rounded-xl w-full">Retour à mon espace</Button></Link>
             </div>
           </div>
@@ -306,16 +331,21 @@ const MandatePage = ({ user }) => {
               <p className="eyebrow mb-1">Dernière étape avant la publication</p>
               <h1 className="font-display text-3xl sm:text-4xl font-extrabold text-brand-navy mb-3">Signez votre mandat de vente simple</h1>
               <p className="text-gray-700">
-                La loi impose un mandat écrit avant la diffusion d'une annonce de cession. Celui-ci est conclu avec {COMMISSION.mandateHolder} (carte professionnelle T) :
-                sans exclusivité, résiliable à tout moment avec un préavis de {MANDATE_NOTICE_DAYS} jours, commission due uniquement si la vente se fait avec un repreneur que nous vous présentons.
+                La loi impose un mandat écrit avant la diffusion d'une annonce immobilière. Celui-ci est conclu avec {COMMISSION.mandateHolder} (carte professionnelle T) :
+                sans exclusivité, pour {MANDATE_DURATION_MONTHS} mois, résiliable à tout moment avec un préavis de {MANDATE_NOTICE_DAYS} jours ; honoraires dus uniquement si la vente se fait avec un acquéreur que nous vous présentons.
               </p>
+              <ul className="mt-4 grid sm:grid-cols-3 gap-3 text-sm" data-testid="mandate-terms">
+                <li className="rounded-xl border border-brand-line bg-white p-3"><strong className="block text-brand-navy">{MANDATE_WITHDRAWAL_DAYS} jours pour vous rétracter</strong>Sans motif ni frais si vous êtes un particulier : la diffusion commence dès la signature, à votre demande.</li>
+                <li className="rounded-xl border border-brand-line bg-white p-3"><strong className="block text-brand-navy">{MANDATE_DURATION_MONTHS} mois, sans exclusivité</strong>Vous restez libre de vendre seul ; prolongation par une nouvelle signature.</li>
+                <li className="rounded-xl border border-brand-line bg-white p-3"><strong className="block text-brand-navy">Rien avant l'acte</strong>Honoraires réglés par le notaire à la signature de l'acte authentique ; clause de suite de {MANDATE_TAIL_MONTHS} mois.</li>
+              </ul>
             </header>
 
             {identityRequired && (
               <section className="card border-amber-200 p-5 sm:p-6 mb-6" data-testid="identity-required">
                 <p className="flex items-start gap-2 font-semibold text-brand-navy"><ShieldCheck className="w-5 h-5 mt-0.5 shrink-0 text-brand-amber" aria-hidden="true" />Vérifiez votre identité avant de signer</p>
-                <p className="text-sm text-gray-700 mt-2 mb-4">Le mandat engage la société : la signature exige une identité vérifiée (pièce d'identité et selfie, environ 2 minutes, dans cet onglet). Si la vérification n'aboutit pas, nous vous recontactons par e-mail.</p>
-                <KYCVerificationButton user={user} className="rounded-xl bg-brand-navy hover:bg-brand-navy-light text-white" />
+                <p className="text-sm text-gray-700 mt-2 mb-4">La signature du mandat exige une identité vérifiée (pièce d'identité et selfie, environ 2 minutes, dans cet onglet). Si la vérification n'aboutit pas, nous vous recontactons par e-mail.</p>
+                <KYCVerificationButton user={user} className="rounded-xl bg-brand-teal hover:bg-brand-teal-dark text-white" />
               </section>
             )}
             {emailRequired && (
@@ -323,7 +353,7 @@ const MandatePage = ({ user }) => {
             )}
 
             <section className="card p-5 sm:p-6 mb-6" aria-labelledby="mandate-listing">
-              <h2 id="mandate-listing" className="font-display text-lg font-bold text-brand-navy mb-4">Votre annonce</h2>
+              <h2 id="mandate-listing" className="font-display text-lg font-bold text-brand-navy mb-4">Le bien</h2>
               {listingSummary}
               {fieldErrors.property && (
                 <p role="alert" className="text-sm text-red-700 mt-3">
@@ -338,13 +368,13 @@ const MandatePage = ({ user }) => {
                   <h2 className="font-display text-lg font-bold text-brand-navy">Mandant et objet du mandat</h2>
                   <p className="text-sm text-gray-600 mt-1">Ces informations figurent dans le mandat (identification complète du mandant exigée par la loi). Elles n'apparaissent jamais sur l'annonce.</p>
                 </div>
-                <p className="flex items-start gap-2 text-sm text-gray-700"><MapPin className="w-4 h-4 mt-0.5 shrink-0 text-brand-blue" aria-hidden="true" /><span>Adresse postale de {user?.first_name ? `${user.first_name} ${user.last_name || ''}`.trim() : 'la personne qui signe'} (mandant).</span></p>
+                <p className="flex items-start gap-2 text-sm text-gray-700"><MapPin className="w-4 h-4 mt-0.5 shrink-0 text-brand-teal" aria-hidden="true" /><span>Votre adresse postale, {user?.first_name ? `${user.first_name} ${user.last_name || ''}`.trim() : 'signataire'} (mandant) : elle peut différer de celle du bien loué.</span></p>
                 <div className="grid sm:grid-cols-2 gap-4">
                   <Field label="Adresse (numéro et voie)" error={fieldErrors.line1} required className="sm:col-span-2">
-                    {(p) => <TextInput value={address.line1} onChange={(v) => setAddress((a) => ({ ...a, line1: v }))} placeholder="12 rue des Artisans" testId="address-line1" {...p} />}
+                    {(p) => <TextInput value={address.line1} onChange={(v) => setAddress((a) => ({ ...a, line1: v }))} placeholder="12 rue des Lilas" testId="address-line1" {...p} />}
                   </Field>
                   <Field label="Complément" optional className="sm:col-span-2">
-                    {(p) => <TextInput value={address.line2} onChange={(v) => setAddress((a) => ({ ...a, line2: v }))} placeholder="Bâtiment, lieu-dit" testId="address-line2" {...p} />}
+                    {(p) => <TextInput value={address.line2} onChange={(v) => setAddress((a) => ({ ...a, line2: v }))} placeholder="Résidence, escalier, lieu-dit" testId="address-line2" {...p} />}
                   </Field>
                   <Field label="Code postal" error={fieldErrors.postal_code} required>
                     {(p) => <TextInput value={address.postal_code} onChange={(v) => setAddress((a) => ({ ...a, postal_code: v.replace(/\D/g, '').slice(0, 5) }))} placeholder="29200" testId="address-postal-code" {...p} />}
@@ -353,25 +383,24 @@ const MandatePage = ({ user }) => {
                     {(p) => <TextInput value={address.city} onChange={(v) => setAddress((a) => ({ ...a, city: v }))} placeholder="Brest" testId="address-city" {...p} />}
                   </Field>
                   <Field label="Vous signez en qualité de" error={fieldErrors.capacity} required className="sm:col-span-2">
-                    {(p) => <SelectInput value={capacity} onChange={setCapacity} options={CAPACITIES} testId="capacity-select" {...p} />}
+                    {(p) => <SelectInput value={capacity} onChange={setCapacity} options={capacities} testId="capacity-select" {...p} />}
                   </Field>
                 </div>
                 <fieldset>
-                  <legend className="text-sm font-semibold text-brand-navy mb-1">Objet de la cession *</legend>
+                  <legend className="text-sm font-semibold text-brand-navy mb-1">Objet de la vente *</legend>
                   <p className="text-sm text-gray-600 mb-3">Repris de votre annonce ; modifiable ici.</p>
-                  <div className="grid sm:grid-cols-3 gap-2" role="radiogroup" aria-label="Objet de la cession">
-                    {SALE_OBJECTS.map((o) => (
-                      <label key={o.value} className={`grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 rounded-xl border-2 px-4 py-3 cursor-pointer min-w-0 focus-within:ring-2 focus-within:ring-brand-blue ${saleObject === o.value ? 'border-brand-navy bg-brand-blue-soft' : 'border-brand-line bg-white hover:border-gray-400'}`} data-testid={`mandate-object-${o.value}`}>
-                        <input type="radio" name="sale_object" value={o.value} checked={saleObject === o.value} onChange={() => setSaleObject(o.value)} className="row-span-2 mt-1 h-4 w-4 accent-brand-navy" />
-                        <span className="text-sm font-semibold text-brand-navy min-w-0">{o.short}</span>
-                        <span className="text-sm text-gray-600 leading-snug min-w-0">{o.label}</span>
+                  <div className={`grid gap-2 ${saleObjects.length > 1 ? 'sm:grid-cols-3' : ''}`} role="radiogroup" aria-label="Objet de la vente">
+                    {saleObjects.map((o) => (
+                      <label key={o.id} className={`flex items-start gap-3 rounded-xl border-2 px-4 py-3 cursor-pointer min-w-0 focus-within:ring-2 focus-within:ring-brand-teal ${saleObject === o.id ? 'border-brand-teal bg-brand-teal-soft' : 'border-brand-line bg-white hover:border-gray-400'}`} data-testid={`mandate-object-${o.id}`}>
+                        <input type="radio" name="sale_object" value={o.id} checked={saleObject === o.id} onChange={() => setSaleObject(o.id)} className="mt-1 h-4 w-4 shrink-0 accent-[#0f766e]" />
+                        <span className="text-sm font-semibold text-brand-navy leading-snug min-w-0">{o.label}</span>
                       </label>
                     ))}
                   </div>
                   {fieldErrors.sale_object && <p role="alert" className="text-sm text-red-700 mt-2">{fieldErrors.sale_object}</p>}
                 </fieldset>
                 <div className="flex flex-col sm:flex-row sm:items-center gap-3 pt-1">
-                  <Button type="submit" disabled={preparing} className="rounded-xl bg-brand-navy hover:bg-brand-navy-light text-white h-12 px-6 text-base" data-testid="prepare-mandate">
+                  <Button type="submit" disabled={preparing} className="rounded-xl bg-brand-teal hover:bg-brand-teal-dark text-white h-12 px-6 text-base" data-testid="prepare-mandate">
                     {preparing ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <FileSignature className="w-5 h-5 mr-2" />}
                     Préparer mon mandat
                   </Button>
@@ -390,17 +419,17 @@ const MandatePage = ({ user }) => {
                   <ol className="space-y-3">
                     {(contract.summary || []).map((line, i) => (
                       <li key={line} className="flex gap-3 text-sm text-gray-800 leading-relaxed">
-                        <span className="shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full bg-brand-navy text-white text-xs font-bold tabular" aria-hidden="true">{i + 1}</span>
+                        <span className="shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full bg-brand-teal text-white text-xs font-bold tabular" aria-hidden="true">{i + 1}</span>
                         <span className="min-w-0 break-words">{line}</span>
                       </li>
                     ))}
                   </ol>
                   {estimate && (
                     <p className="flex items-start gap-2 text-sm text-gray-700 mt-4 rounded-xl bg-brand-surface p-3">
-                      <Info className="w-4 h-4 mt-0.5 shrink-0 text-brand-blue" aria-hidden="true" />
-                      <span>
-                        Sur le prix demandé ({formatEuros(price)}), la commission serait d'environ <strong>{estimateText}</strong>, à votre charge, uniquement à la signature de l'acte.
-                        {' '}{OFFER.commissionMarginal}
+                      <Info className="w-4 h-4 mt-0.5 shrink-0 text-brand-teal" aria-hidden="true" />
+                      <span data-testid="mandate-fees">
+                        Sur le prix de vente ({formatEuros(price)}), les honoraires seraient de <strong>{estimateText}</strong>, à votre charge, réglés par le notaire uniquement à la signature de l'acte authentique.
+                        {' '}{commissionSentenceFor(commission)}
                       </span>
                     </p>
                   )}
@@ -410,7 +439,7 @@ const MandatePage = ({ user }) => {
                       onClick={() => setExpanded((v) => !v)}
                       aria-expanded={expanded}
                       aria-controls="mandate-full-text"
-                      className="inline-flex items-center gap-1 text-sm font-semibold text-brand-blue hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue rounded"
+                      className="inline-flex items-center gap-1 text-sm font-semibold text-brand-teal hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-teal rounded"
                       data-testid="toggle-mandate-text"
                     >
                       {expanded ? <ChevronUp className="w-4 h-4" aria-hidden="true" /> : <ChevronDown className="w-4 h-4" aria-hidden="true" />}
@@ -425,11 +454,11 @@ const MandatePage = ({ user }) => {
                 </section>
 
                 <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                  <Button onClick={() => setDialogOpen(true)} className="rounded-xl bg-brand-green hover:bg-brand-green-dark text-white h-12 px-6 text-base" data-testid="open-mandate-sign">
+                  <Button onClick={() => setDialogOpen(true)} className="rounded-xl bg-brand-teal hover:bg-brand-teal-dark text-white h-12 px-6 text-base" data-testid="open-mandate-sign">
                     <FileSignature className="w-5 h-5 mr-2" />
                     Lire et signer le mandat
                   </Button>
-                  <button type="button" onClick={() => setContract(null)} className="text-sm text-gray-600 hover:underline">Modifier l'adresse ou l'objet</button>
+                  <button type="button" onClick={() => setContract(null)} className="text-sm text-gray-600 hover:underline">Modifier l'adresse, la qualité ou l'objet</button>
                 </div>
 
                 <OtpSignatureDialog
@@ -449,7 +478,7 @@ const MandatePage = ({ user }) => {
             )}
 
             <p className="text-sm text-gray-600 mt-6">
-              Vous pourrez télécharger le mandat signé à tout moment depuis votre espace vendeur, le résilier en ligne ou le prolonger par une nouvelle signature.
+              Vous pourrez télécharger le mandat signé à tout moment depuis votre espace vendeur, vous rétracter dans les {MANDATE_WITHDRAWAL_DAYS} jours, le résilier en ligne ou le prolonger par une nouvelle signature.
             </p>
           </>
         )}

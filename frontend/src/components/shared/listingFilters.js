@@ -1,17 +1,17 @@
-// Filtres de la page des annonces (/) et du module intégrable (/embed/annonces), docs/refonte-2026-10/MODE-TEST-ET-APP.md §A.3.
+// Filtres de la page des annonces (/) et du module intégrable (/embed/annonces) — docs/venteloc/SPEC.md §5.1, API.md §10.
 //
 // Paramètres d'URL (partageables, utilisables depuis le site WordPress) :
-//   metier=pac-clim-cvc,isolation · region=bretagne · departement=29 · rge=1|0 · prix_max=500000
-//   ca_min=300000 · effectif_min=5 · tri=recent|prix_asc|prix_desc · page=2
-// Anciens paramètres encore acceptés (liens de l'ancienne recherche, des hubs et des e-mails) :
-//   metiers, rge_type, max_price, department, sort, q, region en toutes lettres (« Bretagne »).
+//   type=appartement,maison · bail=habitation-vide,habitation-meublee · region=bretagne · departement=69
+//   prix_max=300000 · rendement_min=5 · surface_min=20 · tri=recent|prix_asc|prix_desc|rendement_desc · page=2
+// Une région en toutes lettres (« Bretagne ») est acceptée et réécrite en slug (canonicalSearch).
 //
-// Paramètres d'API (GET /properties, API.md §2) : trades, region, department, rge, max_price, min_ca, min_staff, sort,
-// limit, page. Tous les critères sont filtrés par le serveur : X-Total-Count est exact.
+// Paramètres d'API (GET /properties, API.md §2) : property_types, lease_types, region (nom), department, max_price,
+// min_yield, min_surface, sort (recent|price_asc|price_desc|yield_desc), limit, page. Tous les critères sont filtrés par
+// le serveur : X-Total-Count est exact.
 import axios from 'axios';
 import {
-  TRADES, REGIONS, RGE_TYPES, slugify, tradeBySlug, tradeForRge, regionBySlug, normalizeDepartement, regionForDepartement,
-  parseSearchQuery,
+  PROPERTY_TYPES, LEASE_TYPES, REGIONS, slugify, regionBySlug, normalizeDepartement, regionForDepartement, departementLabel,
+  propertyTypeLabel, leaseTypeLabel,
 } from '@/lib/referentiels';
 import { readableSpaces } from '@/components/shared/formatters';
 
@@ -25,23 +25,28 @@ export const SORTS = [
   { value: 'recent', api: 'recent', label: 'Plus récentes' },
   { value: 'prix_asc', api: 'price_asc', label: 'Prix croissant' },
   { value: 'prix_desc', api: 'price_desc', label: 'Prix décroissant' },
+  { value: 'rendement_desc', api: 'yield_desc', label: 'Meilleur rendement' },
 ];
 
-export const PRICE_MAX_OPTIONS = [100000, 200000, 300000, 500000, 750000, 1000000, 1500000, 2000000, 3000000];
-export const CA_MIN_OPTIONS = [100000, 250000, 500000, 750000, 1000000, 2000000, 5000000];
-export const EFFECTIF_MIN_OPTIONS = [1, 3, 5, 10, 20, 50];
+export const PRICE_MAX_OPTIONS = [50000, 100000, 150000, 200000, 300000, 400000, 500000, 750000, 1000000, 2000000];
+export const YIELD_MIN_OPTIONS = [3, 4, 5, 6, 7, 8, 10];
+export const SURFACE_MIN_OPTIONS = [15, 20, 30, 40, 50, 70, 100, 150];
 
 export const EMPTY_FILTERS = Object.freeze({
-  trades: [], region: '', departement: '', rge: '', prixMax: '', caMin: '', effectifMin: '', tri: 'recent', page: 1,
+  types: [], baux: [], region: '', departement: '', prixMax: '', rendementMin: '', surfaceMin: '', tri: 'recent', page: 1,
 });
 
 // Clés d'URL lues par la page : tout autre paramètre (utm_source…) est conservé tel quel
-const FILTER_KEYS = ['metier', 'region', 'departement', 'rge', 'prix_max', 'ca_min', 'effectif_min', 'tri', 'page'];
-const LEGACY_KEYS = ['metiers', 'rge_type', 'max_price', 'department', 'sort', 'q', 'prix_min', 'min_price'];
+const FILTER_KEYS = ['type', 'bail', 'region', 'departement', 'prix_max', 'rendement_min', 'surface_min', 'tri', 'page'];
 
 const positiveInt = (value) => {
   const n = parseInt(String(value || '').replace(/\s/g, ''), 10);
   return Number.isFinite(n) && n > 0 ? String(n) : '';
+};
+// Rendement : nombre décimal positif, 20 % au plus (« 5,5 » accepté)
+const positiveYield = (value) => {
+  const n = Number(String(value || '').replace(',', '.').trim());
+  return Number.isFinite(n) && n > 0 && n <= 20 ? String(n) : '';
 };
 
 // « bretagne », « Bretagne », « Pays de la Loire » → nom canonique (valeur stockée) ; '' si inconnu
@@ -54,93 +59,79 @@ export const regionFromParam = (value) => {
 
 export const regionSlug = (region) => (region ? slugify(region) : '');
 
-const tradesFromList = (value) => String(value || '')
-  .split(',')
-  .map((s) => tradeBySlug(s.trim()))
-  .filter(Boolean)
-  .map((t) => t.id)
-  .filter((id, i, all) => all.indexOf(id) === i);
-
-const rgeFromParam = (value) => {
-  const v = String(value || '').trim().toLowerCase();
-  if (['1', 'true', 'oui'].includes(v)) return '1';
-  if (['0', 'false', 'non'].includes(v)) return '0';
-  return '';
+// Liste d'ids séparés par des virgules → ids connus, sans doublon, dans l'ordre du référentiel
+const idsFromList = (value, table) => {
+  const wanted = String(value || '').split(',').map((s) => slugify(s.trim())).filter(Boolean);
+  return table.filter((t) => wanted.includes(t.id)).map((t) => t.id);
 };
 
 const sortFromParam = (value) => {
   const v = String(value || '').trim();
-  if (v === 'price_asc') return 'prix_asc';
-  if (v === 'price_desc') return 'prix_desc';
+  const byApi = SORTS.find((s) => s.api === v);
+  if (byApi) return byApi.value;
   return SORTS.some((s) => s.value === v) ? v : 'recent';
 };
 
-// URLSearchParams → filtres (paramètres actuels et anciens)
+// URLSearchParams → filtres
 export const filtersFromParams = (params) => {
   const p = params instanceof URLSearchParams ? params : new URLSearchParams(params || '');
-  const fromQuery = p.get('q') ? parseSearchQuery(p.get('q')) : null;
-  let trades = tradesFromList(p.get('metier') || p.get('metiers'));
-  const legacyRge = p.get('rge_type');
-  if (!trades.length && legacyRge && tradeForRge(legacyRge)) trades = [tradeForRge(legacyRge)];
-  if (!trades.length && fromQuery) trades = fromQuery.trades.slice(0, 4);
-  const departement = normalizeDepartement(p.get('departement') || p.get('department') || (fromQuery ? fromQuery.department : ''));
-  const region = regionFromParam(p.get('region')) || (fromQuery ? fromQuery.region : '') || (departement ? regionForDepartement(departement) : '');
-  let rge = rgeFromParam(p.get('rge'));
-  if (!rge && (legacyRge || (fromQuery && fromQuery.rgeTypes.length))) rge = '1';
+  const departement = normalizeDepartement(p.get('departement'));
+  const region = regionFromParam(p.get('region')) || (departement ? regionForDepartement(departement) : '');
   return {
-    trades,
+    types: idsFromList(p.get('type'), PROPERTY_TYPES),
+    baux: idsFromList(p.get('bail'), LEASE_TYPES),
     region,
     // Un département hors de la région choisie est ignoré
     departement: departement && (!region || regionForDepartement(departement) === region) ? departement : '',
-    rge,
-    prixMax: positiveInt(p.get('prix_max') || p.get('max_price')),
-    caMin: positiveInt(p.get('ca_min')),
-    effectifMin: positiveInt(p.get('effectif_min')),
-    tri: sortFromParam(p.get('tri') || p.get('sort')),
+    prixMax: positiveInt(p.get('prix_max')),
+    rendementMin: positiveYield(p.get('rendement_min')),
+    surfaceMin: positiveInt(p.get('surface_min')),
+    tri: sortFromParam(p.get('tri')),
     page: Math.max(1, parseInt(p.get('page') || '1', 10) || 1),
   };
 };
 
-// Filtres → chaîne de requête canonique, sans « ? » (virgules lisibles dans metier=…)
+// Filtres → chaîne de requête canonique, sans « ? » (virgules lisibles dans type=… et bail=…)
 export const listingsQuery = (filters) => {
   const f = { ...EMPTY_FILTERS, ...(filters || {}) };
   const parts = [];
   const add = (key, value) => { if (value) parts.push(`${key}=${encodeURIComponent(String(value))}`); };
-  if (f.trades.length) parts.push(`metier=${f.trades.map(encodeURIComponent).join(',')}`);
+  if (f.types.length) parts.push(`type=${f.types.map(encodeURIComponent).join(',')}`);
+  if (f.baux.length) parts.push(`bail=${f.baux.map(encodeURIComponent).join(',')}`);
   add('region', regionSlug(f.region));
   add('departement', f.departement);
-  add('rge', f.rge);
   add('prix_max', f.prixMax);
-  add('ca_min', f.caMin);
-  add('effectif_min', f.effectifMin);
+  add('rendement_min', f.rendementMin);
+  add('surface_min', f.surfaceMin);
   if (f.tri && f.tri !== 'recent') add('tri', f.tri);
   if (f.page > 1) add('page', f.page);
   return parts.join('&');
 };
 
-// Lien vers la page des annonces : listingsPath({ trades: ['isolation'], region: 'Bretagne' }) → « /?metier=isolation&region=bretagne »
+// Lien vers la page des annonces : listingsPath({ types: ['appartement'], region: 'Bretagne' }) → « /?type=appartement&region=bretagne »
 export const listingsPath = (filters, base = LISTINGS_PATH) => {
   const q = listingsQuery(filters);
   return q ? `${base}?${q}` : base;
 };
 
-// Anciens paramètres présents → chaîne canonique (paramètres étrangers conservés), sinon null
+// Paramètres à réécrire (région en toutes lettres, tri au format de l'API, liste d'ids non canonique) → chaîne
+// canonique (paramètres étrangers conservés), sinon null
 export const canonicalSearch = (search) => {
   const params = new URLSearchParams(search || '');
   const region = params.get('region');
   const regionIsName = Boolean(region) && regionSlug(regionFromParam(region)) !== region;
-  const legacySort = ['price_asc', 'price_desc'].includes(params.get('tri') || '');
-  if (!LEGACY_KEYS.some((k) => params.has(k)) && !regionIsName && !legacySort) return null;
+  const apiSort = SORTS.some((s) => s.api === params.get('tri') && s.api !== s.value);
+  if (!regionIsName && !apiSort) return null;
   const others = [];
   params.forEach((value, key) => {
-    if (!FILTER_KEYS.includes(key) && !LEGACY_KEYS.includes(key)) others.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
+    if (!FILTER_KEYS.includes(key)) others.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
   });
   return [listingsQuery(filtersFromParams(params)), ...others].filter(Boolean).join('&');
 };
 
 // Nombre de critères actifs (bouton « Filtres (n) »)
-export const activeFilterCount = (f) => (f.trades || []).length
-  + [f.region, f.departement, f.rge, f.prixMax, f.caMin, f.effectifMin].filter(Boolean).length;
+export const activeFilterCount = (f) => (f.types || []).length + (f.baux || []).length
+  + [f.region, f.departement, f.prixMax, f.rendementMin, f.surfaceMin].filter(Boolean).length;
 
 export const hasActiveFilters = (f) => activeFilterCount(f) > 0;
 
@@ -148,13 +139,13 @@ export const hasActiveFilters = (f) => activeFilterCount(f) > 0;
 export const apiParams = (f, { page = 1, limit = PAGE_SIZE } = {}) => {
   const sort = SORTS.find((s) => s.value === f.tri) || SORTS[0];
   return {
-    ...(f.trades.length ? { trades: f.trades.join(',') } : {}),
+    ...(f.types.length ? { property_types: f.types.join(',') } : {}),
+    ...(f.baux.length ? { lease_types: f.baux.join(',') } : {}),
     ...(f.region ? { region: f.region } : {}),
     ...(f.departement ? { department: f.departement } : {}),
-    ...(f.rge === '1' ? { rge: 'true' } : f.rge === '0' ? { rge: 'false' } : {}),
     ...(f.prixMax ? { max_price: Number(f.prixMax) } : {}),
-    ...(f.caMin ? { min_ca: Number(f.caMin) } : {}),
-    ...(f.effectifMin ? { min_staff: Number(f.effectifMin) } : {}),
+    ...(f.rendementMin ? { min_yield: Number(f.rendementMin) } : {}),
+    ...(f.surfaceMin ? { min_surface: Number(f.surfaceMin) } : {}),
     sort: sort.api,
     limit,
     page,
@@ -168,7 +159,7 @@ const totalFrom = (res, fallback) => {
 const listFrom = (res) => (res && Array.isArray(res.data) ? res.data : []);
 
 // Annonces publiques d'une page de résultats → { items, total }.
-// Requête sans jeton (axios nu) : un cédant connecté voit les annonces publiques, pas les siennes (API.md §2).
+// Requête sans jeton (axios nu) : un vendeur connecté voit les annonces publiques, pas les siennes (API.md §2).
 export const fetchListings = async (f, { page = 1, limit = PAGE_SIZE, signal } = {}) => {
   const res = await axios.get(PROPERTIES_URL, { params: apiParams(f, { page, limit }), signal });
   const items = listFrom(res);
@@ -178,39 +169,19 @@ export const fetchListings = async (f, { page = 1, limit = PAGE_SIZE, signal } =
 // Libellés des critères actifs (puces supprimables au-dessus des résultats)
 const NUMBER = new Intl.NumberFormat('fr-FR');
 export const formatEurosShort = (n) => `${readableSpaces(NUMBER.format(Number(n)))}\u00a0€`;
+export const formatYieldShort = (n) => `${String(n).replace('.', ',')}\u00a0%`;
 
 export const filterChips = (f) => {
-  const chips = (f.trades || []).map((id) => {
-    const t = TRADES.find((x) => x.id === id);
-    return { key: `metier-${id}`, label: t ? t.short : id, remove: (x) => ({ ...x, trades: x.trades.filter((v) => v !== id) }) };
-  });
+  const chips = (f.types || []).map((id) => ({
+    key: `type-${id}`, label: propertyTypeLabel(id, true) || id, remove: (x) => ({ ...x, types: x.types.filter((v) => v !== id) }),
+  }));
+  (f.baux || []).forEach((id) => chips.push({
+    key: `bail-${id}`, label: leaseTypeLabel(id, true) || id, remove: (x) => ({ ...x, baux: x.baux.filter((v) => v !== id) }),
+  }));
   if (f.region) chips.push({ key: 'region', label: f.region, remove: (x) => ({ ...x, region: '', departement: '' }) });
-  if (f.departement) chips.push({ key: 'departement', label: `Département ${f.departement}`, remove: (x) => ({ ...x, departement: '' }) });
-  if (f.rge === '1') chips.push({ key: 'rge', label: 'RGE', remove: (x) => ({ ...x, rge: '' }) });
-  if (f.rge === '0') chips.push({ key: 'rge', label: 'Sans RGE', remove: (x) => ({ ...x, rge: '' }) });
+  if (f.departement) chips.push({ key: 'departement', label: departementLabel(f.departement) || `Département ${f.departement}`, remove: (x) => ({ ...x, departement: '' }) });
   if (f.prixMax) chips.push({ key: 'prix_max', label: `Prix ≤ ${formatEurosShort(f.prixMax)}`, remove: (x) => ({ ...x, prixMax: '' }) });
-  if (f.caMin) chips.push({ key: 'ca_min', label: `CA ≥ ${formatEurosShort(f.caMin)}`, remove: (x) => ({ ...x, caMin: '' }) });
-  if (f.effectifMin) chips.push({ key: 'effectif_min', label: `${f.effectifMin} salarié${Number(f.effectifMin) > 1 ? 's' : ''} ou plus`, remove: (x) => ({ ...x, effectifMin: '' }) });
+  if (f.rendementMin) chips.push({ key: 'rendement_min', label: `Rendement brut ≥ ${formatYieldShort(f.rendementMin)}`, remove: (x) => ({ ...x, rendementMin: '' }) });
+  if (f.surfaceMin) chips.push({ key: 'surface_min', label: `Surface ≥ ${f.surfaceMin}\u00a0m²`, remove: (x) => ({ ...x, surfaceMin: '' }) });
   return chips;
-};
-
-// Anciennes pages d'atterrissage (hubs bâtiment et RGE) → page des annonces filtrée. Mêmes correspondances que les
-// redirections 301 de frontend/nginx.conf (le test src/pages/__tests__/listingsPage.test.jsx vérifie la carte nginx).
-//   metier/:slug → ?metier= · region/:slug → ?region= · rge → ?rge=1 · rge-region/:slug → ?rge=1&region=
-//   rge-activite/:slug (domaine RGE) → ?rge=1&metier=<métier correspondant>
-export const legacyListingsPath = (kind, slug = '') => {
-  const region = regionFromParam(slug);
-  if (kind === 'metier') {
-    const trade = tradeBySlug(slug);
-    return listingsPath(trade ? { trades: [trade.id] } : {});
-  }
-  if (kind === 'region') return listingsPath(region ? { region } : {});
-  if (kind === 'rge') return listingsPath({ rge: '1' });
-  if (kind === 'rge-region') return listingsPath({ rge: '1', ...(region ? { region } : {}) });
-  if (kind === 'rge-activite') {
-    const type = RGE_TYPES.find((t) => slugify(t.value) === slugify(slug));
-    const trade = type ? tradeForRge(type.value) : null;
-    return listingsPath({ rge: '1', ...(trade ? { trades: [trade] } : {}) });
-  }
-  return LISTINGS_PATH;
 };

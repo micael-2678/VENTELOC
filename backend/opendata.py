@@ -1,18 +1,17 @@
 """
 Open data gratuit, sans clé : recherche-entreprises.api.gouv.fr (INSEE + RNE/INPI).
 
-- lookup_siren(siren_ou_siret) : identité de l'entreprise (nom, NAF, création, effectif, département,
+Utilisé par VenteLoc pour les biens détenus par une société (SCI, SARL…) : contrôle que la société est active et que le
+vendeur en est bien le gérant (drapeaux non bloquants, sauf société cessée).
+
+- lookup_siren(siren_ou_siret) : identité de la société (dénomination, forme juridique, création, siège, département,
   état, dirigeants), cache mémoire 24 h. Jamais bloquant : en cas d'erreur réseau le résultat porte
   `available: False` et l'utilisateur continue (« vérification différée »).
-- match_dirigeant(siren, prenom, nom) : compare l'identité du vendeur aux dirigeants du RNE
+- match_dirigeant(siren, prenom, nom) : compare l'identité du vendeur aux dirigeants du registre (gérant de SCI…)
   (noms normalisés sans accents) → match_exact | match_partial | no_match | unavailable.
-- naf_in_building(naf) : section F (41/42/43) + codes connexes tolérés (voir taxonomy).
-- department_from_siret(siret) : département de l'établissement (ou du siège).
 
 Tous les appels HTTP passent par `fetch_json(url)` (fonction module-level, `requests`, timeout 8 s),
 exécutée dans `asyncio.to_thread` : les tests la remplacent par une fonction qui renvoie un JSON.
-
-Le BODACC n'est pas ici : il est dans veille.py.
 """
 from __future__ import annotations
 
@@ -30,7 +29,6 @@ from urllib.parse import quote
 import requests
 
 import taxonomy
-from taxonomy import naf_in_building, naf_status  # noqa: F401  (ré-exportés : API du module)
 
 logger = logging.getLogger("opendata")
 
@@ -51,7 +49,7 @@ TRANCHES_EFFECTIF: Dict[str, tuple] = {
     "52": ("5 000 à 9 999 salariés", 7000), "53": ("10 000 salariés et plus", 10000),
 }
 
-# Catégories juridiques INSEE (niveau 3) les plus courantes dans le bâtiment : code → (libellé, valeur
+# Catégories juridiques INSEE (niveau 3) les plus courantes : code → (libellé, valeur
 # du champ `legal_structure` de l'annonce)
 NATURES_JURIDIQUES: Dict[str, tuple] = {
     "1000": ("Entrepreneur individuel", "EI"),
@@ -85,8 +83,8 @@ _NATURE_PREFIXES = (
 
 
 def _user_agent() -> str:
-    site = os.environ.get("SITE_URL", "https://cessionbatiment.fr").strip()
-    return f"cession-plateforme/1.0 (+{site})"
+    site = os.environ.get("SITE_URL", "https://venteloc.fr").strip()
+    return f"venteloc/1.0 (+{site})"
 
 
 def fetch_json(url: str) -> Any:
@@ -376,15 +374,12 @@ def parse_entreprise(entreprise: dict, siret: str = "") -> Dict[str, Any]:
     """Transforme un résultat brut de recherche-entreprises en fiche normalisée (voir lookup_siren)."""
     siege = entreprise.get("siege") or {}
     etab = _pick_etablissement(entreprise, siret)
-    naf_raw = etab.get("activite_principale") or entreprise.get("activite_principale") or ""
-    naf = taxonomy.format_naf(naf_raw)
     tranche_code, tranche_label, effectif = _tranche_effectif(
         entreprise.get("tranche_effectif_salarie") or siege.get("tranche_effectif_salarie"))
     nature_code = str(entreprise.get("nature_juridique") or "").strip()
     forme_label, legal_structure = _nature_juridique(nature_code)
     departement = _departement(etab, siege)
     etat = _etat(entreprise.get("etat_administratif") or siege.get("etat_administratif"))
-    complements = entreprise.get("complements") or {}
     return {
         "available": True,
         "found": True,
@@ -399,11 +394,6 @@ def parse_entreprise(entreprise: dict, siret: str = "") -> Dict[str, Any]:
         "nature_juridique": nature_code,
         "forme_juridique": forme_label,
         "legal_structure": legal_structure,
-        "naf": naf,
-        "naf_libelle": taxonomy.naf_label(naf),
-        "naf_status": taxonomy.naf_status(naf),
-        "naf_in_building": taxonomy.naf_in_building(naf),
-        "trade_suggestion": taxonomy.trade_for_naf(naf),
         "date_creation": entreprise.get("date_creation") or siege.get("date_creation") or "",
         "tranche_effectif": tranche_code,
         "tranche_effectif_libelle": tranche_label,
@@ -416,7 +406,6 @@ def parse_entreprise(entreprise: dict, siret: str = "") -> Dict[str, Any]:
         "adresse": (etab.get("adresse") or siege.get("adresse") or "").strip(),
         "etat": etat,
         "siren_active": etat == "actif",
-        "est_rge": complements.get("est_rge") if isinstance(complements, dict) else None,
         "dirigeants": _dirigeants(entreprise),
     }
 
@@ -431,10 +420,9 @@ async def lookup_siren(siren_or_siret) -> Dict[str, Any]:
     Fiche d'identité d'une entreprise d'après son SIREN ou son SIRET (recherche-entreprises).
     Résultat :
       - trouvée : {available: True, found: True, siren, siret, siret_siege, nom_complet, nature_juridique,
-        forme_juridique, legal_structure, naf, naf_libelle, naf_status, naf_in_building, trade_suggestion,
-        date_creation, tranche_effectif, tranche_effectif_libelle, effectif_estime, departement,
-        departement_libelle, region, code_postal, commune, adresse, etat (actif/cessé), siren_active,
-        est_rge, dirigeants: [{type, nom, prenoms, qualite} | {type, denomination, siren, qualite}]}
+        forme_juridique, legal_structure, date_creation, tranche_effectif, tranche_effectif_libelle, effectif_estime,
+        departement, departement_libelle, region, code_postal, commune, adresse, etat (actif/cessé), siren_active,
+        dirigeants: [{type, nom, prenoms, qualite} | {type, denomination, siren, qualite}]}
       - inconnue : {available: True, found: False, reason: 'not_found'}
       - identifiant invalide : {available: True, found: False, reason: 'invalid'}
       - API injoignable : {available: False, found: False, reason: 'unavailable'} (vérification différée)
@@ -468,7 +456,7 @@ async def match_dirigeant(siren, prenom, nom) -> Dict[str, Any]:
     Compare « prénom nom » aux dirigeants du RNE (via recherche-entreprises).
     Résultat : {status: match_exact | match_partial | no_match | unavailable, verified (exact ou partiel),
     reason, message, dirigeant (celui qui correspond), dirigeants (liste), has_personne_morale, company}.
-    Ce n'est pas une condition de publication : badge et motif de post-modération (spécification §2.3).
+    Ce n'est pas une condition de publication : drapeau « gérant non concordant » de post-modération (SPEC §5.4).
     """
     siren_clean, _ = split_identifier(siren)
     base = {"status": "unavailable", "verified": False, "dirigeant": None, "dirigeants": [],
@@ -520,35 +508,3 @@ async def match_dirigeant(siren, prenom, nom) -> Dict[str, Any]:
                 "matched_as": best_dirigeant.get("qualite") or "Dirigeant"}
     return {**base, "status": "no_match", "reason": "name_mismatch",
             "message": "Vous n'apparaissez pas comme dirigeant de cette société au registre national"}
-
-
-async def department_from_siret(siret) -> Optional[str]:
-    """Code département de l'établissement (ou du siège si l'établissement est inconnu) ; None si indisponible."""
-    siren, _ = split_identifier(siret)
-    if not siren:
-        return None
-    company = await lookup_siren(siret)
-    if not company.get("found"):
-        return None
-    return company.get("departement") or None
-
-
-def property_checks_from(company: Dict[str, Any], dirigeant: Optional[Dict[str, Any]] = None,
-                        in_ademe_list: Optional[bool] = None, duplicate_siren: bool = False) -> Dict[str, Any]:
-    """
-    Drapeaux `company_checks` d'une annonce (spécification §2.2) à partir d'un résultat de lookup_siren
-    et de match_dirigeant. `None` signifie « non vérifié » (open data indisponible).
-    """
-    available = bool(company and company.get("available"))
-    found = bool(company and company.get("found"))
-    return {
-        "opendata_available": available,
-        "siren_active": bool(company.get("siren_active")) if found else None,
-        "naf_code": company.get("naf") if found else None,
-        "naf_status": company.get("naf_status") if found else None,
-        "naf_in_building": bool(company.get("naf_in_building")) if found else None,
-        "in_ademe_list": in_ademe_list,
-        "dirigeant_match": (dirigeant or {}).get("status") or "unavailable",
-        "duplicate_siren": bool(duplicate_siren),
-        "checked_at": datetime.now(timezone.utc).isoformat(),
-    }

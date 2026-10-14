@@ -11,7 +11,7 @@ import TestPanelSection from '@/components/test/TestPanelSection';
 // DELETE /test/emails (admin). L'aperçu est affiché dans un iframe sandbox="" (ni script, ni formulaire, ni navigation
 // du parent) ; les liens de l'e-mail (confirmation, réinitialisation…) sont repris en dessous pour être ouverts.
 
-// « CessionBâtiment <contact@…> » → « CessionBâtiment » (adresse complète dans l'aperçu)
+// « VenteLoc <contact@…> » → « VenteLoc » (adresse complète dans l'aperçu)
 const senderName = (from) => {
   const raw = String(from || '').trim();
   const name = raw.replace(/\s*<[^>]*>\s*$/, '').replace(/^"|"$/g, '').trim();

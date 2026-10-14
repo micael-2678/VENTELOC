@@ -16,8 +16,8 @@ import {
   buildPipeline,
 } from '@/components/buyer/api';
 
-// Espace repreneur (SPEC §4.3 point 7) : « Mes dossiers » (pipeline par étape), offres, alertes, favoris,
-// profil de projet à compléter. Aucun crédit, aucun compteur à zéro, aucune troisième présentation des annonces.
+// Espace acquéreur (SPEC §5.3) : « Mes dossiers » (pipeline contacté → dossier demandé → engagement → dossier →
+// offre → vente), offres d'achat, alertes, favoris, profil d'investisseur à compléter. Aucun compteur à zéro.
 
 const MIN_SCORE_TO_CONTACT = 40;
 const MAX_LOOKUPS = 30;
@@ -37,7 +37,7 @@ const Section = ({ id, title, icon: Icon, count, children, action }) => (
 );
 
 const BuyerDashboard = ({ user, setUser }) => {
-  usePrivateSeo('Espace repreneur');
+  usePrivateSeo('Espace acquéreur');
   const [profile, setProfile] = useState(null);
   const [kyc, setKyc] = useState(null);
   const [conversations, setConversations] = useState([]);
@@ -71,7 +71,7 @@ const BuyerDashboard = ({ user, setUser }) => {
       try { localStorage.setItem('user', JSON.stringify({ ...user, ...p })); } catch (e) { /* stockage indisponible */ }
       setUser({ ...user, ...p });
     }
-    // Statut d'accès et titre de chaque annonce du pipeline (quelques dossiers par repreneur)
+    // Statut d'accès et titre de chaque bien du pipeline (quelques dossiers par acquéreur)
     const ids = [];
     const push = (id) => { if (id && !ids.includes(id) && ids.length < MAX_LOOKUPS) ids.push(id); };
     conv.forEach((c) => push(c.property_id));
@@ -107,7 +107,7 @@ const BuyerDashboard = ({ user, setUser }) => {
     try {
       await axiosInstance.delete(`/favorites/${propertyId}`);
       setFavorites((list) => list.filter((f) => f.property_id !== propertyId && f.property?.id !== propertyId));
-      toast.success('Retirée de vos favoris');
+      toast.success('Annonce retirée de vos favoris');
     } catch (error) {
       toast.error(apiErrorMessage(error));
     }
@@ -125,13 +125,13 @@ const BuyerDashboard = ({ user, setUser }) => {
     <ConnectedShell
       user={user}
       setUser={setUser}
-      eyebrow="Espace repreneur"
+      eyebrow="Espace acquéreur"
       title={user?.first_name ? `Bonjour ${user.first_name}` : 'Mes dossiers'}
       wide
       actions={(
         <Link to={SEARCH_PATH} className="btn-primary px-4 py-2.5 text-sm" data-testid="search-cta">
           <Search className="w-4 h-4" aria-hidden="true" />
-          Voir les entreprises à vendre
+          Voir les biens loués à vendre
         </Link>
       )}
     >
@@ -139,7 +139,7 @@ const BuyerDashboard = ({ user, setUser }) => {
         <div className="notice-amber mb-6 flex flex-col sm:flex-row sm:items-center gap-3" role="status" data-testid="profile-incomplete">
           <UserRound className="w-5 h-5 shrink-0" aria-hidden="true" />
           <p className="flex-1">
-            Votre profil de projet est complété à <strong className="tabular">{score} %</strong> : {MIN_SCORE_TO_CONTACT} % sont nécessaires pour présenter votre projet à un cédant (type de projet, budget, apport, financement, zones, métiers, horizon).
+            Votre profil d&apos;investisseur est complété à <strong className="tabular">{score} %</strong> : {MIN_SCORE_TO_CONTACT} % sont nécessaires pour contacter un vendeur (type d&apos;achat, budget, apport, financement, zones, types de biens, rendement visé, horizon, téléphone).
           </p>
           <Link to="/profile" className="btn-primary px-4 py-2 text-sm shrink-0">Compléter mon profil</Link>
         </div>
@@ -148,7 +148,7 @@ const BuyerDashboard = ({ user, setUser }) => {
         <div className="notice-amber mb-6 flex flex-col sm:flex-row sm:items-center gap-3" role="status" data-testid="offers-todo">
           <PenTool className="w-5 h-5 shrink-0" aria-hidden="true" />
           <p className="flex-1">
-            {openOffers.length === 1 ? 'Une offre attend votre signature ou votre réponse.' : `${openOffers.length} offres attendent votre signature ou votre réponse.`}
+            {openOffers.length === 1 ? 'Une offre d\'achat attend votre signature ou votre réponse.' : `${openOffers.length} offres d'achat attendent votre signature ou votre réponse.`}
           </p>
           <a href="#offres" className="btn-primary px-4 py-2 text-sm shrink-0">Voir mes offres</a>
         </div>
@@ -160,14 +160,14 @@ const BuyerDashboard = ({ user, setUser }) => {
             <PipelineList rows={pipeline} />
           </Section>
 
-          <Section id="offres" title="Mes offres" icon={PenTool} count={offers.length}>
+          <Section id="offres" title="Mes offres d'achat" icon={PenTool} count={offers.length}>
             <OffersList offers={offers} onChanged={reloadOffers} />
           </Section>
         </div>
 
         <div className="space-y-6 min-w-0">
           <section className="card p-5 sm:p-6 min-w-0" aria-labelledby="profil-title">
-            <h2 id="profil-title" className="font-display text-lg font-bold text-brand-navy flex items-center gap-2 mb-3"><UserRound className="w-5 h-5 text-gray-500" aria-hidden="true" />Mon profil de repreneur</h2>
+            <h2 id="profil-title" className="font-display text-lg font-bold text-brand-navy flex items-center gap-2 mb-3"><UserRound className="w-5 h-5 text-gray-500" aria-hidden="true" />Mon profil d&apos;investisseur</h2>
             {score !== null && (
               <div className="mb-3">
                 <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
@@ -181,9 +181,9 @@ const BuyerDashboard = ({ user, setUser }) => {
             )}
             <p className="text-sm text-gray-700 flex items-start gap-2">
               <ShieldCheck className={`w-4 h-4 mt-0.5 shrink-0 ${identityVerified ? 'text-brand-green' : 'text-gray-400'}`} aria-hidden="true" />
-              <span>{identityVerified ? 'Identité vérifiée.' : 'Identité à vérifier au moment de signer un accord de confidentialité, pas avant.'}</span>
+              <span>{identityVerified ? 'Identité vérifiée.' : 'Identité à vérifier avant de signer un engagement de confidentialité, pas avant.'}</span>
             </p>
-            <p className="text-sm text-gray-600 mt-2 leading-relaxed">Les cédants voient votre carte repreneur (projet, budget, financement, zones, horizon, société vérifiée), jamais votre nom avant l&apos;accord de confidentialité.</p>
+            <p className="text-sm text-gray-600 mt-2 leading-relaxed">Les vendeurs voient votre carte acquéreur (type d&apos;achat, budget, financement, biens et zones recherchés, rendement visé, horizon), jamais votre nom avant l&apos;engagement de confidentialité.</p>
             <Link to="/profile" className="btn-link text-sm mt-3">Modifier mon profil</Link>
           </section>
 
@@ -199,7 +199,7 @@ const BuyerDashboard = ({ user, setUser }) => {
                 {favoriteProperties.map((c) => (
                   <li key={c.id} className="min-w-0">
                     <ListingCard property={c} compact source="favorites" />
-                    <button type="button" onClick={() => removeFavorite(c.id)} className="btn-link text-sm mt-1 text-gray-600" aria-label={`Retirer des favoris : ${c.title || 'annonce'}`}>
+                    <button type="button" onClick={() => removeFavorite(c.id)} className="btn-link text-sm mt-1 text-gray-600" aria-label={`Retirer des favoris : ${c.title || 'bien'}`}>
                       <Trash2 className="w-4 h-4" aria-hidden="true" />Retirer
                     </button>
                   </li>

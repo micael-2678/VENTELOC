@@ -245,7 +245,7 @@ const OtpSignatureDialog = ({
                     type="button"
                     onClick={requestCode}
                     disabled={!accepted || !canRequest || requesting || cooldown > 0}
-                    className="w-full sm:w-auto rounded-xl bg-brand-navy hover:bg-brand-navy-light text-white h-auto min-h-10 whitespace-normal"
+                    className="w-full sm:w-auto rounded-xl bg-brand-teal hover:bg-brand-teal-dark text-white h-auto min-h-10 whitespace-normal"
                     data-testid="otp-request"
                   >
                     {requesting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Mail className="w-4 h-4 mr-2 shrink-0" />}
@@ -293,7 +293,7 @@ const OtpSignatureDialog = ({
                       <Button
                         type="submit"
                         disabled={code.length !== 6 || signing || !accepted || !canRequest}
-                        className="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white h-11"
+                        className="rounded-xl bg-brand-teal hover:bg-brand-teal-dark text-white h-11"
                         data-testid="otp-sign"
                       >
                         {signing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <PenTool className="w-4 h-4 mr-2" />}

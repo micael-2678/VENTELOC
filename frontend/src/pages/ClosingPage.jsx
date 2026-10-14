@@ -6,8 +6,9 @@ import { homePathFor } from '@/lib/navigation';
 import NotFound from '@/pages/NotFound';
 import ConnectedShell from '@/components/buyer/ConnectedShell';
 import ClosingPanel from '@/components/closing/ClosingPanel';
+import { propertyPath } from '@/components/buyer/api';
 
-// /vente/:closingId (API.md §7, SPEC §4.5) : étape de vente, pour le cédant comme pour le repreneur.
+// /vente/:closingId (API.md §7, SPEC §7.4) : étape de vente, pour le vendeur comme pour l'acquéreur.
 // GET /closing/{id} → vue (role, status, redacteur, declaration, invoice…) rendue par ClosingPanel.
 
 const ClosingPage = ({ user, setUser }) => {
@@ -58,7 +59,7 @@ const ClosingPage = ({ user, setUser }) => {
       backTo={home}
       backLabel={backLabel}
       wide
-      actions={closing.property_id ? <Link to={`/property/${closing.property_id}`} className="btn-secondary px-4 py-2 text-sm">Voir l&apos;annonce</Link> : null}
+      actions={closing.property_id ? <Link to={propertyPath(closing.property_id)} className="btn-secondary px-4 py-2 text-sm">Voir l&apos;annonce</Link> : null}
     >
       <ClosingPanel closing={closing} user={user} onChange={onChange} />
     </ConnectedShell>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { ArrowLeft, Send, MessageSquare, Lock, Unlock, FolderOpen, Loader2, ChevronDown, ChevronUp, Building2 } from 'lucide-react';
+import { ArrowLeft, Send, MessageSquare, Lock, Unlock, FolderOpen, Loader2, ChevronDown, ChevronUp, Home } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { axiosInstance } from '@/App';
 import { goBack, homePathFor } from '@/lib/navigation';
@@ -14,8 +14,13 @@ import { formatDateTimeMinutesFr, formatDateTimeFr } from '@/lib/mandate';
 import { apiErrorMessage, isEmailNotVerifiedError } from '@/components/account/errors';
 import { fetchConversations, accessStatus } from '@/components/seller/api';
 import { badgeClass } from '@/components/seller/listingStatus';
+import { propertyPath } from '@/components/buyer/api';
 
 const MAX_LENGTH = 5000;
+
+// Messagerie (API.md §3) : une conversation par couple vendeur / acquéreur et par bien. Avant l'engagement de
+// confidentialité, l'acquéreur est désigné par son pseudonyme (« Acquéreur n°123456 ») et les coordonnées écrites sont
+// masquées ; le vendeur voit la carte acquéreur (projet, budget, financement, rendement visé).
 
 // Messages d'une conversation (API.md §3) ; forme historique tolérée (messages déjà embarqués)
 const loadMessages = async (conversation, userId) => {
@@ -37,7 +42,7 @@ const Bubble = ({ message, mine }) => {
   return (
     <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`} data-testid="message">
       <div className={`max-w-[85%] sm:max-w-md rounded-2xl px-4 py-3 min-w-0 ${mine ? 'bg-brand-navy text-white' : 'bg-white border border-brand-line text-gray-900'}`}>
-        {!mine && <p className="text-xs font-semibold text-gray-500 mb-1 break-words">{message.sender_label || 'Repreneur'}</p>}
+        {!mine && <p className="text-xs font-semibold text-gray-500 mb-1 break-words">{message.sender_label || 'Acquéreur'}</p>}
         <p className="whitespace-pre-line break-words">{message.content}</p>
         <p className={`text-xs mt-1 ${mine ? 'text-white/70' : 'text-gray-500'}`}>{formatDateTimeMinutesFr(message.created_at)}</p>
       </div>
@@ -55,7 +60,7 @@ const ConversationItem = ({ conversation, active, onSelect, isSeller }) => (
       data-testid={`conversation-${conversation.id}`}
     >
       <div className="flex items-start justify-between gap-2 min-w-0">
-        <span className="font-semibold text-sm text-brand-navy truncate">{isSeller ? conversation.other_party_label || 'Repreneur' : conversation.property_title || 'Annonce'}</span>
+        <span className="font-semibold text-sm text-brand-navy truncate">{isSeller ? conversation.other_party_label || 'Acquéreur' : conversation.property_title || 'Bien'}</span>
         {conversation.unread_count > 0 && (
           <span className="shrink-0 inline-flex items-center justify-center min-w-5 h-5 px-1 rounded-full bg-brand-amber text-white text-xs font-bold tabular" aria-label={`${conversation.unread_count} non lus`}>{conversation.unread_count}</span>
         )}
@@ -83,7 +88,7 @@ const MessagesPage = ({ user }) => {
   const [showCard, setShowCard] = useState(false);
   const [mobileView, setMobileView] = useState('list'); // 'list' | 'thread' (sous md)
   const endRef = useRef(null);
-  // Côté cédant, la carte repreneur est dépliée à la première ouverture de chaque conversation
+  // Côté vendeur, la carte acquéreur est dépliée à la première ouverture de chaque conversation
   const cardSeen = useRef(new Set());
 
   const loadList = useCallback(async () => {
@@ -186,10 +191,10 @@ const MessagesPage = ({ user }) => {
             <p className="font-semibold text-brand-navy text-lg mb-1">Aucune conversation pour le moment</p>
             <p className="text-sm text-gray-600 mb-5">
               {isSeller
-                ? 'Dès qu\'un repreneur vous présente son projet depuis votre annonce, la conversation apparaît ici avec sa carte repreneur.'
-                : 'Présentez votre projet à un cédant depuis une annonce : la conversation apparaît ici.'}
+                ? 'Dès qu\'un acquéreur vous contacte depuis votre annonce, la conversation apparaît ici avec sa carte acquéreur.'
+                : 'Présentez votre projet au vendeur depuis une annonce : la conversation apparaît ici.'}
             </p>
-            <Link to={isSeller ? '/seller/dashboard' : SEARCH_PATH} className="btn-primary">{isSeller ? 'Voir mes annonces' : 'Voir les entreprises à vendre'}</Link>
+            <Link to={isSeller ? '/seller/dashboard' : SEARCH_PATH} className="btn-primary">{isSeller ? 'Voir mes annonces' : 'Voir les biens à vendre'}</Link>
           </div>
         ) : (
           <div className="grid md:grid-cols-[18rem_1fr] lg:grid-cols-[22rem_1fr] gap-4 flex-1 min-h-0" style={{ minHeight: 'calc(100vh - 12rem)' }}>
@@ -211,14 +216,14 @@ const MessagesPage = ({ user }) => {
                         <ArrowLeft className="w-5 h-5" aria-hidden="true" />
                       </button>
                       <div className="min-w-0 flex-1">
-                        <p className="font-semibold text-brand-navy break-words">{isSeller ? current.other_party_label || 'Repreneur' : current.property_title || 'Annonce'}</p>
+                        <p className="font-semibold text-brand-navy break-words">{isSeller ? current.other_party_label || 'Acquéreur' : current.property_title || 'Bien'}</p>
                         <p className="text-sm text-gray-600 break-words flex items-center gap-1">
-                          <Building2 className="w-4 h-4 shrink-0" aria-hidden="true" />
+                          <Home className="w-4 h-4 shrink-0" aria-hidden="true" />
                           {isSeller ? (current.property_title || 'Votre annonce') : (current.other_party_label || 'Vendeur')}
                         </p>
                       </div>
                       <div className="flex flex-wrap gap-2 justify-end shrink-0">
-                        <Link to={`/property/${current.property_id}`} className="btn-link text-sm">Annonce</Link>
+                        <Link to={propertyPath(current.property_id)} className="btn-link text-sm">Annonce</Link>
                         {isSeller ? (
                           <Link to={dashboardLink} className="btn-link text-sm"><FolderOpen className="w-4 h-4" aria-hidden="true" />Demande de dossier</Link>
                         ) : (
@@ -227,12 +232,12 @@ const MessagesPage = ({ user }) => {
                       </div>
                     </div>
 
-                    <p className={`flex items-start gap-2 text-sm rounded-xl px-3 py-2 ${revealed ? 'bg-brand-green-soft text-brand-green-dark' : 'bg-brand-surface text-gray-700'}`} data-testid="identity-banner">
+                    <p className={`flex items-start gap-2 text-sm rounded-xl px-3 py-2 ${revealed ? 'bg-brand-teal-soft text-brand-teal-dark' : 'bg-brand-surface text-gray-700'}`} data-testid="identity-banner">
                       {revealed ? <Unlock className="w-4 h-4 mt-0.5 shrink-0" aria-hidden="true" /> : <Lock className="w-4 h-4 mt-0.5 shrink-0" aria-hidden="true" />}
                       <span>
                         {revealed
-                          ? 'Accord de confidentialité signé : identités et nom de la société révélés aux deux parties.'
-                          : 'Identités révélées après l\'accord de confidentialité. D\'ici là, les coordonnées écrites dans les messages sont masquées et les échanges restent sur la plateforme.'}
+                          ? 'Engagement de confidentialité signé : identités révélées aux deux parties, adresse du bien communiquée à l\'acquéreur.'
+                          : 'Identités et adresse révélées après l\'engagement de confidentialité. D\'ici là, les coordonnées écrites dans les messages sont masquées et les échanges restent sur la plateforme.'}
                         {current.access_status && access && <span className="ml-1">· Dossier : <span className={badgeClass(access.tone)}>{access.label}</span></span>}
                       </span>
                     </p>
@@ -247,9 +252,9 @@ const MessagesPage = ({ user }) => {
                           data-testid="toggle-buyer-card"
                         >
                           {showCard ? <ChevronUp className="w-4 h-4" aria-hidden="true" /> : <ChevronDown className="w-4 h-4" aria-hidden="true" />}
-                          {showCard ? 'Masquer la carte repreneur' : 'Voir la carte repreneur'}
+                          {showCard ? 'Masquer la carte acquéreur' : 'Voir la carte acquéreur'}
                         </button>
-                        {showCard && <div className="mt-2"><BuyerCard buyer={current.buyer_card} title={current.buyer_card.label || current.other_party_label || 'Repreneur'} compact /></div>}
+                        {showCard && <div className="mt-2"><BuyerCard buyer={current.buyer_card} title={current.buyer_card.label || current.other_party_label || 'Acquéreur'} compact /></div>}
                       </div>
                     )}
                   </header>
@@ -274,13 +279,13 @@ const MessagesPage = ({ user }) => {
                         value={draft}
                         onChange={(e) => setDraft(e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send(e); }}
-                        placeholder="Écrivez votre message… (sans coordonnées avant l'accord de confidentialité)"
+                        placeholder="Écrivez votre message… (sans coordonnées avant l'engagement de confidentialité)"
                         rows={2}
                         maxLength={MAX_LENGTH}
                         className="flex-1 min-w-0 rounded-xl border border-brand-line px-4 py-3 text-base resize-none focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
                         data-testid="message-input"
                       />
-                      <Button type="submit" disabled={sending || !draft.trim()} className="rounded-xl bg-brand-navy hover:bg-brand-navy-light text-white h-12 px-4" aria-label="Envoyer" data-testid="send-message">
+                      <Button type="submit" disabled={sending || !draft.trim()} className="rounded-xl bg-brand-teal hover:bg-brand-teal-dark text-white h-12 px-4" aria-label="Envoyer" data-testid="send-message">
                         {sending ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
                       </Button>
                     </div>

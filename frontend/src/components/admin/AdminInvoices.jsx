@@ -71,7 +71,7 @@ const AdminInvoices = ({ focusId, onEmailBlocked }) => {
   const cancel = async (invoice, reason) => {
     try {
       await axiosInstance.put(`/admin/invoices/${invoice.id}/cancel`, { reason });
-      toast.success(`Facture ${invoice.number} annulée : un avoir est émis et envoyé au cédant.`);
+      toast.success(`Facture ${invoice.number} annulée : un avoir est émis et envoyé au vendeur.`);
       load();
     } catch (err) {
       if (isEmailNotVerifiedError(err)) onEmailBlocked?.();
@@ -171,7 +171,7 @@ const AdminInvoices = ({ focusId, onEmailBlocked }) => {
         open={dialog?.kind === 'cancel'}
         onClose={() => setDialog(null)}
         title={`Annuler la facture ${dialog?.invoice?.number || ''}`}
-        description="La facture reste au registre avec la mention « annulée » et le motif ; un avoir (AV-…) est émis et envoyé au cédant, les relances s'arrêtent. Pour corriger le prix ou la date, utilisez ensuite « Corriger la déclaration » dans l'onglet Ventes : une nouvelle facture est émise."
+        description="La facture reste au registre avec la mention « annulée » et le motif ; un avoir (AV-…) est émis et envoyé au vendeur, les relances s'arrêtent. Pour corriger le prix ou la date, utilisez ensuite « Corriger la déclaration » dans l'onglet Ventes : une nouvelle facture est émise."
         confirmLabel="Annuler la facture"
         noteLabel="Motif d'annulation"
         required

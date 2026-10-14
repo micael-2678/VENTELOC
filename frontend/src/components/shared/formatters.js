@@ -1,4 +1,4 @@
-// Formats fr-FR partagés par les composants (prix, ordres de grandeur, dates, pluriels).
+// Formats fr-FR partagés par les composants (prix, loyers, rendements, surfaces, dates, pluriels).
 
 const EUR = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
 const NUMBER = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 });
@@ -15,7 +15,7 @@ export const formatPrice = (n) => (isAmount(n) ? readableSpaces(EUR.format(Numbe
 // 450000 → « 450 000 »
 export const formatNumber = (n) => (isAmount(n) ? readableSpaces(NUMBER.format(Number(n))) : '—');
 
-// Ordre de grandeur (chiffre d'affaires sur les cartes) : arrondi à 1 000 / 10 000 / 50 000 € selon le montant
+// Ordre de grandeur : arrondi à 1 000 / 10 000 / 50 000 € selon le montant
 export const formatMagnitude = (n) => {
   const v = Number(n);
   if (!isAmount(n) || v <= 0) return '—';
@@ -31,21 +31,23 @@ export const formatDateFr = (value, options) => {
   return new Intl.DateTimeFormat('fr-FR', options || { day: 'numeric', month: 'short', year: 'numeric' }).format(d);
 };
 
-// plural(9, 'salarié') → « 9 salariés » ; plural(1, 'salarié') → « 1 salarié »
+// plural(3, 'lot') → « 3 lots » ; plural(1, 'lot') → « 1 lot »
 export const plural = (n, singular, pluralForm) => {
   const v = Number(n);
   if (!Number.isFinite(v)) return '';
   return `${formatNumber(v)} ${v > 1 ? pluralForm || `${singular}s` : singular}`;
 };
 
-// « de plomberie » / « d'isolation » (élision devant voyelle ou h muet) ; les sigles gardent leur majuscule
-export const deActivity = (activity) => {
-  const s = String(activity || '').trim();
-  if (!s) return '';
-  const keepCase = s.length > 1 && s[1] === s[1].toUpperCase() && /\p{L}/u.test(s[1]);
-  const word = keepCase ? s : s.charAt(0).toLowerCase() + s.slice(1);
-  return /^[aeiouyhàâäéèêëîïôöùûüœ]/i.test(word) ? `d'${word}` : `de ${word}`;
-};
+// Rendement en pourcentage, une décimale : 5.24 → « 5,2 % » ; absent ou nul → '' (jamais « 0 % »)
+const PERCENT = new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+export const formatYield = (n) => (isAmount(n) && Number(n) > 0 ? `${PERCENT.format(Number(n))}\u00a0%` : '');
+
+// Loyer mensuel : 620 → « 620 €/mois » ; absent → '—'
+export const formatMonthly = (n) => (isAmount(n) ? `${formatPrice(n)}/mois` : '—');
+
+// Surface : 42 → « 42 m² », 42.5 → « 42,5 m² » ; absente ou nulle → ''
+const SURFACE = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 });
+export const formatSurface = (n) => (isAmount(n) && Number(n) > 0 ? `${readableSpaces(SURFACE.format(Number(n)))}\u00a0m²` : '');
 
 // Montant court pour les cartes : 1150000 → « 1,15 M€ », 780000 → « 780 k€ », 950 → « 950 € » ; absent → « — »
 export const formatCompactEuros = (n) => {

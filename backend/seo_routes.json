@@ -1,9 +1,13 @@
 {
-  "generated": "2026-10-10",
+  "generated": "2026-10-14",
   "routes": [
     {
       "path": "/",
       "changefreq": "daily"
+    },
+    {
+      "path": "/vendre",
+      "changefreq": "monthly"
     },
     {
       "path": "/estimer",
@@ -16,12 +20,12 @@
     {
       "path": "/confidentialite",
       "changefreq": "yearly",
-      "lastmod": "2026-10-10"
+      "lastmod": "2026-10-14"
     },
     {
       "path": "/cgu",
       "changefreq": "yearly",
-      "lastmod": "2026-10-10"
+      "lastmod": "2026-10-14"
     },
     {
       "path": "/signaler",

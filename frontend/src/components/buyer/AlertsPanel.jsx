@@ -3,23 +3,35 @@ import { toast } from 'sonner';
 import { Bell, BellOff, Loader2, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { axiosInstance } from '@/App';
 import { cn } from '@/lib/utils';
-import { TRADES, REGIONS, tradeLabel } from '@/lib/referentiels';
+import { PROPERTY_TYPES, REGIONS, propertyTypeLabel } from '@/lib/referentiels';
 import { trackEvent } from '@/lib/analytics';
 import { formatPrice } from '@/components/shared/formatters';
 import { apiErrorMessage, isEmailNotVerifiedError } from '@/components/account/errors';
-import { normalizeAlert, alertPayload, alertName } from './api';
+import { normalizeAlert, alertPayload } from './api';
 
-// Alertes du repreneur connecté (API.md §8) : POST/GET/PUT/DELETE /alerts avec trades, regions, max_price, rge.
-// Cinq alertes au maximum ; activation / désactivation ; e-mail immédiat à la publication d'une annonce qui correspond.
+// Alertes de l'acquéreur connecté (API.md §8) : POST/GET/PUT/DELETE /alerts avec property_types, regions, max_price,
+// min_yield. Cinq alertes au maximum ; activation / désactivation ; e-mail à la publication d'une annonce qui correspond.
 
 const PRICE_OPTIONS = [
   { value: '', label: 'Sans limite de prix' },
+  { value: '100000', label: 'Jusqu\'à 100 000 €' },
   { value: '150000', label: 'Jusqu\'à 150 000 €' },
-  { value: '300000', label: 'Jusqu\'à 300 000 €' },
-  { value: '500000', label: 'Jusqu\'à 500 000 €' },
+  { value: '250000', label: 'Jusqu\'à 250 000 €' },
+  { value: '400000', label: 'Jusqu\'à 400 000 €' },
+  { value: '600000', label: 'Jusqu\'à 600 000 €' },
   { value: '1000000', label: 'Jusqu\'à 1 000 000 €' },
-  { value: '2000000', label: 'Jusqu\'à 2 000 000 €' },
 ];
+const YIELD_OPTIONS = [
+  { value: '', label: 'Tous les rendements' },
+  { value: '4', label: '4 % brut et plus' },
+  { value: '5', label: '5 % brut et plus' },
+  { value: '6', label: '6 % brut et plus' },
+  { value: '7', label: '7 % brut et plus' },
+  { value: '8', label: '8 % brut et plus' },
+  { value: '10', label: '10 % brut et plus' },
+];
+const typeShort = (t) => propertyTypeLabel(t, true) || t;
+const yieldText = (v) => `${String(v).replace('.', ',')} %`;
 const MAX_ALERTS = 5;
 
 const PillGroup = ({ legend, name, options, selected, onToggle, idPrefix }) => (
@@ -54,10 +66,10 @@ const PillGroup = ({ legend, name, options, selected, onToggle, idPrefix }) => (
 
 const AlertEditor = ({ initial, onSaved, onCancel }) => {
   const idp = useId();
-  const [trades, setTrades] = useState(initial?.trades || []);
+  const [propertyTypes, setPropertyTypes] = useState(initial?.propertyTypes || []);
   const [regions, setRegions] = useState(initial?.regions || []);
   const [maxPrice, setMaxPrice] = useState(initial?.maxPrice ? String(initial.maxPrice) : '');
-  const [rge, setRge] = useState(initial?.rge === true ? 'true' : 'all');
+  const [minYield, setMinYield] = useState(initial?.minYield ? String(initial.minYield) : '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const toggle = (setter) => (value) => setter((prev) => (prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]));
@@ -67,7 +79,7 @@ const AlertEditor = ({ initial, onSaved, onCancel }) => {
     if (saving) return;
     setSaving(true);
     setError('');
-    const payload = alertPayload({ trades, regions, maxPrice, rge: rge === 'true' ? true : null, name: alertName({ trades, regions, maxPrice, rge: rge === 'true', tradeLabel: (t) => tradeLabel(t, true) || t }) });
+    const payload = alertPayload({ propertyTypes, regions, maxPrice, minYield, typeLabel: typeShort });
     try {
       if (initial?.id) {
         await axiosInstance.put(`/alerts/${initial.id}`, payload);
@@ -75,7 +87,7 @@ const AlertEditor = ({ initial, onSaved, onCancel }) => {
       } else {
         await axiosInstance.post('/alerts', payload);
         toast.success('Alerte créée : vous recevrez les annonces qui correspondent dès leur publication.');
-        trackEvent('alert_created', { source: 'buyer_dashboard', trades: trades.length, regions: regions.length, max_price: payload.max_price });
+        trackEvent('alert_created', { source: 'buyer_dashboard', property_types: propertyTypes.length, regions: regions.length, max_price: payload.max_price, min_yield: payload.min_yield });
       }
       await onSaved();
     } catch (err) {
@@ -88,20 +100,21 @@ const AlertEditor = ({ initial, onSaved, onCancel }) => {
 
   return (
     <form onSubmit={submit} noValidate className="rounded-xl border border-brand-line bg-white p-4 space-y-4 min-w-0" data-testid="alert-editor">
-      <PillGroup legend="Métiers" name="trades" options={TRADES.map((t) => ({ value: t.id, label: t.short || t.label }))} selected={trades} onToggle={toggle(setTrades)} idPrefix={idp} />
+      <PillGroup legend="Types de biens" name="property_types" options={PROPERTY_TYPES.map((t) => ({ value: t.id, label: t.short }))} selected={propertyTypes} onToggle={toggle(setPropertyTypes)} idPrefix={idp} />
       <PillGroup legend="Régions" name="regions" options={REGIONS.map((r) => ({ value: r, label: r }))} selected={regions} onToggle={toggle(setRegions)} idPrefix={idp} />
       <div className="grid sm:grid-cols-2 gap-4">
         <div>
           <label htmlFor={`${idp}-price`} className="block text-sm font-semibold text-brand-navy mb-1">Prix maximum</label>
-          <select id={`${idp}-price`} value={maxPrice} onChange={(e) => setMaxPrice(e.target.value)} className="w-full rounded-xl border border-brand-line bg-white px-4 py-2.5 text-sm text-brand-navy focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30">
+          <select id={`${idp}-price`} data-testid="alert-max-price" value={maxPrice} onChange={(e) => setMaxPrice(e.target.value)} className="w-full rounded-xl border border-brand-line bg-white px-4 py-2.5 text-sm text-brand-navy focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30">
+            {PRICE_OPTIONS.some((o) => o.value === maxPrice) ? null : <option value={maxPrice}>Jusqu&apos;à {formatPrice(maxPrice)}</option>}
             {PRICE_OPTIONS.map((o) => <option key={o.value || 'none'} value={o.value}>{o.label}</option>)}
           </select>
         </div>
         <div>
-          <label htmlFor={`${idp}-rge`} className="block text-sm font-semibold text-brand-navy mb-1">Qualification RGE</label>
-          <select id={`${idp}-rge`} value={rge} onChange={(e) => setRge(e.target.value)} className="w-full rounded-xl border border-brand-line bg-white px-4 py-2.5 text-sm text-brand-navy focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30">
-            <option value="all">RGE ou non</option>
-            <option value="true">Entreprises RGE uniquement</option>
+          <label htmlFor={`${idp}-yield`} className="block text-sm font-semibold text-brand-navy mb-1">Rendement brut minimum</label>
+          <select id={`${idp}-yield`} value={minYield} onChange={(e) => setMinYield(e.target.value)} className="w-full rounded-xl border border-brand-line bg-white px-4 py-2.5 text-sm text-brand-navy focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30" data-testid="alert-min-yield">
+            {YIELD_OPTIONS.some((o) => o.value === minYield) ? null : <option value={minYield}>{yieldText(minYield)} brut et plus</option>}
+            {YIELD_OPTIONS.map((o) => <option key={o.value || 'none'} value={o.value}>{o.label}</option>)}
           </select>
         </div>
       </div>
@@ -150,7 +163,7 @@ const AlertsPanel = ({ alerts, onChanged }) => {
   return (
     <div className="space-y-3 min-w-0" data-testid="alerts-panel">
       {list.length === 0 && editing === null && (
-        <p className="text-sm text-gray-600">Aucune alerte. Créez-en une pour recevoir par e-mail les annonces qui correspondent à vos métiers, vos régions et votre budget, dès leur publication.</p>
+        <p className="text-sm text-gray-600">Aucune alerte. Créez-en une pour recevoir par e-mail les biens loués qui correspondent à vos critères (type, région, budget, rendement), dès leur publication.</p>
       )}
       {list.length > 0 && (
         <ul className="space-y-2">
@@ -162,13 +175,13 @@ const AlertsPanel = ({ alerts, onChanged }) => {
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 min-w-0">
                   <div className="min-w-0">
                     <p className="font-medium text-brand-navy break-words">
-                      {a.trades.length ? a.trades.map((t) => tradeLabel(t, true) || t).join(', ') : 'Tous les métiers'}
+                      {a.propertyTypes.length ? a.propertyTypes.map(typeShort).join(', ') : 'Tous les biens'}
                       {' · '}
                       {a.regions.length ? a.regions.join(', ') : 'Toute la France'}
                     </p>
                     <p className="text-sm text-gray-600">
-                      {a.maxPrice ? `Jusqu'à ${formatPrice(a.maxPrice)}` : 'Sans limite de prix'}{a.rge === true ? ' · RGE uniquement' : ''}
-                      {' · '}<span className={a.active ? 'text-brand-green-dark' : 'text-gray-500'}>{a.active ? 'Active' : 'En pause'}</span>
+                      {a.maxPrice ? `Jusqu'à ${formatPrice(a.maxPrice)}` : 'Sans limite de prix'}{a.minYield ? ` · rendement brut ≥ ${yieldText(a.minYield)}` : ''}
+                      {' · '}<span className={a.active ? 'text-brand-teal-dark' : 'text-gray-500'}>{a.active ? 'Active' : 'En pause'}</span>
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-1 shrink-0">

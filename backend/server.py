@@ -38,8 +38,8 @@ from storage import save_file, load_file, delete_file, max_upload_bytes, s3_enab
 from watermark import WatermarkError, apply_watermark
 import business_model
 from business_model import (
-    seller_commission_enabled, commission_scale, commission_scale_text, commission_minimum_ht, fmt_eur_fr,
-    COMMISSION_TERMS_VERSION, COMMISSION_PAYER,
+    seller_commission_enabled, commission_scale, commission_config, commission_scale_text, commission_minimum_ht, fmt_eur_fr,
+    fmt_percent_fr, COMMISSION_TERMS_VERSION, COMMISSION_PAYER,
     calculate_commission, add_business_days, send_brevo_email, render_email,
     EMAIL_TEMPLATES, site_url, site_name, sender_email,
     TEST_DOCUMENT_BANNER, DEMO_EMAIL_DOMAIN, test_mode_enabled, mark_test, is_test_related, is_demo_email
@@ -256,7 +256,7 @@ def require_verified_email(user: dict):
 
 async def identity_verified_effects(user_id: str) -> None:
     """Effets d'une identité devenue vérifiée (Stripe Identity, admin ou simulation du mode test) : les brouillons du
-    cédant sont soumis, les accès au dossier du repreneur dont toutes les étapes sont faites sont ouverts."""
+    vendeur sont soumis, les accès au dossier de l'acquéreur dont toutes les étapes sont faites sont ouverts."""
     await submit_drafts(user_id)
     async for access in db.dataroom_access.find({"buyer_id": user_id, "status": {"$in": list(DATAROOM_ACCEPTED_STATUSES)}}, {"_id": 0}):
         try:
@@ -382,13 +382,14 @@ async def create_audit_log(
 
 # Models
 class BuyerProfile(BaseModel):
-    """Profil de projet du repreneur (SPEC §4.1, API.md §1) : toutes les clés sont facultatives, le score dit ce qui manque"""
-    project_type: Optional[Literal["reprise-individuelle", "croissance-externe", "groupe-investisseur", "autre"]] = None
-    budget_max: Optional[float] = Field(None, ge=0, le=100_000_000)
-    apport: Optional[float] = Field(None, ge=0, le=100_000_000)
-    financing: Optional[Literal["fonds-propres", "emprunt", "mixte", "a-definir"]] = None
+    """Profil de projet de l'acquéreur (SPEC §4, API.md §1) : toutes les clés sont facultatives, le score dit ce qui manque"""
+    project_type: Optional[Literal["particulier", "sci", "societe", "professionnel"]] = None
+    budget_max: Optional[float] = Field(None, ge=0, le=1_000_000_000)
+    apport: Optional[float] = Field(None, ge=0, le=1_000_000_000)
+    financing: Optional[Literal["comptant", "emprunt", "mixte", "a-definir"]] = None
     zones: Optional[List[str]] = None
-    trades: Optional[List[str]] = None
+    property_types: Optional[List[str]] = None
+    min_yield: Optional[float] = Field(None, ge=0, le=20)
     horizon: Optional[Literal["0-6", "6-12", "12+"]] = None
     siren: Optional[str] = Field(None, max_length=20)
     company_name: Optional[str] = Field(None, max_length=200)
@@ -401,7 +402,6 @@ class UserRegister(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     company_name: Optional[str] = None
-    siret: Optional[str] = None
     phone: Optional[str] = None
     buyer_profile: Optional[BuyerProfile] = None
     source: Optional[str] = Field(None, max_length=50)
@@ -412,14 +412,13 @@ class ProfileUpdate(BaseModel):
     last_name: Optional[str] = Field(None, max_length=100)
     phone: Optional[str] = Field(None, max_length=30)
     company_name: Optional[str] = Field(None, max_length=200)
-    siret: Optional[str] = Field(None, max_length=20)
     buyer_profile: Optional[BuyerProfile] = None
     notifications_opt_out: Optional[bool] = None
 
-# ---- Profil repreneur et score de complétude (SPEC §4.1, API.md §1) ----
+# ---- Profil acquéreur et score de complétude (SPEC §4, API.md §1) ----
 PROFILE_SCORE_WEIGHTS = (("project_type", 15), ("budget_max", 15), ("apport", 10), ("financing", 10), ("zones", 10),
-                         ("trades", 10), ("horizon", 10), ("phone", 10), ("siren_verified", 10))
-SCORE_CONTACT_MIN = 40       # contacter un cédant, demander un dossier
+                         ("property_types", 10), ("min_yield", 10), ("horizon", 10), ("phone", 10))
+SCORE_CONTACT_MIN = 40       # contacter un vendeur, demander un dossier
 SCORE_AUTO_ACCEPT_MIN = 50   # acceptation automatique d'une demande de dossier (option de l'annonce)
 PHONE_DIGITS_RE = re.compile(r"\d")
 
@@ -430,47 +429,32 @@ def phone_is_valid(phone: Optional[str]) -> bool:
     text = str(phone).strip()
     return bool(re.fullmatch(r"\+?[\d\s().\-]{8,25}", text)) and len(PHONE_DIGITS_RE.findall(text)) >= 9
 
+def _profile_key_filled(user: dict, key: str) -> bool:
+    if key == "phone":
+        return phone_is_valid(user.get("phone"))
+    value = (user.get("buyer_profile") or {}).get(key)
+    if isinstance(value, list):
+        return len(value) > 0
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value > 0
+    return bool(str(value or "").strip())
+
 def buyer_profile_score(user: dict) -> int:
-    """0-100 : project_type 15, budget_max 15, apport 10, financing 10, zones 10, trades 10, horizon 10, téléphone 10,
-    SIREN vérifié par l'open data 10 (même barème que frontend/src/components/account/profileScore.js)"""
-    profile = user.get("buyer_profile") or {}
-    score = 0
-    for key, points in PROFILE_SCORE_WEIGHTS:
-        if key == "phone":
-            filled = phone_is_valid(user.get("phone"))
-        elif key == "siren_verified":
-            filled = profile.get("siren_verified") is True
-        else:
-            value = profile.get(key)
-            if isinstance(value, list):
-                filled = len(value) > 0
-            elif isinstance(value, (int, float)):
-                filled = value > 0
-            else:
-                filled = bool(str(value or "").strip())
-        if filled:
-            score += points
+    """0-100 : project_type 15, budget_max 15, apport 10, financing 10, zones 10, property_types 10, min_yield 10,
+    horizon 10, téléphone valide 10 (même barème que frontend/src/components/account/profileScore.js). `siren_verified`
+    reste un badge, sans points."""
+    score = sum(points for key, points in PROFILE_SCORE_WEIGHTS if _profile_key_filled(user, key))
     return max(0, min(100, score))
 
 def profile_missing(user: dict) -> list:
-    """Clés du profil qui ne rapportent pas encore de points (affichage « ce qui manque »)"""
-    profile = user.get("buyer_profile") or {}
-    missing = []
-    for key, _ in PROFILE_SCORE_WEIGHTS:
-        if key == "phone":
-            ok = phone_is_valid(user.get("phone"))
-        elif key == "siren_verified":
-            ok = profile.get("siren_verified") is True
-        else:
-            v = profile.get(key)
-            ok = (len(v) > 0) if isinstance(v, list) else (v > 0 if isinstance(v, (int, float)) else bool(str(v or "").strip()))
-        if not ok:
-            missing.append(key)
-    return missing
+    """Clés du profil qui ne rapportent pas encore de points (affichage « ce qui manque », `phone` inclus)"""
+    return [key for key, _ in PROFILE_SCORE_WEIGHTS if not _profile_key_filled(user, key)]
 
 async def normalize_buyer_profile(profile: Optional[BuyerProfile], previous: Optional[dict] = None) -> Optional[dict]:
-    """Profil validé (zones = régions connues, métiers de la taxonomie) ; le SIREN est vérifié par l'open data
-    (`siren_verified`, jamais bloquant : indisponible → non vérifié, revérifiable plus tard)"""
+    """Profil validé (zones = régions connues, types de biens du référentiel) ; le SIREN d'une société acquéreuse est
+    vérifié par l'open data (`siren_verified`, jamais bloquant : indisponible → non vérifié, revérifiable plus tard)"""
     if profile is None:
         return previous
     data = profile.model_dump()
@@ -481,13 +465,15 @@ async def normalize_buyer_profile(profile: Optional[BuyerProfile], previous: Opt
             if name in taxonomy.REGIONS and name not in zones:
                 zones.append(name)
         data["zones"] = zones[:20]
-    if data.get("trades") is not None:
-        data["trades"] = [t for t in dict.fromkeys(data["trades"]) if taxonomy.trade_by_id(t)][:len(taxonomy.TRADES)]
+    if data.get("property_types") is not None:
+        data["property_types"] = [t for t in dict.fromkeys(data["property_types"]) if taxonomy.property_type_by_id(t)]
+    if data.get("min_yield") is not None:
+        data["min_yield"] = round(float(data["min_yield"]), 2)
     for key in ("siren", "company_name", "experience"):
         if data.get(key) is not None:
             data[key] = str(data[key]).strip() or None
     if data.get("experience"):
-        # Présentée au cédant avant NDA (carte repreneur, e-mail de premier contact) : coordonnées masquées
+        # Présentée au vendeur avant l'engagement de confidentialité (carte acquéreur) : coordonnées masquées
         data["experience"] = mask_contacts(data["experience"])[0]
     siren = (opendata.split_identifier(data.get("siren"))[0] or None) if data.get("siren") else None
     data["siren"] = siren
@@ -502,7 +488,7 @@ async def normalize_buyer_profile(profile: Optional[BuyerProfile], previous: Opt
             try:
                 info = await opendata.lookup_siren(siren)
             except Exception as e:  # jamais bloquant
-                logging.warning(f"Open data indisponible pour le SIREN du repreneur: {e}")
+                logging.warning(f"Open data indisponible pour le SIREN de l'acquéreur: {e}")
                 info = {"available": False, "found": False}
             if info.get("available") and info.get("found"):
                 data["siren_verified"] = bool(info.get("siren_active", True))
@@ -515,35 +501,9 @@ async def normalize_buyer_profile(profile: Optional[BuyerProfile], previous: Opt
                 data["siren_check"] = {"status": "deferred", "checked_at": datetime.now(timezone.utc).isoformat()}
     return data
 
-async def seller_siret_lookup(siret: Optional[str]) -> dict:
-    """SIRET facultatif du vendeur : préremplissage par l'open data ; « vérification différée » si indisponible"""
-    if not siret:
-        return {}
-    clean = re.sub(r"\D", "", str(siret))
-    if not clean:
-        return {}
-    out = {"siret": clean, "siret_verification": "deferred", "siret_check": None}
-    try:
-        info = await opendata.lookup_siren(clean)
-    except Exception as e:
-        logging.warning(f"Open data indisponible pour le SIRET du vendeur: {e}")
-        return out
-    if not info.get("available"):
-        out["siret_check"] = {"status": "deferred", "message": "Vérification différée : le registre national est momentanément indisponible"}
-    elif not info.get("found"):
-        out["siret_verification"] = "not_found"
-        out["siret_check"] = {"status": "not_found", "message": "SIRET introuvable au registre national"}
-    else:
-        out["siret_verification"] = "verified" if info.get("siren_active", True) else "inactive"
-        out["siret_check"] = {"status": out["siret_verification"], "nom_complet": info.get("nom_complet"), "naf": info.get("naf"),
-                              "departement": info.get("departement"), "region": info.get("region"), "checked_at": datetime.now(timezone.utc).isoformat()}
-        out["company_lookup"] = {k: info.get(k) for k in ("nom_complet", "naf", "naf_libelle", "date_creation", "tranche_effectif",
-                                                           "departement", "region", "legal_structure", "etat", "siren_active")}
-    return out
-
 def with_profile_score(user: dict) -> dict:
-    """Vue d'un compte avec `profile_score` (et `profile_missing` pour un repreneur). Une adresse ou une identité simulée
-    en mode test apparaît non vérifiée une fois le mode test désactivé."""
+    """Vue d'un compte avec `profile_score` et `profile_missing` (acquéreur). Une adresse ou une identité simulée en mode
+    test apparaît non vérifiée une fois le mode test désactivé."""
     user = public_user(user)
     if user.get("email_verified") and not is_email_verified(user):
         user["email_verified"] = False
@@ -574,83 +534,190 @@ class UserLogin(BaseModel):
     def _email(cls, value):
         return login_email(value)
 
+# ---- Le bien loué (SPEC §3) : champs saisis par le vendeur, tous facultatifs au brouillon ----
 class PropertyCreate(BaseModel):
-    """Brouillon créé dès l'écran 1 de CreateListing (SPEC §4.2.2) : tout est facultatif, les écrans suivants complètent
-    par `PUT /properties/{id}` ; l'annonce n'est soumise (mandat, contrôles, publication) qu'une fois le prix renseigné."""
-    rge_types: Optional[List[str]] = Field(default_factory=list)
-    rge_validity: Optional[str] = None
-    ca_n: Optional[float] = 0
-    ca_n1: Optional[float] = 0
-    ca_n2: Optional[float] = 0
-    margin: Optional[float] = 0
-    ebitda: Optional[float] = 0
-    mandataire_contracts: Optional[str] = None
-    creation_date: Optional[str] = None
-    staff_count: Optional[int] = 0
-    legal_structure: Optional[str] = None
-    pipeline: Optional[float] = 0
-    fixed_charges: Optional[Dict[str, float]] = Field(default_factory=dict)
-    debt: Optional[float] = 0
-    asking_price: Optional[float] = 0
-    sale_type: Optional[str] = None
-    region: Optional[str] = None
-    specialties: Optional[List[str]] = None
-    equipment: Optional[str] = None
-    premises: Optional[str] = None
-    # Nouveaux champs pour la vérification dirigeant
-    siret: Optional[str] = None
-    company_name: Optional[str] = None
-    dirigeant_verified: Optional[bool] = False
-    dirigeant_status: Optional[str] = "not_checked"
-    # Tout le bâtiment (SPEC §2.2) : métiers, qualifications déclarées, département, cession
-    trades: Optional[List[str]] = None
-    other_qualifications: Optional[List[str]] = None
-    department: Optional[str] = None
-    description: Optional[str] = None
-    sale_reason: Optional[Literal["retraite", "reconversion", "sante", "autre"]] = None
-    sale_object: Optional[Literal["titres", "fonds", "indifferent"]] = None
-    handover_months: Optional[int] = Field(default=None, ge=0, le=24)
-    has_maintenance_contracts: Optional[bool] = None
-    technical_referent_stays: Optional[bool] = None
-    key_staff_stays: Optional[bool] = None
-    decennale_ok: Optional[bool] = None
+    """Brouillon créé dès l'écran 1 de CreateListing (SPEC §5.2) : tout est facultatif, les écrans suivants complètent
+    par `PUT /properties/{id}` ; l'annonce est soumise (mandat, contrôles, publication) une fois le prix renseigné.
+    Les identifiants inconnus, les montants négatifs et les textes hors limites sont refusés en 400 `validation`."""
+    # Le bien
+    property_type: Optional[str] = Field(None, max_length=40)
+    owner_type: Optional[str] = Field(None, max_length=40)
+    company_name: Optional[str] = Field(None, max_length=200)
+    siret: Optional[str] = Field(None, max_length=20)
+    address: Optional[str] = Field(None, max_length=300)
+    postal_code: Optional[str] = Field(None, max_length=10)
+    city: Optional[str] = Field(None, max_length=120)
+    department: Optional[str] = Field(None, max_length=60)
+    district: Optional[str] = Field(None, max_length=120)
+    surface: Optional[float] = None
+    rooms: Optional[int] = None
+    floor: Optional[int] = None
+    elevator: Optional[bool] = None
+    construction_year: Optional[int] = None
+    units_count: Optional[int] = None
+    units_rented: Optional[int] = None
+    is_copro: Optional[bool] = None
+    copro_lots: Optional[int] = None
+    copro_charges_annual: Optional[float] = None
+    copro_procedure: Optional[bool] = None
+    dpe_class: Optional[str] = Field(None, max_length=20)
+    ges_class: Optional[str] = Field(None, max_length=20)
+    energy_cost_min: Optional[float] = None
+    energy_cost_max: Optional[float] = None
+    dpe_date: Optional[str] = Field(None, max_length=10)
+    equipment: Optional[str] = Field(None, max_length=600)
+    recent_works: Optional[str] = Field(None, max_length=1000)
+    description: Optional[str] = Field(None, max_length=3000)
+    # La location
+    lease_type: Optional[str] = Field(None, max_length=40)
+    rent_monthly: Optional[float] = None
+    charges_monthly: Optional[float] = None
+    lease_start: Optional[str] = Field(None, max_length=10)
+    lease_end: Optional[str] = Field(None, max_length=10)
+    tenant_since: Optional[str] = Field(None, max_length=10)
+    deposit: Optional[float] = None
+    indexation: Optional[str] = Field(None, max_length=20)
+    last_revision: Optional[str] = Field(None, max_length=10)
+    tenant_payment_status: Optional[str] = Field(None, max_length=20)
+    has_gli: Optional[bool] = None
+    has_guarantor: Optional[bool] = None
+    property_tax: Optional[float] = None
+    non_recoverable_charges: Optional[float] = None
+    management: Optional[str] = Field(None, max_length=20)
+    operator_lease_end: Optional[str] = Field(None, max_length=10)
+    # La vente
+    asking_price: Optional[float] = None
+    sale_object: Optional[str] = Field(None, max_length=20)
+    sale_reason: Optional[str] = Field(None, max_length=20)
+    availability_note: Optional[str] = Field(None, max_length=300)
     auto_accept_dataroom: Optional[bool] = None
 
-def validate_listing_fields(data: dict) -> dict:
-    """Validation des référentiels (taxonomy) sur les champs envoyés : ValueError → 400 en français.
-    `rge_types` absent de `trades` → métiers déduits des domaines RGE (migration douce)."""
-    out = dict(data)
-    if out.get("trades") is not None:
+INDEXATION_IDS = ("irl", "ilc", "ilat", "aucune")
+MANAGEMENT_IDS = ("direct", "agence", "exploitant")
+MANDANT_CAPACITY_IDS = ("proprietaire", "coindivisaire", "gerant", "mandataire")
+GES_CLASS_IDS = ("A", "B", "C", "D", "E", "F", "G")
+COMPANY_OWNER_TYPES = ("sci", "societe")
+LISTING_ENUM_FIELDS = {
+    "property_type": (taxonomy.PROPERTY_TYPE_IDS, "Type de bien inconnu"),
+    "owner_type": (taxonomy.OWNER_TYPE_IDS, "Type de propriétaire inconnu"),
+    "lease_type": (taxonomy.LEASE_TYPE_IDS, "Type de bail inconnu"),
+    "dpe_class": (taxonomy.DPE_CLASS_IDS, "Classe DPE inconnue"),
+    "ges_class": (GES_CLASS_IDS, "Classe GES inconnue (A à G)"),
+    "tenant_payment_status": (taxonomy.TENANT_PAYMENT_STATUS_IDS, "Situation du locataire inconnue"),
+    "sale_object": (taxonomy.SALE_OBJECT_IDS, "Objet de la vente inconnu"),
+    "sale_reason": (taxonomy.SALE_REASON_IDS, "Motif de vente inconnu"),
+    "indexation": (INDEXATION_IDS, "Indice de révision inconnu (irl, ilc, ilat ou aucune)"),
+    "management": (MANAGEMENT_IDS, "Mode de gestion inconnu (direct, agence ou exploitant)"),
+    "mandant_capacity": (MANDANT_CAPACITY_IDS, "Qualité du signataire inconnue"),
+}
+LISTING_AMOUNT_FIELDS = ("surface", "copro_charges_annual", "energy_cost_min", "energy_cost_max", "rent_monthly",
+                         "charges_monthly", "deposit", "property_tax", "non_recoverable_charges", "asking_price")
+LISTING_COUNT_FIELDS = ("rooms", "units_count", "units_rented", "copro_lots")
+LISTING_DATE_FIELDS = ("dpe_date", "lease_start", "lease_end", "tenant_since", "last_revision", "operator_lease_end")
+# Textes libres publiés sur l'annonce : téléphones et e-mails masqués (contrôle anti-coordonnées)
+LISTING_FREE_TEXT_FIELDS = ("description", "equipment", "recent_works", "availability_note", "district")
+FIELD_LABELS_FR = {"surface": "la surface", "copro_charges_annual": "les charges de copropriété", "energy_cost_min": "le coût énergétique",
+                   "energy_cost_max": "le coût énergétique", "rent_monthly": "le loyer", "charges_monthly": "les charges",
+                   "deposit": "le dépôt de garantie", "property_tax": "la taxe foncière",
+                   "non_recoverable_charges": "les charges non récupérables", "asking_price": "le prix",
+                   "rooms": "le nombre de pièces", "units_count": "le nombre de lots", "units_rented": "le nombre de lots loués",
+                   "copro_lots": "le nombre de lots de la copropriété"}
+
+def _validation(message: str, field: str) -> HTTPException:
+    return api_error(400, "validation", message, field=field)
+
+def validate_listing_fields(data: dict, current: Optional[dict] = None) -> dict:
+    """Validation des champs envoyés (référentiels de taxonomy, montants, dates, textes) : 400 `validation` en français.
+    `current` : annonce existante (mise à jour), pour les contrôles croisés (parts ↔ société)."""
+    out = {k: v for k, v in dict(data).items()}
+    for key, (allowed, message) in LISTING_ENUM_FIELDS.items():
+        value = out.get(key)
+        if value is None or value == "":
+            if key in out and value == "":
+                out[key] = None
+            continue
+        value = str(value).strip()
+        if key in ("dpe_class", "ges_class") and value.upper() in GES_CLASS_IDS:
+            value = value.upper()
+        if value not in allowed:
+            raise _validation(message, key)
+        out[key] = value
+    for key in LISTING_AMOUNT_FIELDS + LISTING_COUNT_FIELDS:
+        value = out.get(key)
+        if value is not None and value < 0:
+            raise _validation(f"Montant ou nombre négatif refusé : {FIELD_LABELS_FR.get(key, key)}", key)
+    if out.get("floor") is not None and not (-5 <= out["floor"] <= 200):
+        raise _validation("Étage invalide", "floor")
+    if out.get("construction_year") is not None and not (1000 <= out["construction_year"] <= datetime.now(timezone.utc).year + 5):
+        raise _validation("Année de construction invalide", "construction_year")
+    for key in LISTING_DATE_FIELDS:
+        value = out.get(key)
+        if value is None or value == "":
+            if value == "":
+                out[key] = None
+            continue
         try:
-            out["trades"] = taxonomy.validate_trades(out["trades"])
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-    if out.get("other_qualifications") is not None:
-        try:
-            out["other_qualifications"] = taxonomy.validate_other_qualifications(out["other_qualifications"])
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-    if out.get("department") is not None and out["department"] != "":
+            out[key] = datetime.strptime(str(value)[:10], "%Y-%m-%d").date().isoformat()
+        except ValueError:
+            raise _validation("Date invalide (format AAAA-MM-JJ)", key)
+    merged = {**(current or {}), **{k: v for k, v in out.items() if v is not None}}
+    if merged.get("units_count") is not None and merged.get("units_rented") is not None and merged["units_rented"] > merged["units_count"]:
+        raise _validation("Le nombre de lots loués dépasse le nombre de lots", "units_rented")
+    if merged.get("energy_cost_min") is not None and merged.get("energy_cost_max") is not None \
+            and merged["energy_cost_min"] > merged["energy_cost_max"]:
+        raise _validation("Le coût énergétique minimum dépasse le maximum", "energy_cost_min")
+    if out.get("sale_object") == "parts" or (out.get("owner_type") and merged.get("sale_object") == "parts"):
+        if merged.get("owner_type") not in COMPANY_OWNER_TYPES:
+            raise _validation("La cession des parts n'est possible que pour un bien détenu par une SCI ou une société", "sale_object")
+    if out.get("siret"):
+        siret = re.sub(r"\D", "", str(out["siret"]))
+        if len(siret) != 14:
+            raise _validation("SIRET invalide (14 chiffres attendus)", "siret")
+        out["siret"] = siret
+    if out.get("postal_code"):
+        cp = re.sub(r"\s", "", str(out["postal_code"]))
+        if not re.fullmatch(r"\d{5}", cp) or not taxonomy.departement_from_postal_code(cp):
+            raise _validation("Code postal invalide (5 chiffres)", "postal_code")
+        out["postal_code"] = cp
+        out["department"] = taxonomy.departement_from_postal_code(cp)
+    elif out.get("department"):
         code = taxonomy.normalize_departement(out["department"])
         if not code:
-            # Nom de département (« Finistère », « finistere ») toléré
+            # Nom de département (« Rhône », « rhone ») toléré
             wanted = taxonomy.slugify(out["department"])
             code = next((c for c, name in taxonomy.DEPARTEMENTS.items() if taxonomy.slugify(name) == wanted), "")
         if not code:
-            raise HTTPException(status_code=400, detail="Département inconnu")
+            raise _validation("Département inconnu", "department")
         out["department"] = code
-    # Textes libres publiés sur l'annonce anonyme : téléphones et e-mails masqués (SPEC §4.2 « contrôle anti-coordonnées »)
+    for key in ("company_name", "address", "city", "district", "equipment", "recent_works", "availability_note"):
+        if isinstance(out.get(key), str):
+            out[key] = out[key].strip() or None
     for key in LISTING_FREE_TEXT_FIELDS:
         if isinstance(out.get(key), str):
             out[key] = mask_contacts(out[key])[0]
     if out.get("description") is not None:
         text = out["description"].strip()
         if text and not (200 <= len(text) <= 1500):
-            raise HTTPException(status_code=400, detail="La description doit faire entre 200 et 1 500 caractères")
-        out["description"] = text
+            raise _validation("La description doit faire entre 200 et 1 500 caractères", "description")
+        out["description"] = text or None
     return out
 
-LISTING_FREE_TEXT_FIELDS = ("description", "equipment", "premises", "mandataire_contracts")
+def computed_property_fields(doc: dict) -> dict:
+    """Champs calculés par le serveur à chaque écriture (SPEC §3.4) : titre, rendements, décence énergétique, région"""
+    department = doc.get("department") or taxonomy.departement_from_postal_code(doc.get("postal_code"))
+    fields = {
+        "department": department or None,
+        "region": taxonomy.region_for_departement(department) or doc.get("region") or None,
+        "title": taxonomy.property_title(doc.get("property_type"), doc.get("city"), department, doc.get("surface"),
+                                         doc.get("rooms"), doc.get("units_count")) if doc.get("property_type") else (doc.get("title") or None),
+        "gross_yield": taxonomy.gross_yield(doc.get("rent_monthly"), doc.get("asking_price")),
+        "net_yield": taxonomy.net_yield(doc.get("rent_monthly"), doc.get("asking_price"), doc.get("property_tax"),
+                                        doc.get("non_recoverable_charges")),
+        "dpe_rental": taxonomy.dpe_rental_status(doc.get("dpe_class"), doc.get("lease_type")),
+    }
+    ownership = doc.get("ownership") or {}
+    fields["ownership"] = {"status": "missing", **ownership} if not ownership.get("status") else ownership
+    return fields
 
 class MessageCreate(BaseModel):
     conversation_id: Optional[str] = None
@@ -660,16 +727,14 @@ class MessageCreate(BaseModel):
     property_id: Optional[str] = None
 
 class PropertySearch(BaseModel):
-    rge_types: Optional[List[str]] = None
-    trades: Optional[List[str]] = None
+    property_types: Optional[Union[List[str], str]] = None
+    lease_types: Optional[Union[List[str], str]] = None
     region: Optional[str] = None
     department: Optional[str] = None
-    rge: Optional[bool] = None
-    min_ca: Optional[float] = None
-    max_ca: Optional[float] = None
     min_price: Optional[float] = None
     max_price: Optional[float] = None
-    min_staff: Optional[int] = None
+    min_yield: Optional[float] = None
+    min_surface: Optional[float] = None
     sort: Optional[str] = None
     limit: Optional[int] = None
     page: Optional[int] = None
@@ -679,15 +744,12 @@ KYC_BUYER_STATUSES = ("accepted", "granted")
 
 async def identity_needed_now(user: dict) -> bool:
     """Stripe Identity est facturé à l'usage (SPEC §0.2, §0.6) : la vérification n'est ouverte qu'au moment où elle est
-    exigée. Cédant : dès qu'il a une annonce (brouillon compris) ou une invitation de président en attente, pour signer
-    le mandat. Repreneur : quand une demande de dossier a été acceptée par le cédant (identité exigée au NDA)."""
+    exigée. Vendeur : dès qu'il a une annonce (brouillon compris), pour signer le mandat. Acquéreur : quand une demande de
+    dossier a été acceptée par le vendeur (identité exigée à l'engagement de confidentialité)."""
     role = user.get("role")
     if role == "seller":
-        if await db.properties.find_one({"$or": [{"seller_id": user["id"]}, {"president_id": user["id"]}],
-                                        "status": {"$nin": ["sold", "sold_elsewhere", "removed"]}}, {"_id": 0, "id": 1}):
-            return True
-        return bool(user.get("email") and await db.president_invitations.find_one(
-            {"president_email": user["email"], "status": "pending"}, {"_id": 0, "id": 1}))
+        return bool(await db.properties.find_one({"seller_id": user["id"], "status": {"$nin": ["sold", "sold_elsewhere", "removed"]}},
+                                                 {"_id": 0, "id": 1}))
     if role == "buyer":
         return bool(await db.dataroom_access.find_one({"buyer_id": user["id"], "status": {"$in": list(KYC_BUYER_STATUSES)}},
                                                       {"_id": 0, "id": 1}))
@@ -699,14 +761,15 @@ async def create_verification_session(request: Request, current_user: dict = Dep
     """
     Crée une session de vérification d'identité Stripe Identity (facturée à l'usage).
     409 `already_verified` si l'identité est déjà vérifiée ; 403 `identity_not_needed_yet` hors des étapes qui l'exigent
-    (cédant : mandat ; repreneur : NDA, après acceptation d'une demande de dossier). 3 sessions par heure et par adresse IP.
+    (vendeur : mandat ; acquéreur : engagement de confidentialité, après acceptation d'une demande de dossier). 3 sessions par
+    heure et par adresse IP.
     """
     if is_user_verified(current_user):
         raise api_error(409, "already_verified", "Votre identité est déjà vérifiée")
     if not await identity_needed_now(current_user):
         raise api_error(403, "identity_not_needed_yet",
-                        "La vérification d'identité est demandée à la signature du mandat (cédant) ou de l'accord de "
-                        "confidentialité (repreneur, après acceptation de votre demande de dossier)")
+                        "La vérification d'identité est demandée à la signature du mandat (vendeur) ou de l'engagement de "
+                        "confidentialité (acquéreur, après acceptation de votre demande de dossier)")
     try:
         # Vérifier si une session active existe déjà
         existing_session = await db.kyc_sessions.find_one({
@@ -964,7 +1027,6 @@ async def register(request: Request, user: UserRegister, background_tasks: Backg
         "first_name": (user.first_name or "").strip() or None,
         "last_name": (user.last_name or "").strip() or None,
         "company_name": (user.company_name or "").strip() or None,
-        "siret": None,
         "phone": phone,
         "kyc_status": "pending",
         "notifications_opt_out": False,
@@ -980,12 +1042,6 @@ async def register(request: Request, user: UserRegister, background_tasks: Backg
         if user_doc["buyer_profile"].get("company_name") and not user_doc["company_name"]:
             user_doc["company_name"] = user_doc["buyer_profile"]["company_name"]
         user_doc["profile_score"] = buyer_profile_score(user_doc)
-    elif user.siret:
-        # SIRET facultatif : préremplissage par l'open data, « vérification différée » si indisponible (jamais bloquant)
-        lookup = await seller_siret_lookup(user.siret)
-        user_doc.update(lookup)
-        if not user_doc.get("company_name") and (lookup.get("company_lookup") or {}).get("nom_complet"):
-            user_doc["company_name"] = lookup["company_lookup"]["nom_complet"]
     await db.users.insert_one(user_doc)
     token = issue_token(user_doc)
     user_response = with_profile_score(user_doc)
@@ -1183,8 +1239,7 @@ async def get_profile(current_user: dict = Depends(get_current_user)):
 
 @api_router.put("/auth/profile")
 async def update_profile(data: ProfileUpdate, current_user: dict = Depends(get_current_user)):
-    """Coordonnées, SIRET (vendeur), profil de projet (repreneur, score recalculé) et préférence de notifications.
-    `siret: ''` efface le SIRET."""
+    """Coordonnées, profil de projet (acquéreur, score recalculé) et préférence de notifications"""
     update = {}
     for key in ("first_name", "last_name", "company_name"):
         value = getattr(data, key)
@@ -1195,11 +1250,6 @@ async def update_profile(data: ProfileUpdate, current_user: dict = Depends(get_c
         if phone and not phone_is_valid(phone):
             raise api_error(400, "validation", "Numéro de téléphone invalide : indiquez un numéro à 10 chiffres (format français)", field="phone")
         update["phone"] = phone
-    if data.siret is not None:
-        if data.siret.strip():
-            update.update(await seller_siret_lookup(data.siret))
-        else:
-            update.update({"siret": None, "siret_verification": None, "siret_check": None, "company_lookup": None})
     if data.notifications_opt_out is not None:
         update["notifications_opt_out"] = bool(data.notifications_opt_out)
     if data.buyer_profile is not None and current_user.get("role") == "buyer":
@@ -1238,8 +1288,8 @@ async def anonymize_user(user: dict, now: str, reason: str = "compte supprimé",
                  "kyc_status": "deleted", "identity_verified": False},
         "$unset": {f: "" for f in personal_fields},
     })
-    # Annonces du cédant retirées (jamais supprimées : le mandat y est rattaché)
-    await db.properties.update_many({"$or": [{"seller_id": uid}, {"president_id": uid}], "status": {"$nin": ["sold", "archived", "removed"]}},
+    # Annonces du vendeur retirées (jamais supprimées : le mandat y est rattaché)
+    await db.properties.update_many({"seller_id": uid, "status": {"$nin": ["sold", "archived", "removed"]}},
                                    {"$set": {"status": "archived", "archived_reason": reason, "updated_at": now}})
     await db.properties.update_many({"seller_id": uid}, {"$set": {"seller_email": anonymous_email}})
     # Coordonnées répliquées dans les autres collections
@@ -1248,18 +1298,10 @@ async def anonymize_user(user: dict, now: str, reason: str = "compte supprimé",
     await db.dataroom_access.update_many({"buyer_id": uid}, {"$set": {"buyer_email": anonymous_email}})
     await db.documents.update_many({"signer_id": uid}, {"$set": {"signer_email": anonymous_email}})
     await db.generated_contracts.update_many({"signed_by": original_email}, {"$set": {"signed_by": anonymous_email}})
-    await db.properties.update_many({"$or": [{"president_id": uid}, {"president_email": original_email}]},
-                                   {"$set": {"president_email": anonymous_email},
-                                    "$unset": {"president_firstname": "", "president_lastname": "", "president_phone": ""}})
-    await db.president_invitations.update_many({"president_email": original_email},
-                                               {"$set": {"president_email": anonymous_email},
-                                                "$unset": {"president_firstname": "", "president_lastname": "", "president_phone": ""}})
-    await db.president_invitations.update_many({"invited_by_email": original_email}, {"$set": {"invited_by_email": anonymous_email}})
     # Journaux (la chaîne d'empreintes d'audit ne porte pas l'adresse e-mail : elle reste vérifiable)
     await db.audit_logs.update_many({"actor_email": original_email}, {"$set": {"actor_email": anonymous_email}})
     await db.audit_logs.update_many({"target_email": original_email}, {"$set": {"target_email": anonymous_email}})
     await db.dataroom_access_logs.update_many({"viewer_email": original_email}, {"$set": {"viewer_email": anonymous_email}})
-    await db.commercial_info_requests.update_many({"buyer_id": uid}, {"$set": {"buyer_email": anonymous_email}})
     # Factures conservées (obligation comptable : nom et adresse du débiteur) ; l'e-mail n'y est pas nécessaire
     await db.invoices.update_many({"debtor.user_id": uid}, {"$set": {"debtor.email": anonymous_email}})
     await db.newsletter_subscribers.delete_many({"email": original_email})
@@ -1267,7 +1309,7 @@ async def anonymize_user(user: dict, now: str, reason: str = "compte supprimé",
     await db.test_emails.delete_many({"to": original_email.lower()})
     # Données sans valeur contractuelle : supprimées
     for coll in (db.alerts, db.favorites, *(() if keep_identity_report else (db.kyc_sessions,)), db.signature_otps, db.login_otps,
-                 db.email_verifications, db.password_resets, db.dirigeant_verifications):
+                 db.email_verifications, db.password_resets):
         await coll.delete_many({"user_id": uid})
     await db.password_resets.delete_many({"user_id": uid})
     await db.followups.delete_many({"buyer_id": uid})
@@ -1279,7 +1321,7 @@ async def anonymize_user(user: dict, now: str, reason: str = "compte supprimé",
 @api_router.delete("/auth/account")
 async def delete_account(data: AccountDeletion, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     """Suppression du compte : données personnelles anonymisées ; mandats, factures et preuves de signature conservés
-    (obligations légales) avec le même user_id. Les annonces du cédant sont retirées."""
+    (obligations légales) avec le même user_id. Les annonces du vendeur sont retirées."""
     if current_user.get("role") == "admin":
         raise HTTPException(status_code=403, detail="Le compte administrateur ne peut pas être supprimé depuis l'espace en ligne")
     user = await db.users.find_one({"id": current_user["id"]})
@@ -1305,11 +1347,9 @@ async def export_account(current_user: dict = Depends(get_current_user)):
     # du mandant…) répliquées dans les messages, offres et contrats restent confidentielles (aucune coordonnée entre membres)
     own = {v.strip().lower() for v in (current_user.get("email"), current_user.get("phone")) if isinstance(v, str) and v.strip()}
     properties = []
-    for property in await rows(db.properties, {"$or": [{"seller_id": uid}, {"president_id": uid}]}):
-        if property.get("seller_id") != uid:
-            for field in ("mandant_address", "mandant_capacity"):
-                property.pop(field, None)
-        properties.append(strip_foreign_contacts(property, own))
+    for property in await rows(db.properties, {"seller_id": uid}):
+        own_property = own | {str(property.get("address")).strip().lower()} if property.get("address") else own
+        properties.append(strip_foreign_contacts(property, own_property))
     data = {
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "account": {k: v for k, v in current_user.items() if k not in ("password_hash",)},
@@ -1342,809 +1382,7 @@ def strip_foreign_contacts(obj, own: set):
         return out
     return obj
 
-# ============ RGE VERIFICATION ============
-# Proxys publics vers l'open data (ADEME, recherche-entreprises) : quotas tiers partagés par tous les utilisateurs
-# (une IP qui boucle ferait répondre 429 aux vrais contrôles d'annonce) → limite par adresse IP et cache mémoire
-OPENDATA_RATE_LIMIT = "30/minute"
-RGE_VERIFY_CACHE_SECONDS = 24 * 3600
-_rge_verify_cache: Dict[str, tuple] = {}
-
-def clean_siret_param(siret: str) -> str:
-    digits = re.sub(r"\D", "", siret or "")
-    if len(digits) != 14:
-        raise HTTPException(status_code=400, detail="SIRET invalide (14 chiffres requis)")
-    return digits
-
-@api_router.get("/rge/verify/{siret}")
-@limiter.limit(OPENDATA_RATE_LIMIT)
-async def verify_rge_route(request: Request, siret: str):
-    """Vérifie si une entreprise possède la certification RGE par SIRET (réponse gardée 24 h en mémoire)"""
-    siret = clean_siret_param(siret)
-    now = datetime.now(timezone.utc).timestamp()
-    cached = _rge_verify_cache.get(siret)
-    if cached and cached[0] > now:
-        return cached[1]
-    result = await verify_rge(siret)
-    if isinstance(result, dict) and not result.get("error"):
-        if len(_rge_verify_cache) > 5000:
-            _rge_verify_cache.clear()
-        _rge_verify_cache[siret] = (now + RGE_VERIFY_CACHE_SECONDS, result)
-    return result
-
-async def verify_rge(siret: str):
-    """
-    Vérifie si une entreprise possède la certification RGE par SIRET
-    """
-    try:
-        # Option 1 : API Data Fair ADEME (gratuite, publique)
-        # Utilise 'q' pour la recherche full-text du SIRET
-        response = await asyncio.to_thread(requests.get, 
-            f"https://data.ademe.fr/data-fair/api/v1/datasets/liste-des-entreprises-rge-2/lines",
-            params={"q": siret, "size": 5},
-            timeout=10
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            if data.get("total", 0) > 0:
-                # Filtrer les résultats pour trouver le SIRET exact
-                for result in data.get("results", []):
-                    if result.get("siret") == siret:
-                        return {
-                            "verified": True,
-                            "siret": result.get("siret"),
-                            "nom_entreprise": result.get("nom_entreprise", ""),
-                            "code_postal": result.get("code_postal"),
-                            "commune": result.get("commune"),
-                            "adresse": result.get("adresse"),
-                            "telephone": result.get("telephone"),
-                            "email": result.get("email"),
-                            "domaine": result.get("domaine", ""),
-                            "meta_domaine": result.get("meta_domaine", ""),
-                            "nom_qualification": result.get("nom_qualification", ""),
-                            "organisme": result.get("organisme"),
-                            "date_debut_validite": result.get("lien_date_debut"),
-                            "date_fin_validite": result.get("lien_date_fin"),
-                            "data_source": "ADEME Data Fair API"
-                        }
-        
-        # Si pas trouvé dans le nouveau dataset, essayer l'ancien
-        response_old = await asyncio.to_thread(requests.get, 
-            f"https://data.ademe.fr/data-fair/api/v1/datasets/liste-des-entreprises-rge-1/lines",
-            params={"q": siret, "size": 5},
-            timeout=10
-        )
-        
-        if response_old.status_code == 200:
-            data_old = response_old.json()
-            if data_old.get("total", 0) > 0:
-                for result in data_old.get("results", []):
-                    if result.get("siret") == siret:
-                        return {
-                            "verified": True,
-                            "siret": result.get("siret"),
-                            "nom_entreprise": result.get("nom_entreprise", result.get("nom", "")),
-                            "data": result,
-                            "data_source": "ADEME Data Fair (legacy)"
-                        }
-        
-        return {
-            "verified": False, 
-            "message": "SIRET non trouvé dans la base RGE",
-            "siret_recherche": siret,
-            "info": "Vérifiez que le SIRET est correct (14 chiffres) et que l'entreprise possède bien une certification RGE valide"
-        }
-        
-    except requests.Timeout:
-        return {
-            "verified": False, 
-            "message": "Timeout lors de la vérification RGE",
-            "error": "API ADEME non disponible"
-        }
-    except Exception as e:
-        return {
-            "verified": False, 
-            "message": f"Erreur lors de la vérification: {str(e)}",
-            "error": str(e)
-        }
-
-@api_router.get("/rge/search")
-@limiter.limit(OPENDATA_RATE_LIMIT)
-async def search_rge(request: Request, q: str, limit: int = 10):
-    """
-    Recherche d'entreprises RGE par nom ou SIRET
-    Utilise une recherche par nom exact puis full-text pour de meilleurs résultats
-    """
-    q = (q or "").strip()[:100]
-    if len(q) < 3:
-        raise HTTPException(status_code=400, detail="Saisissez au moins 3 caractères")
-    limit = max(1, min(int(limit or 10), 20))
-    try:
-        all_results = []
-        seen_sirets = set()
-        
-        # Recherche 1: Par nom exact (meilleurs résultats pour les noms d'entreprise)
-        response_exact = await asyncio.to_thread(requests.get, 
-            f"https://data.ademe.fr/data-fair/api/v1/datasets/liste-des-entreprises-rge-2/lines",
-            params={"nom_entreprise_in": q.upper(), "size": limit},
-            timeout=10
-        )
-        
-        if response_exact.status_code == 200:
-            data_exact = response_exact.json()
-            for result in data_exact.get("results", []):
-                siret = result.get("siret")
-                if siret and siret not in seen_sirets:
-                    seen_sirets.add(siret)
-                    all_results.append({
-                        "siret": siret,
-                        "nom_entreprise": result.get("nom_entreprise", ""),
-                        "code_postal": result.get("code_postal"),
-                        "commune": result.get("commune"),
-                        "adresse": result.get("adresse"),
-                        "telephone": result.get("telephone"),
-                        "email": result.get("email"),
-                        "domaine": result.get("domaine", ""),
-                        "meta_domaine": result.get("meta_domaine", ""),
-                        "nom_qualification": result.get("nom_qualification", ""),
-                        "organisme": result.get("organisme"),
-                        "date_debut_validite": result.get("lien_date_debut"),
-                        "date_fin_validite": result.get("lien_date_fin"),
-                    })
-        
-        # Recherche 2: Full-text si pas assez de résultats
-        if len(all_results) < limit:
-            response_ft = await asyncio.to_thread(requests.get, 
-                f"https://data.ademe.fr/data-fair/api/v1/datasets/liste-des-entreprises-rge-2/lines",
-                params={"q": q, "size": limit},
-                timeout=10
-            )
-            
-            if response_ft.status_code == 200:
-                data_ft = response_ft.json()
-                for result in data_ft.get("results", []):
-                    siret = result.get("siret")
-                    if siret and siret not in seen_sirets:
-                        seen_sirets.add(siret)
-                        all_results.append({
-                            "siret": siret,
-                            "nom_entreprise": result.get("nom_entreprise", ""),
-                            "code_postal": result.get("code_postal"),
-                            "commune": result.get("commune"),
-                            "adresse": result.get("adresse"),
-                            "telephone": result.get("telephone"),
-                            "email": result.get("email"),
-                            "domaine": result.get("domaine", ""),
-                            "meta_domaine": result.get("meta_domaine", ""),
-                            "nom_qualification": result.get("nom_qualification", ""),
-                            "organisme": result.get("organisme"),
-                            "date_debut_validite": result.get("lien_date_debut"),
-                            "date_fin_validite": result.get("lien_date_fin"),
-                        })
-        
-        return {
-            "total": len(all_results),
-            "results": all_results[:limit],
-            "query": q
-        }
-        
-    except Exception as e:
-        return {
-            "total": 0,
-            "results": [],
-            "error": str(e)
-        }
-
-@api_router.get("/rge/categories")
-async def get_rge_categories():
-    """
-    Retourne la liste des catégories/domaines RGE disponibles
-    """
-    return {
-        "categories": [
-            {"id": "isolation_interieur", "label": "Isolation par l'intérieur", "domaine": "Isolation par l'intérieur des murs ou rampants de toitures ou plafonds"},
-            {"id": "isolation_exterieur", "label": "Isolation par l'extérieur", "domaine": "Isolation des murs par l'extérieur"},
-            {"id": "isolation_toiture", "label": "Isolation toiture/terrasse", "domaine": "Isolation des toitures terrasses ou des toitures par l'extérieur"},
-            {"id": "isolation_combles", "label": "Isolation combles perdus", "domaine": "Isolation des combles perdus ou des rampants de toiture"},
-            {"id": "isolation_plancher", "label": "Isolation plancher bas", "domaine": "Isolation du plancher de combles perdus ou du plancher bas"},
-            {"id": "menuiserie", "label": "Menuiseries extérieures", "domaine": "Fenêtres, volets, portes donnant sur l'extérieur"},
-            {"id": "chauffage_bois", "label": "Chauffage au bois", "domaine": "Appareil indépendant de chauffage au bois"},
-            {"id": "chauffage_gaz", "label": "Chaudière gaz/fioul", "domaine": "Chaudière condensation ou micro-cogénération gaz ou fioul"},
-            {"id": "pac_chauffage", "label": "Pompe à chaleur chauffage", "domaine": "Pompe à chaleur air/eau ou eau/eau"},
-            {"id": "pac_ecs", "label": "Chauffe-eau thermodynamique", "domaine": "Chauffe-eau thermodynamique"},
-            {"id": "solaire_thermique", "label": "Solaire thermique", "domaine": "Capteurs solaires thermiques"},
-            {"id": "photovoltaique", "label": "Photovoltaïque", "domaine": "Panneaux photovoltaïques"},
-            {"id": "ventilation", "label": "Ventilation", "domaine": "Ventilation mécanique contrôlée"},
-            {"id": "audit_energetique", "label": "Audit énergétique", "domaine": "Audit énergétique"},
-        ]
-    }
-
-@api_router.get("/rge/property/{siret}/qualifications")
-@limiter.limit(OPENDATA_RATE_LIMIT)
-async def get_property_qualifications_route(request: Request, siret: str):
-    """Qualifications RGE d'une entreprise (page publique « Vérifier une entreprise RGE »)"""
-    return await get_property_qualifications(clean_siret_param(siret))
-
-async def get_property_qualifications(siret: str):
-    """
-    Récupère toutes les qualifications RGE d'une entreprise par son SIRET
-    """
-    try:
-        response = await asyncio.to_thread(requests.get, 
-            f"https://data.ademe.fr/data-fair/api/v1/datasets/liste-des-entreprises-rge-2/lines",
-            params={"siret_eq": siret, "size": 50},
-            timeout=10
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            if data.get("total", 0) > 0:
-                results = data.get("results", [])
-                company_info = {
-                    "siret": siret,
-                    "nom_entreprise": results[0].get("nom_entreprise", "") if results else "",
-                    "code_postal": results[0].get("code_postal") if results else None,
-                    "commune": results[0].get("commune") if results else None,
-                    "adresse": results[0].get("adresse") if results else None,
-                    "telephone": results[0].get("telephone") if results else None,
-                    "email": results[0].get("email") if results else None,
-                }
-                
-                # Extraire tous les domaines uniques
-                domaines = list(set(r.get("domaine", "") for r in results if r.get("domaine")))
-                qualifications = list(set(r.get("nom_qualification", "") for r in results if r.get("nom_qualification")))
-                organismes = list(set(r.get("organisme", "") for r in results if r.get("organisme")))
-                # Détail par qualification (dates de validité, organisme exact) : lu par transmissibility.normalize_ademe
-                details, seen = [], set()
-                for r in results:
-                    key = (r.get("nom_qualification"), r.get("organisme"), r.get("domaine"), r.get("lien_date_fin"))
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    details.append({"nom_qualification": r.get("nom_qualification", ""), "organisme": r.get("organisme", ""),
-                                    "domaine": r.get("domaine", ""), "meta_domaine": r.get("meta_domaine", ""),
-                                    "lien_date_debut": r.get("lien_date_debut"), "lien_date_fin": r.get("lien_date_fin"),
-                                    "nom_certificat": r.get("nom_certificat", ""), "url_qualification": r.get("url_qualification", "")})
-
-                return {
-                    "found": True,
-                    "company": company_info,
-                    "domaines": domaines,
-                    "qualifications": qualifications,
-                    "organismes": organismes,
-                    "details": details,
-                    "total_certifications": data.get("total", 0)
-                }
-        
-        return {
-            "found": False,
-            "message": "Entreprise non trouvée dans la base RGE"
-        }
-        
-    except Exception as e:
-        return {
-            "found": False,
-            "error": str(e)
-        }
-
-# ============ INPI/RNE - VÉRIFICATION DIRIGEANTS ============
-
-# Cache pour le token INPI (évite de se reconnecter à chaque requête)
-INPI_TOKEN_CACHE = {"token": None, "expires_at": None}
-
-async def get_inpi_token():
-    """
-    Obtient un token JWT pour l'API INPI/RNE.
-    Utilise les identifiants stockés en variables d'environnement.
-    """
-    # Vérifier si le token en cache est encore valide
-    if INPI_TOKEN_CACHE["token"] and INPI_TOKEN_CACHE["expires_at"]:
-        if datetime.now(timezone.utc) < INPI_TOKEN_CACHE["expires_at"]:
-            return INPI_TOKEN_CACHE["token"]
-    
-    username = os.environ.get("INPI_USERNAME", "")
-    password = os.environ.get("INPI_PASSWORD", "")
-    
-    if not username or not password:
-        return None
-    
-    try:
-        response = await asyncio.to_thread(requests.post, 
-            "https://registre-national-entreprises.inpi.fr/api/sso/login",
-            json={"username": username, "password": password},
-            timeout=10
-        )
-        
-        if response.status_code == 200:
-            token = response.json().get("token")
-            # Token valide pendant 1 heure (avec marge de sécurité de 50 minutes)
-            INPI_TOKEN_CACHE["token"] = token
-            INPI_TOKEN_CACHE["expires_at"] = datetime.now(timezone.utc) + timedelta(minutes=50)
-            return token
-    except Exception as e:
-        logging.error(f"Erreur authentification INPI: {e}")
-    
-    return None
-
-def _dirigeant_legacy(d: dict) -> dict:
-    """Forme attendue par DirigeantVerification.jsx (nom_complet, prenom, nom, qualite) à partir d'un dirigeant opendata"""
-    if not d:
-        return None
-    if d.get("type") == "personne morale" or d.get("type_personne") == "morale":
-        denomination = d.get("denomination") or d.get("nom") or ""
-        return {"nom": denomination, "prenom": "", "nom_complet": denomination, "qualite": d.get("qualite") or "Dirigeant",
-                "siren_pm": d.get("siren") or d.get("siren_pm"), "type_personne": "morale"}
-    prenoms = d.get("prenoms") or d.get("prenoms_complets") or d.get("prenom") or ""
-    prenom = (prenoms.split() or [""])[0]
-    nom = d.get("nom") or ""
-    return {"nom": nom, "prenom": prenom, "prenoms_complets": prenoms, "nom_complet": f"{prenom} {nom}".strip(),
-            "qualite": d.get("qualite") or "Dirigeant", "annee_naissance": d.get("annee_de_naissance") or d.get("annee_naissance"),
-            "type_personne": "physique"}
-
-async def _inpi_dirigeants(siren_clean: str) -> Optional[dict]:
-    """Second choix : API INPI/RNE (uniquement si INPI_USERNAME est configuré). Même forme de réponse que
-    get_property_dirigeants, `source` = INPI_RNE ; None si indisponible."""
-    token = await get_inpi_token()
-    if not token:
-        return None
-    try:
-        response = await asyncio.to_thread(requests.get,
-            f"https://registre-national-entreprises.inpi.fr/api/properties/{siren_clean}",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=15
-        )
-        if response.status_code != 200:
-            return None
-        data = response.json()
-        company_info = {
-            "siren": siren_clean,
-            "denomination": data.get("companyName") or data.get("denomination"),
-            "forme_juridique": data.get("legalForm") or data.get("formeJuridique"),
-            "date_creation": data.get("creationDate") or data.get("dateCreation"),
-        }
-        dirigeants = []
-        for rep in data.get("representatives", []) or data.get("dirigeants", []):
-            first = rep.get("firstName") or rep.get("prenom", "")
-            last = rep.get("lastName") or rep.get("nom", "")
-            dirigeants.append({
-                "type": "personne physique" if first else "personne morale",
-                "nom": last, "prenoms": first, "denomination": last if not first else None,
-                "qualite": rep.get("role") or rep.get("qualite") or rep.get("fonction", "Dirigeant"),
-                "date_debut": rep.get("startDate") or rep.get("dateDebut"),
-            })
-        if not dirigeants:
-            return None
-        legacy = [_dirigeant_legacy(d) for d in dirigeants]
-        return {"found": True, "available": True, "source": "INPI_RNE", "company": company_info, "dirigeants": dirigeants,
-                "dirigeants_legacy": legacy,
-                "president": next((d for d in legacy if "président" in d.get("qualite", "").lower()), legacy[0])}
-    except Exception as e:
-        logging.warning(f"Erreur API INPI: {e}")
-        return None
-
-@api_router.get("/property/{siren}/dirigeants")
-@limiter.limit(OPENDATA_RATE_LIMIT)
-async def get_property_dirigeants(request: Request, siren: str):
-    """
-    Dirigeants d'une entreprise d'après le registre national (recherche-entreprises, gratuit, sans clé).
-    INPI/RNE en second choix uniquement si l'open data est indisponible et si INPI_USERNAME est configuré.
-    """
-    siren_clean = siren.replace(" ", "")[:9]
-    if len(siren_clean) != 9 or not siren_clean.isdigit():
-        raise HTTPException(status_code=400, detail="SIREN invalide (9 chiffres requis)")
-    property = await opendata.lookup_siren(siren_clean)
-    if property.get("found"):
-        dirigeants = [_dirigeant_legacy(d) for d in property.get("dirigeants") or []]
-        president = next((d for d in dirigeants if any(q in d["qualite"].lower() for q in ("président", "gérant", "directeur général"))),
-                         dirigeants[0] if dirigeants else None)
-        return {"found": True, "available": True, "source": "API_GOUV_ENTREPRISES",
-                "company": {"siren": property["siren"], "denomination": property.get("nom_complet"),
-                            "forme_juridique": property.get("forme_juridique"), "date_creation": property.get("date_creation"),
-                            "siege": property.get("adresse"), "code_postal": property.get("code_postal"),
-                            "commune": property.get("commune"), "departement": property.get("departement"),
-                            "naf": property.get("naf"), "etat": property.get("etat")},
-                "dirigeants": dirigeants, "president": president}
-    if not property.get("available") and os.environ.get("INPI_USERNAME"):
-        inpi = await _inpi_dirigeants(siren_clean)
-        if inpi:
-            return {**inpi, "dirigeants": inpi["dirigeants_legacy"]}
-    return {"found": False, "available": property.get("available", False), "source": None,
-            "message": property.get("message") or "Impossible de récupérer les informations de l'entreprise"}
-
-@api_router.post("/property/{siren}/verify-dirigeant")
-async def verify_user_is_dirigeant(
-    siren: str,
-    current_user: dict = Depends(get_current_user)
-):
-    """
-    Vérifie si l'utilisateur connecté correspond à un dirigeant de l'entreprise (registre national des entreprises).
-    Compare le nom certifié (Stripe Identity) s'il existe, sinon le nom déclaré.
-    """
-    # Nom certifié par Stripe Identity en priorité, sinon nom déclaré à l'inscription
-    identity_source = "verified_identity" if current_user.get("verified_last_name") else "declared"
-    user_firstname = (current_user.get("verified_first_name") or current_user.get("first_name") or "").lower().strip()
-    user_lastname = (current_user.get("verified_last_name") or current_user.get("last_name") or "").lower().strip()
-    user_fullname = f"{user_firstname} {user_lastname}".strip()
-    
-    siren_clean = siren.replace(" ", "")[:9]
-    if not siren_clean.isdigit() or len(siren_clean) != 9:
-        raise HTTPException(status_code=400, detail="SIREN invalide")
-    if not user_fullname:
-        return {
-            "verified": False,
-            "status": "unavailable",
-            "reason": "missing_identity",
-            "message": "Votre nom n'est pas renseigné : complétez votre vérification d'identité",
-            "can_invite_president": True
-        }
-    result = await _match_dirigeant(siren_clean, user_firstname, user_lastname, user_fullname)
-    # Résultat conservé côté serveur : le client ne peut pas se déclarer « dirigeant vérifié »
-    await db.dirigeant_verifications.update_one(
-        {"user_id": current_user["id"], "siren": siren_clean},
-        {"$set": {
-            "user_id": current_user["id"],
-            "siren": siren_clean,
-            "verified": bool(result.get("verified")),
-            "status": result.get("status"),
-            "reason": result.get("reason"),
-            "identity_source": identity_source,
-            "checked_at": datetime.now(timezone.utc).isoformat()
-        }},
-        upsert=True
-    )
-    result["identity_source"] = identity_source
-    return result
-
-async def _match_dirigeant(siren_clean: str, user_firstname: str, user_lastname: str, user_fullname: str) -> dict:
-    """Comparaison « prénom nom » avec les dirigeants du registre (opendata.match_dirigeant) ; INPI en second choix
-    seulement si l'open data n'a rien donné d'exploitable et si INPI_USERNAME est défini."""
-    r = await opendata.match_dirigeant(siren_clean, user_firstname, user_lastname)
-    if (r["status"] == "unavailable" and r.get("reason") in ("api_unavailable", "no_dirigeants_data")
-            and os.environ.get("INPI_USERNAME")):
-        inpi = await _inpi_dirigeants(siren_clean)
-        if inpi and inpi.get("dirigeants"):
-            status, d = opendata.match_in_list(inpi["dirigeants"], user_firstname, user_lastname)
-            r = {**r, "status": status, "verified": status != "no_match", "dirigeant": d, "source": "INPI_RNE",
-                 "reason": None if status != "no_match" else "name_mismatch", "dirigeants": inpi["dirigeants"],
-                 "matched_as": (d or {}).get("qualite") or "Dirigeant" if d else None,
-                 "message": ("Dirigeant confirmé par le registre INPI" if status != "no_match"
-                             else "Vous n'apparaissez pas comme dirigeant de cette société au registre national")}
-    president = next((d for d in r.get("dirigeants") or [] if d.get("type") == "personne physique"), None)
-    return {"verified": bool(r.get("verified")), "status": r["status"], "reason": r.get("reason"), "message": r.get("message"),
-            "matched_as": r.get("matched_as"), "dirigeant": _dirigeant_legacy(r["dirigeant"]) if r.get("dirigeant") else None,
-            "president": _dirigeant_legacy(president) if president else None, "company": r.get("company"),
-            "has_personne_morale": r.get("has_personne_morale", False), "source": r.get("source"),
-            "can_invite_president": r["status"] != "match_exact"}
-
-
-# ============ INVITATION PRÉSIDENT ============
-
-class PresidentInvitation(BaseModel):
-    property_id: str
-    president_firstname: str = Field(..., min_length=1, max_length=100)
-    president_lastname: str = Field(..., min_length=1, max_length=100)
-    president_email: EmailStr
-    president_phone: Optional[str] = Field(None, max_length=30)
-    message: Optional[str] = Field(None, max_length=1000)
-
-# Invitations du président : au plus 3 par annonce et 10 par compte sur 24 h (en plus de la limite par adresse IP)
-PRESIDENT_INVITES_PER_PROPERTY_PER_DAY = 3
-PRESIDENT_INVITES_PER_USER_PER_DAY = 10
-
-@api_router.post("/listings/{property_id}/invite-president")
-@limiter.limit("5/hour")
-async def invite_president(
-    request: Request,
-    property_id: str,
-    invitation: PresidentInvitation,
-    current_user: dict = Depends(get_current_user)
-):
-    """
-    Invite le président de l'entreprise à valider l'annonce.
-    Envoie un email avec un lien d'authentification.
-    """
-    # E-mail envoyé à une adresse tierce depuis l'expéditeur de la plateforme : adresse confirmée et volume borné
-    require_verified_email(current_user)
-    # Vérifier que l'annonce existe et appartient à l'utilisateur
-    property = await db.properties.find_one({"id": property_id})
-    if not property:
-        raise HTTPException(status_code=404, detail="Annonce non trouvée")
-    
-    if property["seller_id"] != current_user["id"]:
-        raise HTTPException(status_code=403, detail="Vous n'êtes pas autorisé à modifier cette annonce")
-    
-    if invitation.president_email.strip().lower() == current_user["email"].strip().lower():
-        raise HTTPException(status_code=400, detail="Vous ne pouvez pas vous inviter vous-même comme président")
-
-    since = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
-    if (await db.president_invitations.count_documents({"property_id": property_id, "created_at": {"$gte": since}})
-            >= PRESIDENT_INVITES_PER_PROPERTY_PER_DAY
-            or await db.president_invitations.count_documents({"invited_by": current_user["id"], "created_at": {"$gte": since}})
-            >= PRESIDENT_INVITES_PER_USER_PER_DAY):
-        raise HTTPException(status_code=429, detail="Trop d'invitations envoyées aujourd'hui. Réessayez demain.")
-    # Une seule invitation en attente par annonce : la précédente est remplacée
-    await db.president_invitations.update_many({"property_id": property_id, "status": "pending"},
-                                               {"$set": {"status": "replaced"}})
-    
-    # Générer un token d'invitation unique
-    invitation_token = str(uuid.uuid4())
-    invitation_expires = datetime.now(timezone.utc) + timedelta(days=30)
-    
-    # Sauvegarder l'invitation
-    invitation_doc = {
-        "id": str(uuid.uuid4()),
-        "property_id": property_id,
-        "invited_by": current_user["id"],
-        "invited_by_email": current_user["email"],
-        "president_firstname": invitation.president_firstname,
-        "president_lastname": invitation.president_lastname,
-        "president_email": invitation.president_email,
-        "president_phone": invitation.president_phone,
-        "token": invitation_token,
-        "status": "pending",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "expires_at": invitation_expires.isoformat(),
-        "message": invitation.message
-    }
-    
-    await db.president_invitations.insert_one(invitation_doc)
-    
-    # Mettre à jour l'annonce avec le statut d'invitation
-    await db.properties.update_one(
-        {"id": property_id},
-        {"$set": {
-            "president_invitation_pending": True,
-            "president_invitation_id": invitation_doc["id"],
-            "president_email": invitation.president_email,
-            "updated_at": datetime.now(timezone.utc).isoformat()
-        }}
-    )
-    
-    # Envoyer l'email d'invitation
-    invitation_link = site_url(f"/president/accept/{invitation_token}")
-    
-    # Toutes les valeurs saisies sont échappées (aucun HTML ni lien injecté dans un e-mail envoyé par la plateforme)
-    sender_name = html_escape(current_user.get('first_name') or 'Expéditeur')
-    message_part = ""
-    if invitation.message:
-        message_part = f'<p><strong>Message de {sender_name}:</strong> {html_escape(invitation.message)}</p>'
-    president_name = html_escape(f"{invitation.president_firstname.strip()} {invitation.president_lastname.strip()}")
-    inviter = html_escape(f"{current_user.get('first_name') or ''} {current_user.get('last_name') or ''}".strip())
-    
-    email_content = f"""
-    <h2>Invitation à valider une annonce de cession</h2>
-    <p>Bonjour {president_name},</p>
-    <p>{inviter} ({html_escape(current_user['email'])}) souhaite publier une annonce de cession pour votre entreprise sur {html_escape(site_name())}.</p>
-    <p>En tant que président/dirigeant de l'entreprise, votre validation est requise pour mettre l'annonce en ligne.</p>
-    {message_part}
-    <p><a href="{invitation_link}" style="display:inline-block;padding:12px 24px;background:#090e1c;color:white;text-decoration:none;border-radius:8px;">Voir et valider l'annonce</a></p>
-    <p>Ce lien est valable 30 jours.</p>
-    <p>Si vous n'êtes pas concerné par cette demande, vous pouvez ignorer cet email.</p>
-    <p>Cordialement,<br>L'équipe {site_name()}</p>
-    """
-    
-    try:
-        await send_brevo_email(
-            to_email=invitation.president_email,
-            to_name=re.sub(r"[<>\"]", "", f"{invitation.president_firstname} {invitation.president_lastname}")[:120],
-            subject="Validation requise - Annonce de cession d'entreprise RGE",
-            html_content=email_content
-        )
-    except Exception as e:
-        logging.error(f"Erreur envoi email invitation: {e}")
-    
-    return {
-        "success": True,
-        "message": f"Invitation envoyée à {invitation.president_email}",
-        "invitation_id": invitation_doc["id"],
-        "expires_at": invitation_expires.isoformat()
-    }
-
-@api_router.get("/president/invitation/{token}")
-async def get_president_invitation(token: str):
-    """
-    Récupère les détails d'une invitation pour le président.
-    """
-    invitation = await db.president_invitations.find_one({"token": token})
-    
-    if not invitation:
-        raise HTTPException(status_code=404, detail="Invitation non trouvée ou expirée")
-    
-    # Vérifier l'expiration
-    expires_at = datetime.fromisoformat(invitation["expires_at"].replace("Z", "+00:00"))
-    if datetime.now(timezone.utc) > expires_at:
-        raise HTTPException(status_code=410, detail="Cette invitation a expiré")
-    
-    # Récupérer l'annonce
-    property = await db.properties.find_one({"id": invitation["property_id"]})
-    
-    return {
-        "invitation": {
-            "id": invitation["id"],
-            "president_firstname": invitation["president_firstname"],
-            "president_lastname": invitation["president_lastname"],
-            "president_email": invitation["president_email"],
-            "invited_by_email": invitation["invited_by_email"],
-            "status": invitation["status"],
-            "message": invitation.get("message"),
-            "created_at": invitation["created_at"],
-            "expires_at": invitation["expires_at"]
-        },
-        "company": {
-            "id": property["id"] if property else None,
-            "rge_types": property.get("rge_types", []) if property else [],
-            "region": property.get("region") if property else None,
-            "asking_price": property.get("asking_price") if property else None,
-            "staff_count": property.get("staff_count") if property else None
-        } if property else None
-    }
-
-@api_router.post("/president/accept/{token}")
-async def accept_president_invitation(
-    token: str,
-    current_user: dict = Depends(get_current_user)
-):
-    """
-    Le président accepte l'invitation et devient co-propriétaire de l'annonce.
-    Il doit d'abord créer un compte et vérifier son identité.
-    """
-    invitation = await db.president_invitations.find_one({"token": token})
-    
-    if not invitation:
-        raise HTTPException(status_code=404, detail="Invitation non trouvée")
-    
-    if invitation["status"] == "accepted":
-        raise HTTPException(status_code=400, detail="Cette invitation a déjà été acceptée")
-    if invitation["status"] != "pending":
-        raise HTTPException(status_code=400, detail="Cette invitation n'est plus valide")
-    expires_at = invitation.get("expires_at")
-    if expires_at and datetime.fromisoformat(expires_at.replace("Z", "+00:00")) < datetime.now(timezone.utc):
-        raise HTTPException(status_code=410, detail="Cette invitation a expiré")
-    if current_user["id"] == invitation.get("invited_by"):
-        raise HTTPException(status_code=403, detail="Le créateur de l'annonce ne peut pas valider sa propre invitation")
-    
-    # Vérifier que l'email correspond
-    if current_user["email"].lower() != invitation["president_email"].lower():
-        raise HTTPException(
-            status_code=403, 
-            detail=f"Cette invitation est destinée à {invitation['president_email']}"
-        )
-    
-    # Vérifier que le président a vérifié son identité
-    if not is_user_verified(current_user):
-        raise HTTPException(
-            status_code=403,
-            detail="Vous devez vérifier votre identité avant d'accepter cette invitation"
-        )
-    
-    # Mettre à jour l'invitation
-    await db.president_invitations.update_one(
-        {"token": token},
-        {"$set": {
-            "status": "accepted",
-            "accepted_by": current_user["id"],
-            "accepted_at": datetime.now(timezone.utc).isoformat()
-        }}
-    )
-    
-    # Mettre à jour l'annonce - le président devient co-propriétaire
-    await db.properties.update_one(
-        {"id": invitation["property_id"]},
-        {"$set": {
-            "president_id": current_user["id"],
-            "president_email": current_user["email"],
-            "president_verified": True,
-            "president_invitation_pending": False,
-            "dirigeant_verified": True,
-            "can_be_published": True,
-            "updated_at": datetime.now(timezone.utc).isoformat()
-        }}
-    )
-    
-    # Le président (identité vérifiée) a validé : l'annonce est mise en ligne automatiquement
-    property = await db.properties.find_one({"id": invitation["property_id"]}, {"_id": 0})
-    if property and property.get("status") == "pending" and (not mandate_required() or await has_signed_mandate(property)):
-        await publish_property(property)
-    
-    # Notifier le créateur de l'annonce
-    invitation_creator = await db.users.find_one({"id": invitation["invited_by"]})
-    if invitation_creator:
-        try:
-            await send_brevo_email(
-                to_email=invitation_creator["email"],
-                to_name=f"{invitation_creator.get('first_name', '')} {invitation_creator.get('last_name', '')}",
-                subject="Validation acceptée par le président",
-                html_content=f"""
-                <h2>Bonne nouvelle !</h2>
-                <p>{html_escape(invitation['president_firstname'])} {html_escape(invitation['president_lastname'])} a validé votre annonce.</p>
-                <p>Votre annonce est maintenant en ligne et visible par les acquéreurs.</p>
-                """
-            )
-        except Exception as e:
-            logging.error(f"Erreur notification créateur: {e}")
-    
-    return {
-        "success": True,
-        "message": "Invitation acceptée. L'annonce peut maintenant être publiée.",
-        "property_id": invitation["property_id"]
-    }
-
-@api_router.post("/president/decline/{token}")
-async def decline_president_invitation(token: str, reason: Optional[str] = None):
-    """
-    Le président refuse l'invitation.
-    """
-    invitation = await db.president_invitations.find_one({"token": token})
-    
-    if not invitation:
-        raise HTTPException(status_code=404, detail="Invitation non trouvée")
-    if invitation.get("status") != "pending":
-        raise HTTPException(status_code=400, detail="Cette invitation a déjà été traitée")
-    reason = html_escape(reason) if reason else reason
-    
-    await db.president_invitations.update_one(
-        {"token": token},
-        {"$set": {
-            "status": "declined",
-            "declined_at": datetime.now(timezone.utc).isoformat(),
-            "decline_reason": reason
-        }}
-    )
-    
-    # Mettre à jour l'annonce
-    await db.properties.update_one(
-        {"id": invitation["property_id"]},
-        {"$set": {
-            "president_invitation_pending": False,
-            "president_invitation_declined": True,
-            "updated_at": datetime.now(timezone.utc).isoformat()
-        }}
-    )
-    
-    # Notifier le créateur
-    invitation_creator = await db.users.find_one({"id": invitation["invited_by"]})
-    if invitation_creator:
-        try:
-            await send_brevo_email(
-                to_email=invitation_creator["email"],
-                to_name=f"{invitation_creator.get('first_name', '')} {invitation_creator.get('last_name', '')}",
-                subject="Invitation refusée - Annonce de cession",
-                html_content=f"""
-                <h2>Invitation refusée</h2>
-                <p>{html_escape(invitation['president_firstname'])} {html_escape(invitation['president_lastname'])} a refusé de valider votre annonce.</p>
-                {f'<p><strong>Raison:</strong> {reason}</p>' if reason else ''}
-                <p>Vous pouvez contacter directement la personne pour plus d'informations.</p>
-                """
-            )
-        except Exception as e:
-            logging.error(f"Erreur notification refus: {e}")
-    
-    return {
-        "success": True,
-        "message": "Invitation refusée"
-    }
-
-
 # ============ PROPERTIES ROUTES ============
-async def dirigeant_check_for(user: dict, siren: str) -> Optional[dict]:
-    """Vérification dirigeant de l'utilisateur pour ce SIREN ; refaite avec le nom certifié si disponible"""
-    if not siren:
-        return None
-    check = await db.dirigeant_verifications.find_one({"user_id": user["id"], "siren": siren}, {"_id": 0})
-    if user.get("verified_last_name") and (not check or check.get("identity_source") != "verified_identity"):
-        # L'identité a été certifiée après la saisie de l'annonce : on refait la comparaison avec le vrai nom
-        try:
-            first = (user.get("verified_first_name") or "").lower().strip()
-            last = user["verified_last_name"].lower().strip()
-            result = await _match_dirigeant(siren, first, last, f"{first} {last}".strip())
-            check = {"user_id": user["id"], "siren": siren, "verified": bool(result.get("verified")),
-                     "status": result.get("status"), "reason": result.get("reason"), "identity_source": "verified_identity",
-                     "checked_at": datetime.now(timezone.utc).isoformat()}
-            await db.dirigeant_verifications.update_one({"user_id": user["id"], "siren": siren}, {"$set": check}, upsert=True)
-        except Exception as e:
-            logging.warning(f"Revérification dirigeant impossible: {e}")
-    return check
-
 def mandate_required() -> bool:
     return os.environ.get("FF_MANDATE_REQUIRED", "true").strip().lower() not in ("false", "0", "no")
 
@@ -2157,105 +1395,149 @@ async def has_signed_mandate(property: dict) -> bool:
         query["is_test"] = {"$ne": True}
     return bool(await db.generated_contracts.find_one(query))
 
-# Motifs de blocage (publication impossible) et drapeaux (publiée, à relire par l'admin sous 48 h) — SPEC §4.4
+# Motifs de blocage (publication impossible) et drapeaux (publiée, à relire par l'admin sous 48 h) — SPEC §5.4, API.md §2
 LISTING_BLOCKING_LABELS = {
-    "email_non_confirme": "votre adresse e-mail n'est pas confirmée",
-    "identite_non_verifiee": "votre identité n'est pas vérifiée",
-    "siret_manquant": "le SIRET de l'entreprise n'est pas renseigné",
-    "siren_inactif": "l'entreprise est signalée comme cessée au registre national",
-    "doublon_siren": "une annonce est déjà en ligne ou en pause pour cette entreprise",
-    "metier_manquant": "aucun métier n'est renseigné",
-    "prix_manquant": "le prix demandé n'est pas renseigné",
+    "email_not_verified": "votre adresse e-mail n'est pas confirmée",
+    "identity": "votre identité n'est pas vérifiée",
+    "mandate": "le mandat de vente n'est pas signé",
+    "property_type": "le type de bien n'est pas renseigné",
+    "location": "la ville et le code postal du bien ne sont pas renseignés",
+    "lease": "le type de bail et la date de prise d'effet du bail en cours ne sont pas renseignés",
+    "rent": "le loyer mensuel hors charges n'est pas renseigné",
+    "price": "le prix de vente n'est pas renseigné",
+    "dpe": "la classe énergie (DPE) n'est pas renseignée (« non soumis » n'est possible que pour un local, des bureaux, un parking ou un autre bien non habitable)",
+    "surface": "la surface du bien n'est pas renseignée",
+    "ownership_proof": "le justificatif de propriété n'est pas déposé ou a été refusé",
+    "siret": "le SIRET de la société propriétaire n'est pas renseigné",
+    "societe_cessee": "la société propriétaire est signalée comme cessée au registre national",
 }
 LISTING_FLAG_LABELS = {
-    "dirigeant_non_confirme": "qualité de dirigeant non confirmée par le registre",
-    "naf_hors_batiment": "code NAF hors bâtiment",
-    "naf_connexe": "code NAF connexe au bâtiment",
-    "rge_absent_ademe": "RGE déclaré mais absent de la liste ADEME",
-    "open_data_indisponible": "open data indisponible au moment de la publication",
-    "migration_sans_controles": "annonce reprise de l'ancienne file de validation, contrôles automatiques non rejoués",
-    # Mode test (MODE-TEST-ET-APP.md §B.2.5) : motifs bloquants rétrogradés en drapeaux
-    "siren_inactif": "entreprise signalée comme cessée au registre national (mode test : non bloquant)",
-    "doublon_siren": "autre annonce en ligne ou en pause pour ce SIREN (mode test : non bloquant)",
+    "ownership_pending": "justificatif de propriété à contrôler",
+    "gerant_mismatch": "le vendeur n'apparaît pas comme gérant de la société au registre",
+    "dpe_rental_ban": "logement dont la classe énergie interdit déjà tout nouveau bail ou renouvellement",
+    "tenant_unpaid": "impayés en cours déclarés par le vendeur",
+    "duplicate_address": "doublon probable : même adresse publiée par un autre compte",
+    "opendata_unavailable": "open data indisponible au moment de la publication",
+    # Mode test (MODE-TEST-ET-APP.md §B.2.5) : motif bloquant rétrogradé en drapeau pour les données de test
+    "societe_cessee": "société signalée comme cessée au registre national (mode test : non bloquant)",
 }
 MODERATION_REVIEW_HOURS = 48
+# Types de biens pour lesquels « non soumis au DPE » est accepté (SPEC §5.4) ; un logement exige A-G ou « vierge »
+DPE_EXEMPT_PROPERTY_TYPES = ("local-commercial", "bureaux", "parking", "autre")
+# Statuts d'une annonce qui « occupent » une adresse (détection de doublon)
+DUPLICATE_LISTING_STATUSES = ("published", "paused")
+ACCOUNT_BLOCKING_CODES = ("email_not_verified", "identity", "mandate")
 
-# Une annonce en pause (volontaire ou après 60 jours sans connexion) occupe toujours son SIREN : elle peut être remise
-# en ligne à tout moment, sans nouveau contrôle (SPEC §4.4, un seul mandat et une seule annonce par entreprise)
-DUPLICATE_LISTING_STATUSES = ("published", "paused", "pending")
+def labeled(codes: list, labels: dict) -> list:
+    return [{"code": c, "label": labels.get(c, c)} for c in codes]
 
-async def duplicate_listing_for(property_id: str, siren: str, statuses=DUPLICATE_LISTING_STATUSES) -> Optional[dict]:
-    """Autre annonce du même SIREN dans l'un des `statuts` (None si aucune ou SIREN invalide)"""
-    siren = re.sub(r"\D", "", siren or "")[:9]
-    if len(siren) != 9:
+def address_key(address: Optional[str], postal_code: Optional[str]) -> Optional[str]:
+    """Adresse normalisée (sans accents, ponctuation ni casse) + code postal : détection des doublons probables"""
+    if not address or not postal_code:
         return None
-    return await db.properties.find_one({"id": {"$ne": property_id}, "siret": {"$regex": f"^{siren}"}, "status": {"$in": list(statuses)}},
-                                       {"_id": 0, "id": 1, "status": 1})
+    text = taxonomy.slugify(address)
+    return f"{postal_code}:{text}" if text else None
 
-async def listing_checks(property_doc: dict, user: dict) -> dict:
-    """Contrôles automatiques d'une annonce (open data, dirigeant, ADEME, doublon) → {checks, trades, blocking, flags, property}"""
-    siret = (property_doc.get("siret") or "").replace(" ", "")
-    siren = siret[:9]
-    property = await opendata.lookup_siren(siret or siren) if siren else {"available": False, "found": False}
-    first = (user.get("verified_first_name") or user.get("first_name") or "")
-    last = (user.get("verified_last_name") or user.get("last_name") or "")
-    dirigeant = await opendata.match_dirigeant(siren, first, last) if siren else None
-    if dirigeant and dirigeant.get("status") != "match_exact" and property_doc.get("president_verified"):
-        # Le président de la société a validé l'annonce lui-même (flux d'invitation) : qualité de dirigeant acquise
-        dirigeant = {**dirigeant, "status": "match_exact", "verified": True}
-    rge_declared = bool(property_doc.get("rge_types"))
-    in_ademe = None
-    if rge_declared and siret:
-        try:
-            ademe = await verify_rge(siret)
-            in_ademe = bool(ademe.get("verified")) if not ademe.get("error") else None
-        except Exception as e:  # jamais bloquant
-            logging.warning(f"ADEME indisponible pour {siret}: {e}")
-    duplicate = await duplicate_listing_for(property_doc["id"], siren)
-    checks = opendata.property_checks_from(property, dirigeant, in_ademe, bool(duplicate))
-    checks["email_verified"] = is_email_verified(user)
-    try:
-        trades = taxonomy.validate_trades(property_doc.get("trades") or taxonomy.trades_for_rge(property_doc.get("rge_types")))
-    except ValueError:
-        trades = []
+async def duplicate_address_for(property_doc: dict) -> Optional[dict]:
+    """Annonce en ligne (ou en pause) d'un autre compte à la même adresse normalisée"""
+    key = address_key(property_doc.get("address"), property_doc.get("postal_code"))
+    if not key:
+        return None
+    return await db.properties.find_one({"id": {"$ne": property_doc.get("id")}, "seller_id": {"$ne": property_doc.get("seller_id")},
+                                         "address_key": key, "status": {"$in": list(DUPLICATE_LISTING_STATUSES)}},
+                                        {"_id": 0, "id": 1, "status": 1})
+
+def content_blocking(doc: dict) -> list:
+    """Motifs bloquants liés au contenu de l'annonce (sans les étapes du compte ni l'open data)"""
     blocking = []
-    if not checks["email_verified"]:
-        blocking.append("email_non_confirme")
+    if not doc.get("property_type"):
+        blocking.append("property_type")
+    if not (doc.get("city") and doc.get("postal_code")):
+        blocking.append("location")
+    if not (doc.get("lease_type") and doc.get("lease_start")):
+        blocking.append("lease")
+    if not (doc.get("rent_monthly") or 0) > 0:
+        blocking.append("rent")
+    if not (doc.get("asking_price") or 0) > 0:
+        blocking.append("price")
+    dpe = doc.get("dpe_class")
+    if not dpe or (dpe == "non-soumis" and doc.get("property_type") not in DPE_EXEMPT_PROPERTY_TYPES):
+        blocking.append("dpe")
+    if doc.get("property_type") != "parking" and not (doc.get("surface") or 0) > 0:
+        blocking.append("surface")
+    if (doc.get("ownership") or {}).get("status") not in ("pending", "verified"):
+        blocking.append("ownership_proof")
+    if doc.get("owner_type") in COMPANY_OWNER_TYPES and not doc.get("siret"):
+        blocking.append("siret")
+    return blocking
+
+async def listing_checks(property_doc: dict, user: dict, mandate_signed: Optional[bool] = None) -> dict:
+    """Contrôles d'une annonce (SPEC §5.4) → {checks, blocking: [codes], flags: [codes], company}. Étapes du compte
+    (e-mail, identité, mandat), contenu, justificatif de propriété, société (open data : active, gérant), drapeaux."""
+    doc = {**property_doc, **computed_property_fields(property_doc)}
+    blocking, flags = [], []
+    if not is_email_verified(user):
+        blocking.append("email_not_verified")
     if not is_user_verified(user):
-        blocking.append("identite_non_verifiee")
-    if not siret:
-        blocking.append("siret_manquant")
-    # Mode test : entreprise cessée et doublon deviennent des drapeaux (un SIRET fictif de 14 chiffres est accepté) pour
-    # les seules données de test (annonce ou cédant `is_test`) : une annonce réelle garde ses contrôles pendant l'essai ;
-    # e-mail, identité, mandat, métier et prix restent bloquants
+        blocking.append("identity")
+    if mandate_signed is None:
+        mandate_signed = (not mandate_required()) or await has_signed_mandate(doc)
+    if not mandate_signed:
+        blocking.append("mandate")
+    blocking += content_blocking(doc)
+    # Mode test : société cessée devient un drapeau pour les seules données de test (annonce ou vendeur `is_test`) ;
+    # une annonce réelle garde tous ses contrôles pendant l'essai
     relaxed = test_mode_enabled() and is_test_related(property_doc, user)
-    soft_flags = []
-    if checks["siren_active"] is False:
-        (soft_flags if relaxed else blocking).append("siren_inactif")
-    if checks["duplicate_siren"]:
-        (soft_flags if relaxed else blocking).append("doublon_siren")
-    if not trades:
-        blocking.append("metier_manquant")
-    if not (property_doc.get("asking_price") or 0) > 0:
-        blocking.append("prix_manquant")
-    flags = []
-    if checks["dirigeant_match"] != "match_exact":
-        flags.append("dirigeant_non_confirme")
-    if checks["naf_in_building"] is False:
-        flags.append("naf_hors_batiment")
-    if checks["naf_status"] == "connexe":
-        flags.append("naf_connexe")
-    if rge_declared and in_ademe is False:
-        flags.append("rge_absent_ademe")
-    if not checks["opendata_available"]:
-        flags.append("open_data_indisponible")
-    flags += soft_flags
-    return {"checks": checks, "trades": trades, "blocking": blocking, "flags": flags, "company": property,
-            "rge_declared": rge_declared, "siret": siret}
+    company = {"available": None, "found": False}
+    gerant = None
+    if doc.get("owner_type") in COMPANY_OWNER_TYPES and doc.get("siret"):
+        try:
+            company = await opendata.lookup_siren(doc["siret"])
+        except Exception as e:  # jamais bloquant
+            logging.warning(f"Open data indisponible pour le SIRET {doc.get('siret')}: {e}")
+            company = {"available": False, "found": False}
+        if not company.get("available"):
+            flags.append("opendata_unavailable")
+        elif company.get("found"):
+            if company.get("siren_active") is False:
+                (flags if relaxed else blocking).append("societe_cessee")
+            first = user.get("verified_first_name") or user.get("first_name") or ""
+            last = user.get("verified_last_name") or user.get("last_name") or ""
+            gerant = await opendata.match_dirigeant(doc["siret"][:9], first, last)
+            if gerant.get("status") not in ("match_exact", "match_partial"):
+                flags.append("gerant_mismatch")
+    ownership_status = (doc.get("ownership") or {}).get("status")
+    if ownership_status == "pending":
+        flags.append("ownership_pending")
+    if (doc.get("dpe_rental") or {}).get("status") == "interdit":
+        flags.append("dpe_rental_ban")
+    if doc.get("tenant_payment_status") == "impayes":
+        flags.append("tenant_unpaid")
+    duplicate = await duplicate_address_for(doc)
+    if duplicate:
+        flags.append("duplicate_address")
+    checks = {
+        "email_verified": is_email_verified(user),
+        "siren_active": company.get("siren_active") if company.get("found") else None,
+        "gerant_match": (gerant or {}).get("status") if gerant else None,
+        "ownership_verified": ownership_status == "verified",
+        "dpe_rental_status": (doc.get("dpe_rental") or {}).get("status"),
+        "opendata_available": company.get("available"),
+        "duplicate_address": bool(duplicate),
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+    }
+    return {"checks": checks, "blocking": blocking, "flags": flags, "company": company}
+
+async def attach_checks(property_doc: dict, user: dict) -> dict:
+    """Réponse de création, de mise à jour ou de soumission : `blocking` et `flags` à jour [{code, label}]"""
+    result = await listing_checks(property_doc, user)
+    property_doc["blocking"] = labeled(result["blocking"], LISTING_BLOCKING_LABELS)
+    property_doc["flags"] = labeled(result["flags"], LISTING_FLAG_LABELS)
+    return property_doc
 
 async def submit_listing(property_doc: dict, user: dict) -> dict:
     """Soumet une annonce : e-mail confirmé et mandat signé obligatoires (loi Hoguet), puis publication automatique
-    sans humain si les contrôles passent (SPEC §4.4) ; sinon brouillon avec la liste des motifs. Les drapeaux non
+    sans humain si les contrôles passent (SPEC §5.4) ; sinon brouillon avec la liste des motifs. Les drapeaux non
     bloquants sont listés dans « À faire » admin pendant 48 h (post-modération)."""
     now = datetime.now(timezone.utc).isoformat()
     if not is_email_verified(user):
@@ -2264,40 +1546,30 @@ async def submit_listing(property_doc: dict, user: dict) -> dict:
         property_doc["status"] = "draft"
         property_doc["auto_published"] = False
         property_doc["blocked_reason"] = "email_not_verified"
-        return property_doc
-    if mandate_required() and not await has_signed_mandate(property_doc):
+        return await attach_checks(property_doc, user)
+    mandate_signed = (not mandate_required()) or await has_signed_mandate(property_doc)
+    if not mandate_signed:
         await db.properties.update_one({"id": property_doc["id"]}, {"$set": {"status": "mandat_en_attente", "updated_at": now}})
         # Point de départ des relances « mandat à signer » (J+1/J+4/J+10), posé une seule fois
         await db.properties.update_one({"id": property_doc["id"], "mandate_pending_since": {"$exists": False}},
                                       {"$set": {"mandate_pending_since": now}})
         property_doc["status"] = "mandat_en_attente"
         property_doc["auto_published"] = False
-        await email_user(user["id"], "listing_mandate_required",
-                         link=site_url(f"/seller/mandat/{property_doc['id']}"))
-        return property_doc
-    result = await listing_checks(property_doc, user)
-    checks, trades, blocking, flags, property = (result["checks"], result["trades"], result["blocking"],
-                                                result["flags"], result["company"])
-    found = bool(property.get("found"))
-    region = property_doc.get("region") or (property.get("region") if found else None)
+        await email_user(user["id"], "listing_mandate_required", link=site_url(f"/seller/mandat/{property_doc['id']}"))
+        return await attach_checks(property_doc, user)
+    result = await listing_checks(property_doc, user, mandate_signed=True)
+    blocking, flags, company = result["blocking"], result["flags"], result["company"]
     update = {
-        "property_checks": checks,
-        "trades": trades,
-        "is_rge": result["rge_declared"],
-        "naf_code": property.get("naf") if found else property_doc.get("naf_code"),
-        "naf_in_building": checks["naf_in_building"],
-        "department": property_doc.get("department") or (property.get("departement") if found else None),
-        "region": region,
-        "title": taxonomy.listing_title(trades, region, property_doc.get("staff_count")) if trades else property_doc.get("title"),
-        "dirigeant_status": checks["dirigeant_match"],
-        "dirigeant_verified": checks["dirigeant_match"] in ("match_exact", "match_partial"),
+        **computed_property_fields(property_doc),
+        "property_checks": result["checks"],
         "can_be_published": not blocking,
-        "blocking": blocking,
+        "blocking": labeled(blocking, LISTING_BLOCKING_LABELS),
+        "flags": labeled(flags, LISTING_FLAG_LABELS),
         "submitted_at": now,
         "updated_at": now,
     }
-    if property_doc.get("qualifications_verified_at") is None and checks.get("in_ademe_list") is not None:
-        update["qualifications_verified_at"] = now
+    if company.get("found"):
+        update["company_lookup"] = {k: company.get(k) for k in ("nom_complet", "forme_juridique", "adresse", "etat", "siren_active")}
     if blocking:
         update["status"] = "draft"
         update["blocked_reason"] = blocking[0]
@@ -2322,79 +1594,87 @@ async def submit_listing(property_doc: dict, user: dict) -> dict:
     return property_doc
 
 async def submit_drafts(user_id: str):
-    """Appelé quand l'identité d'un vendeur devient vérifiée : ses brouillons sont soumis"""
+    """Appelé quand l'identité d'un vendeur devient vérifiée : ses brouillons complets sont soumis"""
     user = await db.users.find_one({"id": user_id}, USER_SAFE_PROJECTION)
     if not user or user.get("role") != "seller":
         return
     drafts = await db.properties.find({"seller_id": user_id, "status": "draft"}, {"_id": 0}).to_list(50)
     for draft in drafts:
+        if not listing_complete(draft):
+            continue
         try:
             await submit_listing(draft, user)
         except Exception as e:
             logging.error(f"Soumission du brouillon {draft.get('id')} impossible: {e}")
 
+async def resubmit_if_ready(property_doc: dict, user: dict) -> dict:
+    """Brouillon complet d'un vendeur à l'identité vérifiée : soumis s'il ne l'a jamais été, re-soumis s'il était bloqué
+    et que son mandat est signé (après correction, dépôt du justificatif…)"""
+    if property_doc.get("status") != "draft" or not listing_complete(property_doc) or not is_user_verified(user):
+        return property_doc
+    if not property_doc.get("submitted_at") and not property_doc.get("blocking"):
+        return await submit_listing(property_doc, user)
+    if property_doc.get("blocking") and await has_signed_mandate(property_doc):
+        return await submit_listing(property_doc, user)
+    return property_doc
+
 @api_router.post("/properties")
 async def create_property(property: PropertyCreate, current_user: dict = Depends(get_current_user)):
+    """Brouillon d'annonce (champs SPEC §3 tous facultatifs) → annonce avec `blocking` et `flags` [{code, label}]"""
     if current_user["role"] != "seller":
-        raise HTTPException(status_code=403, detail="Only sellers can create listings")
-    
+        raise api_error(403, "not_allowed", "Seuls les vendeurs peuvent déposer une annonce")
     now = datetime.now(timezone.utc).isoformat()
     fields = validate_listing_fields(property.model_dump())
-    if fields.get("trades") is None:
-        fields["trades"] = taxonomy.trades_for_rge(fields.get("rge_types")) or None
-    fields["is_rge"] = bool(fields.get("rge_types"))
-    fields["commission_terms_version"] = COMMISSION_TERMS_VERSION
     property_doc = {
         "id": str(uuid.uuid4()),
         "seller_id": current_user["id"],
         "seller_email": current_user["email"],
         **fields,
-        # Le statut « dirigeant vérifié » est calculé côté serveur (jamais pris du client)
-        "dirigeant_verified": False,
-        "dirigeant_status": property.dirigeant_status or "not_checked",
+        "commission_terms_version": COMMISSION_TERMS_VERSION,
+        "ownership": {"status": "missing"},
         "status": "draft",
         "views": 0,
         "contacts_count": 0,
+        "favorites_count": 0,
         "can_be_published": False,
-        "president_invitation_pending": False,
         "created_at": now,
         "updated_at": now
     }
+    property_doc.update(computed_property_fields(property_doc))
+    property_doc["address_key"] = address_key(property_doc.get("address"), property_doc.get("postal_code"))
     mark_test(property_doc, current_user)
     await db.properties.insert_one(property_doc)
     property_doc.pop("_id", None)
-    
+
     # Écran 1 seul (pas de prix) : simple brouillon, soumis au PUT de l'écran 3
     if not listing_complete(property_doc):
         property_doc["auto_published"] = False
-        return property_doc
+        return await attach_checks(property_doc, current_user)
     # Sans identité vérifiée, l'annonce reste en brouillon : elle sera soumise dès la vérification
     if not is_user_verified(current_user):
         await email_user(current_user["id"], "listing_draft")
         property_doc["auto_published"] = False
-        return property_doc
-    
-    return await submit_listing(property_doc, current_user)
+        return await attach_checks(property_doc, current_user)
+    return await attach_checks(await submit_listing(property_doc, current_user), current_user)
 
 def listing_complete(doc: dict) -> bool:
     """Une annonce est soumise (mandat, contrôles, publication) dès que l'écran 3 de CreateListing est renseigné
-    (objet de la cession ou prix demandé) ; un prix manquant est alors un motif de blocage, pas un brouillon muet."""
-    if doc.get("sale_object"):
-        return True
+    (prix de vente) ; un champ manquant est alors un motif de blocage, pas un brouillon muet."""
     try:
         return float(doc.get("asking_price") or 0) > 0
     except (TypeError, ValueError):
         return False
 
-# Informations qui lèvent l'anonymat d'une annonce : jamais exposées avant signature d'un NDA
-CONFIDENTIAL_PROPERTY_FIELDS = ["seller_email", "siret", "company_name", "president_email", "president_id",
-                               "president_invitation_id", "president_firstname", "president_lastname",
+# Informations qui lèvent l'anonymat d'une annonce : jamais exposées avant la signature de l'engagement de confidentialité
+CONFIDENTIAL_PROPERTY_FIELDS = ["seller_email", "address", "address_key", "company_name", "siret", "company_lookup",
                                "mandant_address", "mandant_capacity", "presented_buyers"]
 PUBLIC_PROPERTY_PROJECTION = {"_id": 0, **{f: 0 for f in CONFIDENTIAL_PROPERTY_FIELDS}}
-# Vue du repreneur après NDA : seuls ces champs confidentiels sont révélés ; les champs internes ci-dessous restent cachés
-NDA_REVEALED_PROPERTY_FIELDS = ("company_name", "siret")
-NDA_HIDDEN_PROPERTY_FIELDS = ["seller_id", "blocking", "blocked_reason", "can_be_published", "auto_accept_dataroom", "veille_flag",
-                             "president_invitation_pending", "president_invitation_declined", "president_phone", "alerts_sent"]
+# Vue de l'acquéreur après l'engagement : seuls ces champs confidentiels sont révélés (SPEC §3.5)
+NDA_REVEALED_PROPERTY_FIELDS = ("address", "company_name", "siret")
+# Champs internes jamais montrés hors du vendeur et de l'admin
+INTERNAL_PROPERTY_FIELDS = ["seller_id", "blocking", "blocked_reason", "can_be_published", "auto_accept_dataroom", "alerts_sent",
+                            "alerts_sent_count", "flags", "moderation", "demo_key", "weekly_snapshot", "draft_notified",
+                            "mandate_pending_since", "submitted_at", "auto_published"]
 
 def property_sort_criteria(sort: Optional[str]):
     if sort == "popular":
@@ -2403,33 +1683,34 @@ def property_sort_criteria(sort: Optional[str]):
         return [("asking_price", 1), ("created_at", -1)]
     if sort == "price_desc":
         return [("asking_price", -1), ("created_at", -1)]
+    if sort == "yield_desc":
+        return [("gross_yield", -1), ("published_at", -1)]
     # `recent` / `latest` / défaut : les plus récentes d'abord (date de publication, puis de création)
     return [("published_at", -1), ("created_at", -1)]
 
-def listing_filters(trades: Optional[Any] = None, region: Optional[str] = None, department: Optional[str] = None,
-                    rge: Optional[Any] = None, min_price: Optional[float] = None, max_price: Optional[float] = None,
-                    rge_types: Optional[List[str]] = None, min_ca: Optional[float] = None, max_ca: Optional[float] = None,
-                    min_staff: Optional[int] = None) -> dict:
-    """Filtres publics d'API.md §2 (métiers en OU logique, région, département, RGE oui/non, prix, chiffre d'affaires,
-    effectif minimum) → requête Mongo"""
+def _id_list(value: Optional[Any], allowed: list) -> list:
+    if isinstance(value, str):
+        value = [v.strip() for v in value.split(",")]
+    return [v for v in dict.fromkeys(value or []) if v in allowed]
+
+def listing_filters(property_types: Optional[Any] = None, lease_types: Optional[Any] = None, region: Optional[str] = None,
+                    department: Optional[str] = None, min_price: Optional[float] = None, max_price: Optional[float] = None,
+                    min_yield: Optional[float] = None, min_surface: Optional[float] = None) -> dict:
+    """Filtres publics d'API.md §2 (types de biens et de baux en OU logique, région, département, prix, rendement brut
+    minimum, surface minimum) → requête Mongo"""
     query = {}
-    if isinstance(trades, str):
-        trades = [t.strip() for t in trades.split(",")]
-    ids = [t for t in (trades or []) if taxonomy.trade_by_id(t)]
-    if ids:
-        query["trades"] = {"$in": ids}
-    if rge_types:
-        query["rge_types"] = {"$in": rge_types}
+    types = _id_list(property_types, taxonomy.PROPERTY_TYPE_IDS)
+    if types:
+        query["property_type"] = {"$in": types}
+    leases = _id_list(lease_types, taxonomy.LEASE_TYPE_IDS)
+    if leases:
+        query["lease_type"] = {"$in": leases}
     if region:
         query["region"] = taxonomy.region_by_slug(region) or region
     if department:
         code = taxonomy.normalize_departement(department)
         if code:
             query["department"] = code
-    if rge in (True, "true", "1", "oui"):
-        query["is_rge"] = True
-    elif rge in (False, "false", "0", "non"):
-        query["is_rge"] = {"$ne": True}
     price = {}
     if min_price is not None and min_price > 0:
         price["$gte"] = float(min_price)
@@ -2437,15 +1718,10 @@ def listing_filters(trades: Optional[Any] = None, region: Optional[str] = None, 
         price["$lte"] = float(max_price)
     if price:
         query["asking_price"] = price
-    ca = {}
-    if min_ca:
-        ca["$gte"] = float(min_ca)
-    if max_ca:
-        ca["$lte"] = float(max_ca)
-    if ca:
-        query["ca_n"] = ca
-    if min_staff is not None and min_staff > 0:
-        query["staff_count"] = {"$gte": int(min_staff)}
+    if min_yield is not None and min_yield > 0:
+        query["gross_yield"] = {"$gte": float(min_yield)}
+    if min_surface is not None and min_surface > 0:
+        query["surface"] = {"$gte": float(min_surface)}
     return query
 
 def hide_test_listings(query: dict) -> dict:
@@ -2460,16 +1736,28 @@ def listing_hidden_outside_test(property: dict) -> bool:
     """Annonce masquée au public hors mode test (voir hide_test_listings)"""
     return bool(property.get("is_test") or property.get("mandate_is_test")) and not test_mode_enabled()
 
-def public_listing(property: dict) -> dict:
-    """Annonce publique : champs confidentiels retirés (jamais company_name, siret, seller_id, mandant_address…)"""
-    for field in CONFIDENTIAL_PROPERTY_FIELDS + ["seller_id", "blocking", "blocked_reason", "can_be_published",
-                                               "president_verified", "alerts_sent", "auto_accept_dataroom", "veille_flag"]:
-        property.pop(field, None)
+def _public_shape(property: dict) -> dict:
+    """Forme publique des blocs calculés : statut seul du justificatif, contrôles affichables, honoraires"""
     property["commission_info"] = commission_info_for(property)
-    property.setdefault("is_rge", bool(property.get("rge_types")))
-    property.setdefault("trades", taxonomy.trades_for_rge(property.get("rge_types")))
+    property["ownership"] = {"status": (property.get("ownership") or {}).get("status") or "missing"}
     checks = property.get("property_checks") or {}
-    property["property_checks"] = {"in_ademe_list": checks.get("in_ademe_list"), "dirigeant_match": checks.get("dirigeant_match")}
+    dpe_rental = property.get("dpe_rental") or taxonomy.dpe_rental_status(property.get("dpe_class"), property.get("lease_type"))
+    property["dpe_rental"] = dpe_rental
+    property["property_checks"] = {"ownership_verified": property["ownership"]["status"] == "verified",
+                                   "dpe_rental_status": checks.get("dpe_rental_status") or dpe_rental.get("status")}
+    return property
+
+def public_listing(property: dict) -> dict:
+    """Annonce publique : champs confidentiels et internes retirés (jamais address, company_name, siret, seller_id…)"""
+    for field in CONFIDENTIAL_PROPERTY_FIELDS + INTERNAL_PROPERTY_FIELDS:
+        property.pop(field, None)
+    return _public_shape(property)
+
+def owner_listing(property: dict) -> dict:
+    """Annonce vue par son vendeur ou l'admin : tout, avec les honoraires calculés"""
+    property["commission_info"] = commission_info_for(property)
+    property.setdefault("ownership", {"status": "missing"})
+    property.pop("_id", None)
     return property
 
 async def has_signed_nda(property_id: str, user_id: str) -> bool:
@@ -2480,19 +1768,19 @@ async def has_signed_nda(property_id: str, user_id: str) -> bool:
     return nda is not None
 
 def is_property_owner(property: dict, user: Optional[dict]) -> bool:
-    return bool(user) and user["id"] in (property.get("seller_id"), property.get("president_id"))
+    return bool(user) and user["id"] == property.get("seller_id")
 
 async def sanitize_property(property: dict, user: Optional[dict]) -> dict:
-    """Retire les informations identifiantes sauf pour le propriétaire, l'admin ou un acheteur ayant signé le NDA"""
-    property["commission_info"] = commission_info_for(property)
+    """Retire les informations identifiantes sauf pour le vendeur, l'admin ou un acquéreur ayant signé l'engagement"""
     if user and (user.get("role") == "admin" or is_property_owner(property, user)):
-        return property
+        return owner_listing(property)
     if user and user.get("role") == "buyer" and await has_signed_nda(property["id"], user["id"]):
-        # Nom et SIRET de la société révélés après NDA (annexe A) ; toutes les autres données confidentielles (coordonnées
-        # et identité du président invité, adresse et qualité du mandant, repreneurs présentés) restent au cédant
-        for field in [f for f in CONFIDENTIAL_PROPERTY_FIELDS if f not in NDA_REVEALED_PROPERTY_FIELDS] + NDA_HIDDEN_PROPERTY_FIELDS:
+        # Adresse, dénomination et SIRET révélés après l'engagement ; mandant, acquéreurs présentés et données internes
+        # restent au vendeur
+        for field in [f for f in CONFIDENTIAL_PROPERTY_FIELDS if f not in NDA_REVEALED_PROPERTY_FIELDS] + INTERNAL_PROPERTY_FIELDS:
             property.pop(field, None)
-        return property
+        property["identity_revealed"] = True
+        return _public_shape(property)
     return public_listing(property)
 
 def fmt_eur(amount) -> str:
@@ -2520,7 +1808,7 @@ def buyer_pseudonym(user_id: str) -> str:
     return f"Acquéreur n°{(user_id or '')[:6].upper()}"
 
 class PartyLabels:
-    """Libellés affichables des parties d'une annonce, sans coordonnées (nom révélé seulement après NDA)"""
+    """Libellés affichables des parties d'une annonce, sans coordonnées (nom révélé seulement après l'engagement)"""
     def __init__(self, viewer: dict):
         self.viewer = viewer
         self.cache = {}
@@ -2538,7 +1826,7 @@ class PartyLabels:
             value = "Utilisateur"
         elif user.get("role") == "admin":
             value = site_name()
-        elif property and user_id in (property.get("seller_id"), property.get("president_id")):
+        elif property and user_id == property.get("seller_id"):
             value = "Vendeur"
         elif property and await has_signed_nda(property["id"], user_id):
             value = display_name(user) or buyer_pseudonym(user_id)
@@ -2547,7 +1835,7 @@ class PartyLabels:
         self.cache[key] = value
         return value
 
-# Détection de coordonnées dans les messages (contournement de la plateforme avant NDA)
+# Détection de coordonnées dans les messages (contournement de la plateforme avant l'engagement de confidentialité)
 PHONE_RE = re.compile(r"(?:(?:\+|00)\s*33\s*[\s.\-]?|\b0)[1-9](?:[\s.\-]?\d{2}){4}\b")
 EMAIL_RE = re.compile(r"[\w.+\-]+@[\w\-]+(?:\.[\w\-]+)+")
 
@@ -2605,8 +1893,8 @@ async def publish_property(property: dict):
         except Exception as e:
             logging.error(f"Erreur envoi alertes: {e}")
         await db.properties.update_one({"id": property["id"]}, {"$set": {"alerts_sent_count": sent}})
-    sent_line = (f"Elle a été envoyée à {sent} repreneur{'s' if sent > 1 else ''} dont les critères d'alerte correspondent."
-                 if sent else "Elle sera envoyée aux repreneurs dont les critères d'alerte correspondent.")
+    sent_line = (f"Elle a été envoyée à {sent} acquéreur{'s' if sent > 1 else ''} dont les critères d'alerte correspondent."
+                 if sent else "Elle sera envoyée aux acquéreurs dont les critères d'alerte correspondent.")
     await email_user(property.get("seller_id"), "listing_published", sent_line=sent_line, property_title=update.get("title") or property.get("title") or "",
                      link=site_url("/seller/dashboard"))
 
@@ -2617,25 +1905,25 @@ async def get_properties(
     sort: Optional[str] = None,
     limit: Optional[int] = None,
     page: Optional[int] = None,
-    trades: Optional[str] = None,
+    property_types: Optional[str] = None,
+    lease_types: Optional[str] = None,
     region: Optional[str] = None,
     department: Optional[str] = None,
-    rge: Optional[str] = None,
     min_price: Optional[float] = None,
     max_price: Optional[float] = None,
-    min_ca: Optional[float] = None,
-    min_staff: Optional[int] = None,
+    min_yield: Optional[float] = None,
+    min_surface: Optional[float] = None,
     authorization: Optional[str] = Header(None)
 ):
-    """Annonces en ligne (publiques, API.md §2) : filtres `trades` (ids séparés par des virgules, OU logique), `region`,
-    `department`, `rge` (true/false), `min_price`, `max_price`, `min_ca` (chiffre d'affaires N minimum), `min_staff` (effectif
-    minimum), `sort` (recent | price_asc | price_desc), `limit` (≤ 100),
-    `page` (1…) ; en-tête `X-Total-Count`. Un cédant connecté voit ses propres annonces (tous statuts), l'admin peut filtrer par statut."""
+    """Annonces en ligne (publiques, API.md §2) : filtres `property_types`, `lease_types` (ids séparés par des virgules,
+    OU logique), `region`, `department`, `min_price`, `max_price`, `min_yield` (rendement brut minimum), `min_surface`,
+    `sort` (recent | price_asc | price_desc | yield_desc), `limit` (≤ 100), `page` (1…) ; en-tête `X-Total-Count`.
+    Un vendeur connecté voit ses propres annonces (tous statuts), l'admin peut filtrer par statut."""
     current_user = await get_current_user_optional(authorization)
-    query = listing_filters(trades, region, department, rge, min_price, max_price, min_ca=min_ca, min_staff=min_staff)
+    query = listing_filters(property_types, lease_types, region, department, min_price, max_price, min_yield, min_surface)
     owner_view = False
     if current_user and current_user["role"] == "seller":
-        query["$or"] = [{"seller_id": current_user["id"]}, {"president_id": current_user["id"]}]
+        query["seller_id"] = current_user["id"]
         owner_view = True
     elif current_user and current_user["role"] == "admin" and status:
         query["status"] = status
@@ -2643,7 +1931,10 @@ async def get_properties(
     else:
         query["status"] = "published"
         hide_test_listings(query)
-    
+    return await _list_properties(response, query, owner_view, sort, limit, page)
+
+async def _list_properties(response: Response, query: dict, owner_view: bool, sort: Optional[str], limit: Optional[int],
+                           page: Optional[int]) -> list:
     limit = max(1, min(limit or 100, 100))
     skip = (max(1, page or 1) - 1) * limit
     total = await db.properties.count_documents(query)
@@ -2652,10 +1943,16 @@ async def get_properties(
     cursor = db.properties.find(query, projection).sort(property_sort_criteria(sort)).skip(skip).limit(limit)
     properties = await cursor.to_list(limit)
     if owner_view:
-        for c in properties:
-            c["commission_info"] = commission_info_for(c)
-        return properties
+        return [owner_listing(c) for c in properties]
     return [public_listing(c) for c in properties]
+
+@api_router.get("/properties/seller/mine")
+async def get_my_properties(response: Response, sort: Optional[str] = None, limit: Optional[int] = None, page: Optional[int] = None,
+                            current_user: dict = Depends(get_current_user)):
+    """Vendeur : ses annonces, tous statuts (équivalent de GET /properties avec un jeton de vendeur)"""
+    if current_user["role"] != "seller":
+        raise api_error(403, "not_allowed", "Réservé aux vendeurs")
+    return await _list_properties(response, {"seller_id": current_user["id"]}, True, sort, limit, page)
 
 @api_router.get("/properties/{property_id}")
 async def get_property(property_id: str, authorization: Optional[str] = Header(None)):
@@ -2668,7 +1965,7 @@ async def get_property(property_id: str, authorization: Optional[str] = Header(N
     is_privileged = bool(current_user) and (current_user.get("role") == "admin" or is_property_owner(property, current_user))
     hidden_test = listing_hidden_outside_test(property)
     if (property.get("status") != "published" or hidden_test) and not is_privileged:
-        # Un repreneur en relation (dossier accepté, NDA signé, offre, vente) garde l'accès à la fiche d'une annonce
+        # Un acquéreur en relation (dossier accepté, engagement signé, offre, vente) garde l'accès à la fiche d'une annonce
         # vendue, en pause ou retirée : son dossier et son étape de vente y renvoient
         related = bool(current_user) and current_user.get("role") == "buyer" and (
             await db.dataroom_access.find_one({"property_id": property_id, "buyer_id": current_user["id"],
@@ -2687,16 +1984,11 @@ async def get_property(property_id: str, authorization: Optional[str] = Header(N
 
 @api_router.post("/properties/search")
 async def search_properties(search: PropertySearch, response: Response, authorization: Optional[str] = Header(None)):
-    """Recherche (alertes, pages d'activité RGE) : mêmes filtres que GET /properties, plus `rge_types`, `min_ca`, `max_ca`"""
-    query = hide_test_listings({"status": "published", **listing_filters(search.trades, search.region, search.department, search.rge,
-                                                                         search.min_price, search.max_price, search.rge_types,
-                                                                         search.min_ca, search.max_ca, search.min_staff)})
-    limit = max(1, min(search.limit or 100, 100))
-    skip = (max(1, search.page or 1) - 1) * limit
-    total = await db.properties.count_documents(query)
-    response.headers["X-Total-Count"] = str(total)
-    cursor = db.properties.find(query, PUBLIC_PROPERTY_PROJECTION).sort(property_sort_criteria(search.sort)).skip(skip).limit(limit)
-    return [public_listing(c) for c in await cursor.to_list(limit)]
+    """Recherche (alertes) : mêmes filtres que GET /properties, en corps JSON"""
+    query = hide_test_listings({"status": "published", **listing_filters(search.property_types, search.lease_types, search.region,
+                                                                         search.department, search.min_price, search.max_price,
+                                                                         search.min_yield, search.min_surface)})
+    return await _list_properties(response, query, False, search.sort, search.limit, search.page)
 
 class ContactCreate(BaseModel):
     message: Optional[str] = Field(None, max_length=5000)
@@ -2708,21 +2000,21 @@ def require_buyer_profile(user: dict, minimum: int = SCORE_CONTACT_MIN):
     score = buyer_profile_score(user)
     if score < minimum:
         raise api_error(403, "profile_incomplete",
-                        f"Complétez votre profil de projet avant de contacter un cédant (profil complet à {score} %, {minimum} % requis)",
+                        f"Complétez votre profil de projet avant de contacter un vendeur (profil complet à {score} %, {minimum} % requis)",
                         profile_score=score, required=minimum, missing=profile_missing(user))
 
 @api_router.post("/properties/{property_id}/contact")
 async def contact_property(property_id: str, background_tasks: BackgroundTasks, data: Optional[ContactCreate] = None,
                           current_user: dict = Depends(get_current_user)):
-    """Premier contact du repreneur (SPEC §4.3.4, API.md §3) : adresse e-mail confirmée et profil ≥ 40 obligatoires ;
-    crée (ou retrouve) la conversation du couple annonce / repreneur, enregistre le message et envoie au cédant
-    l'e-mail « premier contact » avec la carte repreneur pseudonymisée. → {conversation_id}"""
+    """Premier contact de l'acquéreur (SPEC §5.3, API.md §3) : adresse e-mail confirmée et profil ≥ 40 obligatoires ;
+    crée (ou retrouve) la conversation du couple annonce / acquéreur, enregistre le message et envoie au vendeur
+    l'e-mail « premier contact » avec la carte acquéreur pseudonymisée. → {conversation_id}"""
     if current_user["role"] != "buyer":
-        raise api_error(403, "not_allowed", "Seuls les repreneurs peuvent contacter un cédant")
+        raise api_error(403, "not_allowed", "Seuls les acquéreurs peuvent contacter un vendeur")
     property = await db.properties.find_one({"id": property_id}, {"_id": 0})
     if not property or property.get("status") != "published":
-        raise HTTPException(status_code=404, detail="Entreprise introuvable")
-    # Premier contact : e-mail confirmé et profil de projet suffisant ; l'identité n'est vérifiée qu'au moment du NDA
+        raise HTTPException(status_code=404, detail="Annonce introuvable")
+    # Premier contact : e-mail confirmé et profil de projet suffisant ; l'identité n'est vérifiée qu'à l'engagement
     require_verified_email(current_user)
     require_buyer_profile(current_user)
     now = datetime.now(timezone.utc)
@@ -2734,17 +2026,17 @@ async def contact_property(property_id: str, background_tasks: BackgroundTasks, 
         message_doc = await store_message(conversation, current_user, content, now)
     if created:
         await register_contact(property, current_user["id"], now)
-        extract = (message_doc or {}).get("content") or "Le repreneur n'a pas laissé de message : répondez-lui depuis la messagerie."
+        extract = (message_doc or {}).get("content") or "L'acquéreur n'a pas laissé de message : répondez-lui depuis la messagerie."
         background_tasks.add_task(notify_first_contact, conversation, current_user, extract)
         background_tasks.add_task(email_user, current_user["id"], "contact_sent_buyer",
                                   property_title=property.get("title") or "l'annonce", link=site_url(f"/messages?conversation={conversation['id']}"))
     elif message_doc:
         background_tasks.add_task(notify_new_message, conversation, current_user, message_doc)
     return {"conversation_id": conversation["id"], "property_id": property_id, "already_contacted": not created,
-            "message": ("Votre message a été transmis au cédant." if created else "Contact déjà établi : retrouvez votre conversation dans la messagerie."),
+            "message": ("Votre message a été transmis au vendeur." if created else "Contact déjà établi : retrouvez votre conversation dans la messagerie."),
             "message_id": (message_doc or {}).get("id")}
 
-# ---- Actions du cédant sur son annonce (SPEC §4.2.4) ----
+# ---- Actions du vendeur sur son annonce (SPEC §5.2.5) ----
 SELLER_STATUSES = {"paused", "published", "withdrawn", "sold_elsewhere"}
 SELLER_STATUS_LABELS = {"paused": "mise en pause", "published": "remise en ligne", "withdrawn": "retirée", "sold_elsewhere": "vendue autrement"}
 
@@ -2756,9 +2048,6 @@ async def seller_status_change(property: dict, status: str, current_user: dict, 
             raise api_error(400, "validation", "Seule une annonce en pause peut être remise en ligne")
         if mandate_required() and not await has_signed_mandate(property):
             raise api_error(400, "mandate_required", "Signez un mandat avant de remettre l'annonce en ligne")
-        relaxed = test_mode_enabled() and is_test_related(property, current_user)
-        if not relaxed and await duplicate_listing_for(property_id, property.get("siret"), ("published",)):
-            raise api_error(400, "validation", "Une autre annonce est déjà en ligne pour cette entreprise")
         await db.properties.update_one({"id": property_id}, {"$set": {"status": "published", "updated_at": now, "resumed_at": now},
                                                            "$unset": {"paused_at": "", "paused_reason": ""}})
     elif current not in ("published", "paused", "withdrawn", "mandat_en_attente", "draft", "pending"):
@@ -2766,22 +2055,21 @@ async def seller_status_change(property: dict, status: str, current_user: dict, 
     elif status == "paused":
         if current != "published":
             raise api_error(400, "validation", "Seule une annonce en ligne peut être mise en pause")
-        await db.properties.update_one({"id": property_id}, {"$set": {"status": "paused", "paused_at": now, "paused_reason": "cedant", "updated_at": now}})
+        await db.properties.update_one({"id": property_id}, {"$set": {"status": "paused", "paused_at": now, "paused_reason": "vendeur", "updated_at": now}})
     elif status == "withdrawn":
-        await db.properties.update_one({"id": property_id}, {"$set": {"status": "withdrawn", "withdrawn_at": now, "withdrawn_reason": "cedant",
+        await db.properties.update_one({"id": property_id}, {"$set": {"status": "withdrawn", "withdrawn_at": now, "withdrawn_reason": "vendeur",
                                                                     "updated_at": now}})
     elif status == "sold_elsewhere":
-        await db.properties.update_one({"id": property_id}, {"$set": {"status": "sold_elsewhere", "sold_elsewhere_at": now,
-                                                                    "veille_flag": True, "updated_at": now}})
+        await db.properties.update_one({"id": property_id}, {"$set": {"status": "sold_elsewhere", "sold_elsewhere_at": now, "updated_at": now}})
         mandate = await db.generated_contracts.find_one({"id": property.get("mandate_id"), "type": "mandat"}, {"_id": 0}) if property.get("mandate_id") else None
         presented = await presented_buyers_view(property)
         buyers_list = " ; ".join(f"{b.get('name') or b['label']}" + (f" ({b['company_name']})" if b.get("company_name") else "") for b in presented) \
-            or "aucun repreneur ne vous a été nommément présenté"
+            or "aucun acquéreur ne vous a été nommément présenté"
         tail = fmt_date_fr(property.get("mandate_tail_ends_at") or (mandate or {}).get("tail_ends_at")) or "la fin de la clause de suite"
         await email_user(property.get("seller_id"), "sold_elsewhere_tail_clause", tail_ends_at=tail, buyers_list=buyers_list,
                          registry_number=(mandate or {}).get("registry_number") or "", link=site_url("/seller/dashboard"))
-        await email_admin("sold_elsewhere_admin", property_id=property_id, company_name=property.get("company_name") or property.get("title") or "",
-                          siret=property.get("siret") or "", buyers_list=buyers_list)
+        await email_admin("sold_elsewhere_admin", property_id=property_id, property_title=property.get("title") or "",
+                          buyers_list=buyers_list, tail_ends_at=tail)
     if status in ("withdrawn", "sold_elsewhere"):
         await close_pending_dataroom_requests(property_id, status, now)
     await create_audit_log(action=f"LISTING_{status.upper()}", property_id=property_id, actor_id=current_user["id"],
@@ -2789,11 +2077,11 @@ async def seller_status_change(property: dict, status: str, current_user: dict, 
     return {"message": "Status updated", "status": status, "label": SELLER_STATUS_LABELS[status]}
 
 REMOVAL_REASONS = {
-    "coordonnees": "L'annonce contient des coordonnées ou des éléments permettant d'identifier l'entreprise",
-    "hors_perimetre": "L'activité n'entre pas dans le périmètre de la plateforme (entreprises du bâtiment)",
-    "informations_inexactes": "Les informations de l'annonce sont inexactes ou invérifiables",
-    "dirigeant": "La qualité de dirigeant ou de mandataire n'a pas pu être établie",
-    "doublon": "Une annonce existe déjà pour cette entreprise",
+    "justificatif": "Le justificatif de propriété ne permet pas d'établir que le vendeur a qualité pour vendre le bien",
+    "informations-inexactes": "Les informations de l'annonce sont inexactes ou invérifiables",
+    "doublon": "Une annonce existe déjà pour ce bien",
+    "bien-non-loue": "Le bien n'est pas loué : la plateforme est réservée aux biens vendus avec un locataire en place",
+    "contenu-interdit": "L'annonce contient des coordonnées, des données personnelles du locataire ou un contenu interdit",
     "autre": "Autre motif",
 }
 
@@ -2801,10 +2089,10 @@ REMOVAL_REASONS = {
 async def update_property_status(property_id: str, status: str, reason: Optional[str] = None, reason_text: Optional[str] = None,
                                 current_user: dict = Depends(get_current_user)):
     """Changement de statut (API.md §2).
-    Cédant : `paused` (mise en pause), `published` (reprise d'une annonce en pause), `withdrawn` (retrait),
-    `sold_elsewhere` (vendue autrement : rappel de la clause de suite par e-mail, drapeau pour la veille BODACC).
+    Vendeur : `paused` (mise en pause), `published` (reprise d'une annonce en pause), `withdrawn` (retrait),
+    `sold_elsewhere` (vendue autrement : rappel de la clause de suite par e-mail).
     Admin : `published` = mise en ligne (mandat signé obligatoire, relecture close) ; `removed` = retrait motivé
-    (motif obligatoire, e-mail au cédant, mandat caduc, le cédant peut corriger et re-soumettre)."""
+    (motif obligatoire, e-mail au vendeur, mandat caduc, le vendeur peut corriger et re-soumettre)."""
     property = await db.properties.find_one({"id": property_id}, {"_id": 0})
     if not property:
         raise HTTPException(status_code=404, detail="Annonce introuvable")
@@ -2812,7 +2100,7 @@ async def update_property_status(property_id: str, status: str, reason: Optional
     
     if current_user["role"] != "admin":
         if status not in SELLER_STATUSES or not is_property_owner(property, current_user):
-            raise api_error(403, "not_allowed", "Action réservée au cédant de l'annonce")
+            raise api_error(403, "not_allowed", "Action réservée au vendeur de l'annonce")
         return await seller_status_change(property, status, current_user, now)
     if status not in {"pending", "published", "rejected", "removed", "sold", "archived", "paused", "withdrawn", "sold_elsewhere"}:
         raise HTTPException(status_code=400, detail="Statut invalide")
@@ -2834,8 +2122,8 @@ async def update_property_status(property_id: str, status: str, reason: Optional
         await db.properties.update_one({"id": property_id}, {"$set": {"status": "removed", "removed_at": now, "updated_at": now,
                                                                      "moderation": moderation, "can_be_published": False}})
         if property.get("mandate_id"):
-            # Caducité du mandat : l'annonce retirée met fin au mandat (SPEC §3.2), le cédant pourra en signer un nouveau
-            # Clause de suite : 18 mois à compter de la caducité (fin du mandat, art. 7)
+            # Caducité du mandat : l'annonce retirée met fin au mandat (art. 5), le vendeur pourra en signer un nouveau
+            # Clause de suite : 12 mois à compter de la caducité (fin du mandat, art. 10)
             tail_ends_at = add_months(datetime.fromisoformat(now), MANDATE_TAIL_MONTHS).isoformat()
             voided = await db.generated_contracts.update_one({"id": property["mandate_id"], "type": "mandat", "status": "signed"},
                                                              {"$set": {"status": "void", "void_at": now, "void_reason": "annonce retirée : " + reason_label,
@@ -2865,92 +2153,187 @@ class MandantAddress(BaseModel):
     postal_code: str = Field(..., pattern=r"^\d{5}$")
     city: str = Field(..., min_length=1, max_length=120)
 
-class PropertyUpdate(BaseModel):
-    ca_n: Optional[float] = None
-    ca_n1: Optional[float] = None
-    ca_n2: Optional[float] = None
-    margin: Optional[float] = None
-    ebitda: Optional[float] = None
-    mandataire_contracts: Optional[str] = None
-    staff_count: Optional[int] = None
-    pipeline: Optional[float] = None
-    fixed_charges: Optional[Dict[str, float]] = None
-    debt: Optional[float] = None
-    asking_price: Optional[float] = None
-    sale_type: Optional[str] = None
-    equipment: Optional[str] = None
-    premises: Optional[str] = None
-    description: Optional[str] = None
-    specialties: Optional[List[str]] = None
-    rge_validity: Optional[str] = None
-    creation_date: Optional[str] = None
-    legal_structure: Optional[str] = None
-    region: Optional[str] = None
-    siret: Optional[str] = None
-    company_name: Optional[str] = None
-    rge_types: Optional[List[str]] = None
-    # Tout le bâtiment (SPEC §2.2)
-    trades: Optional[List[str]] = None
-    other_qualifications: Optional[List[str]] = None
-    department: Optional[str] = None
-    sale_reason: Optional[Literal["retraite", "reconversion", "sante", "autre"]] = None
-    sale_object: Optional[Literal["titres", "fonds", "indifferent"]] = None
-    handover_months: Optional[int] = Field(default=None, ge=0, le=24)
-    has_maintenance_contracts: Optional[bool] = None
-    technical_referent_stays: Optional[bool] = None
-    key_staff_stays: Optional[bool] = None
-    decennale_ok: Optional[bool] = None
-    auto_accept_dataroom: Optional[bool] = None
+class PropertyUpdate(PropertyCreate):
+    """Mêmes champs que la création (SPEC §3), plus l'adresse postale et la qualité du mandant (préalables au mandat)"""
     mandant_address: Optional[Union[MandantAddress, str]] = None
-    mandant_capacity: Optional[Literal["dirigeant", "associe", "mandataire"]] = None
+    mandant_capacity: Optional[str] = Field(None, max_length=20)
 
-# Champs figés une fois l'annonce publiée ou le mandat signé (l'identité de l'entreprise est portée par le mandat)
-LOCKED_AFTER_MANDATE_FIELDS = ("siret", "company_name", "rge_types", "legal_structure", "creation_date")
+# Champs figés une fois l'annonce publiée ou le mandat signé (le bien et son propriétaire sont désignés par le mandat)
+LOCKED_AFTER_MANDATE_FIELDS = ("property_type", "owner_type", "company_name", "siret", "address", "postal_code", "city")
+LOCKED_FIELD_LABELS = {"property_type": "type de bien", "owner_type": "propriétaire", "company_name": "dénomination de la société",
+                       "siret": "SIRET", "address": "adresse", "postal_code": "code postal", "city": "ville"}
 
 @api_router.put("/properties/{property_id}")
 async def update_property(property_id: str, update_data: PropertyUpdate, current_user: dict = Depends(get_current_user)):
     """
-    Mise à jour d'une annonce par le vendeur (brouillon sauvegardé à chaque écran). Un brouillon bloqué dont le mandat
-    est signé est re-soumis automatiquement après correction (publication immédiate si les contrôles passent).
+    Mise à jour d'une annonce par le vendeur (brouillon sauvegardé à chaque écran). Titre, rendements et décence
+    énergétique sont recalculés ; un brouillon bloqué dont le mandat est signé est re-soumis automatiquement après
+    correction (publication immédiate si les contrôles passent). → annonce avec `blocking` et `flags`.
     """
     if current_user["role"] != "seller":
-        raise HTTPException(status_code=403, detail="Only sellers can update listings")
-    
+        raise api_error(403, "not_allowed", "Seuls les vendeurs peuvent modifier une annonce")
     property = await db.properties.find_one({"id": property_id, "seller_id": current_user["id"]}, {"_id": 0})
     if not property:
-        raise HTTPException(status_code=404, detail="Property not found or not authorized")
-    # Filter out None values and update
-    update_dict = validate_listing_fields({k: v for k, v in update_data.model_dump().items() if v is not None})
+        raise HTTPException(status_code=404, detail="Annonce introuvable")
+    sent = {k: v for k, v in update_data.model_dump().items() if v is not None}
+    if isinstance(sent.get("mandant_address"), dict):
+        sent["mandant_address"] = {k: v for k, v in sent["mandant_address"].items() if v is not None}
+    update_dict = validate_listing_fields(sent, property)
     if property.get("mandat_signed") or property.get("status") == "published":
         for f in LOCKED_AFTER_MANDATE_FIELDS:
             if f in update_dict and update_dict[f] != property.get(f):
-                raise HTTPException(status_code=400, detail=f"Le champ « {f} » ne peut plus être modifié après la signature du mandat")
+                raise api_error(400, "validation", f"Le champ « {LOCKED_FIELD_LABELS[f]} » ne peut plus être modifié après la "
+                                                   "signature du mandat", field=f)
     if update_dict:
+        merged = {**property, **update_dict}
+        update_dict.update(computed_property_fields(merged))
+        update_dict["address_key"] = address_key(merged.get("address"), merged.get("postal_code"))
         update_dict["updated_at"] = datetime.now(timezone.utc).isoformat()
         if property.get("status") == "removed":
             update_dict["status"] = "draft"
         await db.properties.update_one({"id": property_id}, {"$set": update_dict})
-    
+
     updated = await db.properties.find_one({"id": property_id}, {"_id": 0})
     if updated.get("status") == "draft" and listing_complete(updated) and is_user_verified(current_user):
-        if not updated.get("submitted_at") and not updated.get("blocking"):
-            # Brouillon jamais soumis (créé à l'écran 1) : soumission dès que l'annonce est complète
-            updated = await submit_listing(updated, current_user)
-        elif updated.get("blocking") and await has_signed_mandate(updated):
-            updated = await submit_listing(updated, current_user)
+        updated = await resubmit_if_ready(updated, current_user)
     elif updated.get("status") == "draft" and listing_complete(updated) and not updated.get("submitted_at") \
             and not property.get("draft_notified"):
         # Identité non vérifiée : brouillon complet, e-mail « enregistré en brouillon » une seule fois ; soumis à la vérification
         await db.properties.update_one({"id": property_id}, {"$set": {"draft_notified": True}})
         await email_user(current_user["id"], "listing_draft")
-    # Baisse de prix sur une annonce en ligne : les repreneurs intéressés (favoris, contacts, alertes) sont prévenus
+    # Baisse de prix sur une annonce en ligne : les acquéreurs intéressés (favoris, contacts) sont prévenus
     old_price, new_price = float(property.get("asking_price") or 0), float(updated.get("asking_price") or 0)
     if updated.get("status") == "published" and old_price > 0 and 0 < new_price < old_price:
         try:
             await notify_price_drop(updated, old_price, new_price)
         except Exception as e:
             logging.error(f"Notification de baisse de prix impossible: {e}")
-    return updated
+    return await attach_checks(owner_listing(updated), current_user)
+
+# ============ JUSTIFICATIF DE PROPRIÉTÉ (SPEC §5.2.3, API.md §2) ============
+# Stocké hors dossier du bien, visible du vendeur et de l'admin seulement ; contrôlé par l'admin (badge « Propriétaire
+# vérifié »). Statuts : missing → pending (dépôt) → verified | rejected (motif) ; un nouveau dépôt repasse en `pending`.
+OWNERSHIP_DOC_TYPES = {
+    "titre-propriete": "Titre de propriété (acte de vente)",
+    "attestation-notariee": "Attestation notariée de propriété",
+    "taxe-fonciere": "Avis de taxe foncière",
+    "statuts-kbis": "Statuts et extrait Kbis de la société propriétaire",
+}
+OWNERSHIP_STATUS_LABELS = {"missing": "non déposé", "pending": "à contrôler", "verified": "vérifié", "rejected": "refusé"}
+
+def ownership_view(property: dict) -> dict:
+    """Métadonnées du justificatif (vendeur, admin) ; le public ne voit que le statut"""
+    o = property.get("ownership") or {}
+    return {"status": o.get("status") or "missing", "status_label": OWNERSHIP_STATUS_LABELS.get(o.get("status") or "missing"),
+            "doc_type": o.get("doc_type"), "doc_type_label": OWNERSHIP_DOC_TYPES.get(o.get("doc_type") or ""),
+            "filename": o.get("filename"), "content_type": o.get("content_type"), "uploaded_at": o.get("uploaded_at"),
+            "reviewed_at": o.get("reviewed_at"), "note": o.get("note")}
+
+async def _owned_or_admin(property_id: str, user: dict) -> dict:
+    property = await db.properties.find_one({"id": property_id}, {"_id": 0})
+    if not property or (user.get("role") != "admin" and not is_property_owner(property, user)):
+        raise HTTPException(status_code=404, detail="Annonce introuvable")
+    return property
+
+@api_router.post("/properties/{property_id}/ownership-proof")
+async def upload_ownership_proof(property_id: str, file: UploadFile = File(...), doc_type: str = Form(...),
+                                 current_user: dict = Depends(get_current_user)):
+    """Vendeur : dépose le justificatif de propriété (PDF, JPEG, PNG, WebP) → {ownership: {status:'pending', doc_type,
+    uploaded_at, filename}} ; un brouillon bloqué par le justificatif est re-soumis (publication si tout est en ordre)"""
+    if current_user["role"] != "seller":
+        raise api_error(403, "not_allowed", "Seul le vendeur dépose le justificatif de propriété")
+    property = await db.properties.find_one({"id": property_id, "seller_id": current_user["id"]}, {"_id": 0})
+    if not property:
+        raise HTTPException(status_code=404, detail="Annonce introuvable")
+    if doc_type not in OWNERSHIP_DOC_TYPES:
+        raise api_error(400, "validation", "Type de justificatif inconnu : " + ", ".join(OWNERSHIP_DOC_TYPES), field="doc_type")
+    content = await read_upload(file, ALLOWED_DOCUMENT_TYPES)
+    stored = await save_file(content, file.content_type, f"ownership/{property_id}")
+    now = datetime.now(timezone.utc).isoformat()
+    previous = await db.ownership_proofs.find({"property_id": property_id}, {"_id": 0}).to_list(20)
+    for old in previous:
+        try:
+            await delete_file(old)
+        except Exception as e:  # fichier déjà absent : la référence est retirée quand même
+            logging.warning(f"Justificatif {old.get('id')} non supprimé du stockage ({e})")
+    await db.ownership_proofs.delete_many({"property_id": property_id})
+    proof = {"id": str(uuid.uuid4()), "property_id": property_id, "doc_type": doc_type, "filename": file.filename,
+             "content_type": file.content_type, **stored, "uploaded_at": now, "uploaded_by": current_user["id"]}
+    mark_test(proof, property, current_user)
+    await db.ownership_proofs.insert_one(proof)
+    ownership = {"status": "pending", "doc_type": doc_type, "filename": file.filename, "content_type": file.content_type,
+                 "uploaded_at": now, "proof_id": proof["id"], "reviewed_at": None, "reviewed_by": None, "note": None,
+                 "previous_status": (property.get("ownership") or {}).get("status")}
+    await db.properties.update_one({"id": property_id}, {"$set": {"ownership": ownership, "property_checks.ownership_verified": False,
+                                                                 "updated_at": now}})
+    await create_audit_log(action="OWNERSHIP_PROOF_UPLOADED", property_id=property_id, actor_id=current_user["id"],
+                           actor_email=current_user["email"], details={"doc_type": doc_type})
+    await email_user(current_user["id"], "ownership_received", property_title=property.get("title") or "votre annonce",
+                     doc_label=OWNERSHIP_DOC_TYPES[doc_type], link=site_url("/seller/dashboard"))
+    updated = await db.properties.find_one({"id": property_id}, {"_id": 0})
+    updated = await resubmit_if_ready(updated, current_user)
+    if updated.get("status") == "published" and property.get("status") == "published":
+        # Annonce déjà en ligne : nouveau justificatif à contrôler (ligne « À faire »)
+        await db.properties.update_one({"id": property_id}, {"$set": {"moderation.status": "pending", "moderation.review_until":
+                                                                     (datetime.now(timezone.utc) + timedelta(hours=MODERATION_REVIEW_HOURS)).isoformat()}})
+    return {"ownership": ownership_view({"ownership": ownership}), "listing_status": updated.get("status")}
+
+@api_router.get("/properties/{property_id}/ownership-proof")
+async def get_ownership_proof(property_id: str, current_user: dict = Depends(get_current_user)):
+    """Vendeur, admin : métadonnées du justificatif → {ownership: {status, doc_type, filename, uploaded_at, reviewed_at, note}}"""
+    property = await _owned_or_admin(property_id, current_user)
+    return {"ownership": ownership_view(property)}
+
+@api_router.get("/properties/{property_id}/ownership-proof/file")
+async def get_ownership_proof_file(property_id: str, current_user: dict = Depends(get_current_user)):
+    """Vendeur, admin : le fichier du justificatif (jamais servi à un acquéreur)"""
+    await _owned_or_admin(property_id, current_user)
+    proof = await db.ownership_proofs.find_one({"property_id": property_id}, {"_id": 0}, sort=[("uploaded_at", -1)])
+    if not proof:
+        raise HTTPException(status_code=404, detail="Aucun justificatif déposé")
+    data = await load_file(proof)
+    filename = re.sub(r'[^\w.\- ]', "_", proof.get("filename") or "justificatif")
+    return Response(content=data, media_type=proof.get("content_type") or "application/octet-stream",
+                    headers={"Content-Disposition": f'inline; filename="{filename}"', "Cache-Control": "private, no-store"})
+
+class OwnershipReview(BaseModel):
+    status: Literal["verified", "rejected"]
+    note: Optional[str] = Field(None, max_length=1000)
+
+@api_router.put("/admin/properties/{property_id}/ownership")
+async def admin_review_ownership(property_id: str, data: OwnershipReview, current_user: dict = Depends(require_admin)):
+    """Admin : valide ou refuse (motif obligatoire) le justificatif → {ownership} + e-mail au vendeur. Un refus retire
+    l'annonce du site (brouillon bloqué) jusqu'au dépôt d'un nouveau justificatif."""
+    property = await db.properties.find_one({"id": property_id}, {"_id": 0})
+    if not property:
+        raise HTTPException(status_code=404, detail="Annonce introuvable")
+    ownership = property.get("ownership") or {}
+    if ownership.get("status") not in ("pending", "verified", "rejected"):
+        raise api_error(400, "validation", "Aucun justificatif déposé pour cette annonce")
+    note = (data.note or "").strip() or None
+    if data.status == "rejected" and not note:
+        raise api_error(400, "validation", "Indiquez le motif du refus", field="note")
+    now = datetime.now(timezone.utc).isoformat()
+    ownership = {**ownership, "status": data.status, "reviewed_at": now, "reviewed_by": current_user["id"], "note": note}
+    update = {"ownership": ownership, "property_checks.ownership_verified": data.status == "verified", "updated_at": now}
+    if data.status == "rejected" and property.get("status") in ("published", "paused"):
+        update.update({"status": "draft", "blocking": labeled(["ownership_proof"], LISTING_BLOCKING_LABELS),
+                       "blocked_reason": "ownership_proof", "can_be_published": False, "unpublished_at": now})
+    await db.properties.update_one({"id": property_id}, {"$set": update})
+    if update.get("status") == "draft":
+        await close_pending_dataroom_requests(property_id, "draft", now)
+    await create_audit_log(action=f"OWNERSHIP_{data.status.upper()}", property_id=property_id, actor_id=current_user["id"],
+                           actor_email=current_user["email"], details={"note": note})
+    title = property.get("title") or "votre annonce"
+    if data.status == "verified":
+        await email_user(property.get("seller_id"), "ownership_verified", property_title=title, link=site_url("/seller/dashboard"))
+    else:
+        await email_user(property.get("seller_id"), "ownership_rejected", property_title=title, note=note,
+                         unpublished_line=("Votre annonce est retirée du site jusqu'au dépôt d'un nouveau justificatif."
+                                           if update.get("status") == "draft" else
+                                           "Votre annonce ne pourra pas être publiée sans un justificatif valable."),
+                         link=site_url("/seller/dashboard"))
+    return {"ownership": ownership_view({"ownership": ownership}), "listing_status": update.get("status") or property.get("status")}
 
 # ============ PHOTOS MANAGEMENT ============
 @api_router.post("/properties/{property_id}/photos")
@@ -2963,7 +2346,7 @@ async def upload_photo(
     """
     Upload d'une photo pour une annonce
     - public: visible par tous
-    - private: visible après signature NDA
+    - private: visible après l'engagement de confidentialité
     """
     if current_user["role"] != "seller":
         raise HTTPException(status_code=403, detail="Only sellers can upload photos")
@@ -3001,7 +2384,7 @@ async def get_property_photos(property_id: str, authorization: Optional[str] = H
     """
     Récupère les photos d'une annonce
     - Photos publiques: visibles par tous
-    - Photos privées: visibles si NDA signé
+    - Photos privées: visibles après l'engagement de confidentialité
     """
     current_user = await get_current_user_optional(authorization)
     
@@ -3046,7 +2429,7 @@ async def get_photo_content(property_id: str, photo_id: str, authorization: Opti
         if not is_property_owner(property, current_user) and current_user.get("role") != "admin":
             nda = await has_signed_nda(property_id, current_user.get("id"))
             if not nda:
-                raise HTTPException(status_code=403, detail="NDA required to view private photos")
+                raise api_error(403, "nda_required", "Photo visible après la signature de l'engagement de confidentialité")
     
     data = await load_file(photo)
     return {"filename": photo["filename"], "content": base64.b64encode(data).decode("utf-8"), "content_type": photo.get("content_type")}
@@ -3072,22 +2455,28 @@ async def delete_photo(property_id: str, photo_id: str, current_user: dict = Dep
     return {"message": "Photo deleted"}
 
 # ============ DATA ROOM MANAGEMENT ============
+# Catégories du dossier du bien (SPEC §6.3) ; avertissement affiché à chaque dépôt
 DATAROOM_CATEGORIES = [
-    {"id": "bilans", "label": "Bilans et comptes annuels"},
-    {"id": "kbis", "label": "Kbis et statuts"},
-    {"id": "contrats_clients", "label": "Contrats clients"},
-    {"id": "contrats_fournisseurs", "label": "Contrats fournisseurs"},
-    {"id": "baux", "label": "Baux et locaux"},
-    {"id": "rge_certificats", "label": "Certificats RGE"},
-    {"id": "assurances", "label": "Assurances"},
-    {"id": "ressources_humaines", "label": "Ressources humaines"},
-    {"id": "autres", "label": "Autres documents"},
+    {"id": "bail", "label": "Bail et avenants", "hint": "Bail en cours signé, avenants, éventuel acte de cautionnement."},
+    {"id": "etats-des-lieux", "label": "États des lieux", "hint": "État des lieux d'entrée (et de sortie du précédent locataire, le cas échéant)."},
+    {"id": "loyers", "label": "Loyers et quittances", "hint": "Relevé des loyers encaissés sur les 12 derniers mois, quittances, dernière révision."},
+    {"id": "diagnostics", "label": "Diagnostics", "hint": "DPE et dossier de diagnostic technique (amiante, plomb, électricité, gaz, ERP…)."},
+    {"id": "taxe-fonciere", "label": "Taxe foncière", "hint": "Dernier avis de taxe foncière."},
+    {"id": "copropriete", "label": "Copropriété", "hint": "Règlement, procès-verbaux des 3 dernières assemblées générales, fiche synthétique, appels de charges, carnet d'entretien."},
+    {"id": "titre-propriete", "label": "Titre de propriété", "hint": "Acte d'acquisition ou attestation notariée."},
+    {"id": "assurances", "label": "Assurances", "hint": "Assurance propriétaire non occupant (PNO), garantie loyers impayés (GLI)."},
+    {"id": "travaux", "label": "Travaux", "hint": "Factures et garanties des travaux réalisés."},
+    {"id": "societe", "label": "Société propriétaire", "hint": "Statuts, derniers bilans, procès-verbaux (vente des parts d'une SCI ou d'une société)."},
+    {"id": "autres", "label": "Autres documents", "hint": "Tout autre document utile à l'acquéreur."},
 ]
+DATAROOM_CATEGORY_IDS = [c["id"] for c in DATAROOM_CATEGORIES]
+DATAROOM_TENANT_WARNING = ("Masquez le nom, les coordonnées et les pièces d'identité du locataire : l'acquéreur n'en a pas besoin "
+                           "avant l'acte.")
 
 @api_router.get("/dataroom/categories")
 async def get_dataroom_categories():
-    """Retourne les catégories de documents pour la data room"""
-    return {"categories": DATAROOM_CATEGORIES}
+    """Catégories du dossier du bien [{id, label, hint}] et avertissement sur les données du locataire"""
+    return {"categories": DATAROOM_CATEGORIES, "warning": DATAROOM_TENANT_WARNING}
 
 @api_router.post("/dataroom/{property_id}/documents")
 async def upload_dataroom_document(
@@ -3099,17 +2488,19 @@ async def upload_dataroom_document(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Upload d'un document dans la data room par le vendeur
+    Dépôt d'un document dans le dossier du bien par le vendeur (catégories SPEC §6.3)
     """
     if current_user["role"] != "seller":
-        raise HTTPException(status_code=403, detail="Only sellers can upload documents")
+        raise api_error(403, "not_allowed", "Seul le vendeur dépose des documents dans le dossier du bien")
     
     property = await db.properties.find_one({"id": property_id, "seller_id": current_user["id"]})
     if not property:
-        raise HTTPException(status_code=404, detail="Property not found or not authorized")
+        raise HTTPException(status_code=404, detail="Annonce introuvable")
+    if category not in DATAROOM_CATEGORY_IDS:
+        raise api_error(400, "validation", "Catégorie de document inconnue", field="category")
     
     content = await read_upload(file, ALLOWED_DOCUMENT_TYPES)
-    # Chaque consultation par un repreneur est filigranée : un fichier non filigranable (PDF protégé par mot de passe,
+    # Chaque consultation par un acquéreur est filigranée : un fichier non filigranable (PDF protégé par mot de passe,
     # illisible) est refusé dès le dépôt plutôt que servi en clair
     try:
         await asyncio.to_thread(apply_watermark, content, file.content_type, "CONFIDENTIEL - contrôle", True)
@@ -3134,14 +2525,15 @@ async def upload_dataroom_document(
     await db.dataroom.insert_one(doc)
     doc.pop("_id", None)
     doc.pop("content", None)
+    doc["warning"] = DATAROOM_TENANT_WARNING
     return doc
 
 @api_router.get("/dataroom/{property_id}/documents")
 async def list_dataroom_documents(property_id: str, current_user: dict = Depends(get_current_user)):
     """
-    Liste les documents de la data room
+    Liste les documents du dossier du bien
     - Vendeur: voit tout
-    - Acheteur: voit uniquement si accès accordé (identité, accord de confidentialité, origine des fonds)
+    - Acheteur: voit uniquement si accès accordé (identité, engagement de confidentialité, origine des fonds)
     """
     property = await db.properties.find_one({"id": property_id}, {"_id": 0})
     if not property:
@@ -3152,7 +2544,7 @@ async def list_dataroom_documents(property_id: str, current_user: dict = Depends
         docs = await db.dataroom.find({"property_id": property_id}, {"_id": 0, "content": 0}).to_list(100)
         return {"documents": docs, "access_granted": True}
     
-    # Accès du repreneur : demande acceptée, identité vérifiée, NDA signé, origine des fonds déclarée
+    # Accès de l'acquéreur : demande acceptée, identité vérifiée, NDA signé, origine des fonds déclarée
     access = await db.dataroom_access.find_one({
         "property_id": property_id,
         "buyer_id": current_user["id"],
@@ -3160,7 +2552,7 @@ async def list_dataroom_documents(property_id: str, current_user: dict = Depends
     })
     
     if not access:
-        return {"documents": [], "access_granted": False, "message": "L'accès au dossier s'ouvre après l'accord de confidentialité et la déclaration d'origine des fonds."}
+        return {"documents": [], "access_granted": False, "message": "L'accès au dossier s'ouvre après l'engagement de confidentialité et la déclaration d'origine des fonds."}
     
     docs = await db.dataroom.find({"property_id": property_id}, {"_id": 0, "content": 0}).to_list(100)
     
@@ -3177,7 +2569,7 @@ async def list_dataroom_documents(property_id: str, current_user: dict = Depends
 @api_router.post("/dataroom/{property_id}/documents/{doc_id}/view")
 async def view_dataroom_document(property_id: str, doc_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     """
-    Visualise un document de la data room (avec filigrane et log d'accès)
+    Visualise un document du dossier du bien (avec filigrane et log d'accès)
     Retourne le document en base64 pour affichage avec filigrane
     """
     property = await db.properties.find_one({"id": property_id}, {"_id": 0})
@@ -3201,7 +2593,7 @@ async def view_dataroom_document(property_id: str, doc_id: str, background_tasks
             can_access = True
     
     if not can_access:
-        raise api_error(403, "not_allowed", "L'accès au dossier s'ouvre après l'accord de confidentialité et la déclaration d'origine des fonds")
+        raise api_error(403, "not_allowed", "L'accès au dossier s'ouvre après l'engagement de confidentialité et la déclaration d'origine des fonds")
     
     doc = await db.dataroom.find_one({"id": doc_id, "property_id": property_id})
     if not doc:
@@ -3245,7 +2637,7 @@ async def view_dataroom_document(property_id: str, doc_id: str, background_tasks
     
     if watermark_failed:
         raise api_error(409, "watermark_failed", "Ce document ne peut pas être filigrané (fichier protégé ou illisible) : "
-                                                 "il n'est pas consultable. Demandez au cédant de déposer une version PDF non protégée.")
+                                                 "il n'est pas consultable. Demandez au vendeur de déposer une version PDF non protégée.")
     
     # Return document content in base64 for viewing
     return {
@@ -3264,7 +2656,7 @@ async def view_dataroom_document(property_id: str, doc_id: str, background_tasks
 @api_router.get("/dataroom/{property_id}/access-log")
 async def get_dataroom_access_log(property_id: str, current_user: dict = Depends(get_current_user)):
     """
-    Récupère le journal d'accès à la data room (pour vendeur et admin)
+    Récupère le journal d'accès au dossier du bien (pour vendeur et admin)
     """
     property = await db.properties.find_one({"id": property_id}, {"_id": 0})
     if not property:
@@ -3287,7 +2679,7 @@ async def get_dataroom_access_log(property_id: str, current_user: dict = Depends
 @api_router.get("/dataroom/{property_id}/audit-trail")
 async def get_dataroom_audit_trail(property_id: str, current_user: dict = Depends(get_current_user)):
     """
-    Récupère le journal d'audit blockchain-like pour une entreprise (vendeur et admin)
+    Récupère le journal d'audit blockchain-like pour un bien (vendeur et admin)
     Ce journal est immuable et peut servir de preuve juridique.
     """
     property = await db.properties.find_one({"id": property_id}, {"_id": 0})
@@ -3329,18 +2721,18 @@ async def get_dataroom_audit_trail(property_id: str, current_user: dict = Depend
 @api_router.get("/dataroom/{property_id}/documents/{doc_id}/download")
 async def download_dataroom_document(property_id: str, doc_id: str, current_user: dict = Depends(get_current_user)):
     """
-    DÉSACTIVÉ - Téléchargement non autorisé pour la data room sécurisée
+    DÉSACTIVÉ - Téléchargement non autorisé pour le dossier du bien sécurisé
     Les documents sont consultables uniquement via l'endpoint /view
     """
     raise HTTPException(
         status_code=403, 
-        detail="Téléchargement non autorisé. Les documents de la data room sont consultables uniquement en ligne avec filigrane."
+        detail="Téléchargement non autorisé. Les documents du dossier du bien sont consultables uniquement en ligne avec filigrane."
     )
 
 @api_router.delete("/dataroom/{property_id}/documents/{doc_id}")
 async def delete_dataroom_document(property_id: str, doc_id: str, current_user: dict = Depends(get_current_user)):
     """
-    Supprime un document de la data room (vendeur uniquement)
+    Supprime un document du dossier du bien (vendeur uniquement)
     """
     if current_user["role"] != "seller":
         raise HTTPException(status_code=403, detail="Only sellers can delete documents")
@@ -3358,13 +2750,13 @@ async def delete_dataroom_document(property_id: str, doc_id: str, current_user: 
     return {"message": "Document deleted"}
 
 # ============ DEMANDE DE DOSSIER (DATA ROOM) : demande → acceptation → identité → NDA → origine des fonds → accès ============
-# API.md §4. Statuts d'une demande : pending → accepted (cédant ou acceptation automatique) → granted (les trois étapes
+# API.md §4. Statuts d'une demande : pending → accepted (vendeur ou acceptation automatique) → granted (les trois étapes
 # faites) ; rejected ; expired (J+10 sans réponse). Les statuts `validated` / `loi_pending` de la vague 1 valent `accepted`.
 DATAROOM_REQUEST_EXPIRY_DAYS = 10
 DATAROOM_REMINDER_DAYS = (2, 5)
 FUNDS_SOURCE_LABELS = {"fonds-propres": "fonds propres", "emprunt": "emprunt bancaire", "mixte": "apport personnel et emprunt",
                        "investisseurs": "investisseurs ou associés"}
-DATAROOM_STEP_LABELS = {"identity": "vérifier votre identité", "nda": "signer l'accord de confidentialité",
+DATAROOM_STEP_LABELS = {"identity": "vérifier votre identité", "nda": "signer l'engagement de confidentialité",
                         "funds": "déclarer l'origine des fonds"}
 
 class AccessRequestCreate(BaseModel):
@@ -3413,11 +2805,11 @@ async def grant_dataroom_access(access: dict, now: Optional[datetime] = None) ->
         return False
     property = await db.properties.find_one({"id": access["property_id"]}, {"_id": 0, "seller_id": 1, "title": 1, "company_name": 1})
     await system_message(access["property_id"], access["buyer_id"],
-                         "Identité vérifiée, accord de confidentialité signé et origine des fonds déclarée : l'accès au dossier est ouvert.",
+                         "Identité vérifiée, engagement de confidentialité signé et origine des fonds déclarée : l'accès au dossier est ouvert.",
                          "dataroom_granted")
     await create_audit_log(action="DATAROOM_GRANTED", property_id=access["property_id"], actor_id="system", actor_email="",
                            target_id=access["buyer_id"], details={"request_id": access["id"]})
-    await email_user(access["buyer_id"], "dataroom_granted", property_title=(property or {}).get("title") or "l'entreprise",
+    await email_user(access["buyer_id"], "dataroom_granted", property_title=(property or {}).get("title") or "le bien",
                      link=site_url(f"/dataroom/{access['property_id']}"))
     if property:
         await email_user(property.get("seller_id"), "dataroom_granted_seller",
@@ -3425,7 +2817,7 @@ async def grant_dataroom_access(access: dict, now: Optional[datetime] = None) ->
     return True
 
 async def accept_access_request(access: dict, property: dict, by: Optional[dict], now: datetime, auto: bool = False) -> None:
-    """Acceptation (cédant ou automatique) : étapes communiquées au repreneur, e-mail « dossier accepté » avec la checklist"""
+    """Acceptation (vendeur ou automatique) : étapes communiquées à l'acquéreur, e-mail « dossier accepté » avec la checklist"""
     await db.dataroom_access.update_one({"id": access["id"]}, {"$set": {
         "status": "accepted", "accepted_at": now.isoformat(), "validated_at": now.isoformat(), "auto_accepted": auto,
         "accepted_by": by["id"] if by else "auto"}, "$unset": {"expires_at": ""}})
@@ -3433,14 +2825,14 @@ async def accept_access_request(access: dict, property: dict, by: Optional[dict]
     steps = await dataroom_steps(property["id"], buyer, access)
     pending = [k for k in ("identity", "nda", "funds") if not steps.get(k)]
     checklist = " ; ".join(DATAROOM_STEP_LABELS[k] for k in pending) if pending else "toutes les étapes sont faites"
-    content = ("Votre demande de dossier est acceptée automatiquement." if auto else "Le cédant a accepté votre demande de dossier.") \
+    content = ("Votre demande de dossier est acceptée automatiquement." if auto else "Le vendeur a accepté votre demande de dossier.") \
         + " Prochaines étapes : " + checklist + "."
     await system_message(property["id"], access["buyer_id"], content, "access_accepted", receiver_id=access["buyer_id"])
     await create_audit_log(action="ACCESS_ACCEPTED", property_id=property["id"], actor_id=by["id"] if by else "auto",
                            actor_email=(by or {}).get("email") or "", target_id=access["buyer_id"], details={"request_id": access["id"], "auto": auto})
     checklist_html = "".join(f"<li>{html_escape(DATAROOM_STEP_LABELS[k])}</li>" for k in pending) \
         or "<li>toutes les étapes sont déjà faites : l'accès s'ouvre automatiquement</li>"
-    await email_user(access["buyer_id"], "dataroom_accepted", property_title=property.get("title") or "l'entreprise",
+    await email_user(access["buyer_id"], "dataroom_accepted", property_title=property.get("title") or "le bien",
                      checklist=checklist_html, link=site_url(f"/dataroom/{property['id']}"))
     if auto:
         card = await buyer_card(access["buyer_id"])
@@ -3452,17 +2844,17 @@ async def accept_access_request(access: dict, property: dict, by: Optional[dict]
 @api_router.post("/dataroom/{property_id}/request-access")
 async def request_dataroom_access(property_id: str, background_tasks: BackgroundTasks, data: Optional[AccessRequestCreate] = None,
                                   current_user: dict = Depends(get_current_user)):
-    """Demande de dossier du repreneur (adresse confirmée, profil ≥ 40) → {request_id, status: 'pending'|'accepted'}.
-    Acceptation immédiate si l'annonce a l'option `auto_accept_dataroom` et que le profil est ≥ 50 ; sinon le cédant
+    """Demande de dossier de l'acquéreur (adresse confirmée, profil ≥ 40) → {request_id, status: 'pending'|'accepted'}.
+    Acceptation immédiate si l'annonce a l'option `auto_accept_dataroom` et que le profil est ≥ 50 ; sinon le vendeur
     est relancé à J+2 et J+5 et la demande expire à J+10."""
     if current_user["role"] != "buyer":
-        raise api_error(403, "not_allowed", "Seuls les repreneurs demandent l'accès au dossier")
+        raise api_error(403, "not_allowed", "Seuls les acquéreurs demandent l'accès au dossier")
     require_verified_email(current_user)
     require_buyer_profile(current_user)
 
     property = await db.properties.find_one({"id": property_id}, {"_id": 0})
     if not property or property.get("status") != "published":
-        raise HTTPException(status_code=404, detail="Entreprise introuvable")
+        raise HTTPException(status_code=404, detail="Annonce introuvable")
     now = datetime.now(timezone.utc)
     message = ((data.message if data else None) or "").strip()
 
@@ -3487,9 +2879,9 @@ async def request_dataroom_access(property_id: str, background_tasks: Background
         await db.dataroom_access.insert_one(access_request)
     access_request.pop("_id", None)
 
-    # Le repreneur demande le dossier ; le cédant reçoit la carte repreneur
+    # L'acquéreur demande le dossier ; le vendeur reçoit la carte acquéreur
     await store_message(conversation, current_user,
-                        message or "Je souhaite consulter le dossier de cette entreprise. Pouvez-vous accepter ma demande ?",
+                        message or "Je souhaite consulter le dossier de ce bien. Pouvez-vous accepter ma demande ?",
                         now, message_type="access_request")
     await create_audit_log(action="ACCESS_REQUEST", property_id=property_id, actor_id=current_user["id"],
                            actor_email=current_user["email"], target_id=property.get("seller_id"), details={"request_id": access_request["id"]})
@@ -3500,7 +2892,7 @@ async def request_dataroom_access(property_id: str, background_tasks: Background
     background_tasks.add_task(email_user, property.get("seller_id"), "access_request", buyer_label=card["label"],
                               card_rows=buyer_card_html(card), message=message or "(sans message)",
                               property_title=property.get("title") or "votre annonce", link=site_url("/seller/dashboard"))
-    return {"request_id": access_request["id"], "status": "pending", "message": "Demande transmise au cédant"}
+    return {"request_id": access_request["id"], "status": "pending", "message": "Demande transmise au vendeur"}
 
 async def access_request_view(req: dict, property: dict) -> dict:
     buyer = await db.users.find_one({"id": req["buyer_id"]}, USER_SAFE_PROJECTION)
@@ -3524,7 +2916,7 @@ async def access_request_view(req: dict, property: dict) -> dict:
 
 @api_router.get("/dataroom/{property_id}/access-requests")
 async def get_access_requests(property_id: str, current_user: dict = Depends(get_current_user)):
-    """Cédant : demandes de dossier avec carte repreneur et étapes → [{id, buyer_id, buyer_card, message, status, created_at, expires_at, steps}]"""
+    """Vendeur : demandes de dossier avec carte acquéreur et étapes → [{id, buyer_id, buyer_card, message, status, created_at, expires_at, steps}]"""
     property = await db.properties.find_one({"id": property_id}, {"_id": 0})
     if not property or (current_user.get("role") != "admin" and not is_property_owner(property, current_user)):
         raise HTTPException(status_code=404, detail="Property not found or not authorized")
@@ -3549,7 +2941,7 @@ async def _owned_request(property_id: str, request_id: str, current_user: dict) 
 
 @api_router.put("/dataroom/{property_id}/access/{request_id}/validate")
 async def validate_access_request(property_id: str, request_id: str, current_user: dict = Depends(get_current_user)):
-    """Cédant : accepte la demande en un geste → {status:'accepted'} ; le repreneur passe aux étapes identité → NDA → fonds"""
+    """Vendeur : accepte la demande en un geste → {status:'accepted'} ; l'acquéreur passe aux étapes identité → NDA → fonds"""
     property, access_request = await _owned_request(property_id, request_id, current_user)
     status = access_request_status(access_request)
     if status == "accepted":
@@ -3557,12 +2949,12 @@ async def validate_access_request(property_id: str, request_id: str, current_use
     if status not in ("pending", "expired"):
         raise api_error(400, "validation", "Cette demande a déjà été traitée")
     await accept_access_request(access_request, property, current_user, datetime.now(timezone.utc))
-    return {"status": "accepted", "message": "Demande acceptée : le repreneur doit vérifier son identité, signer l'accord de confidentialité et déclarer l'origine des fonds"}
+    return {"status": "accepted", "message": "Demande acceptée : l'acquéreur doit vérifier son identité, signer l'engagement de confidentialité et déclarer l'origine des fonds"}
 
 @api_router.put("/dataroom/{property_id}/access/{request_id}/reject")
 async def reject_access_request(property_id: str, request_id: str, reason: Optional[str] = None, data: Optional[AccessRejectInput] = None,
                                 current_user: dict = Depends(get_current_user)):
-    """Cédant : refuse la demande (motif facultatif, en corps `{reason}` ou en paramètre)"""
+    """Vendeur : refuse la demande (motif facultatif, en corps `{reason}` ou en paramètre)"""
     property, access_request = await _owned_request(property_id, request_id, current_user)
     reason = ((data.reason if data else None) or reason or "").strip() or None
     now = datetime.now(timezone.utc).isoformat()
@@ -3571,7 +2963,7 @@ async def reject_access_request(property_id: str, request_id: str, reason: Optio
     await create_audit_log(action="ACCESS_REJECTED", property_id=property_id, actor_id=current_user["id"], actor_email=current_user["email"],
                            target_id=access_request.get("buyer_id"), details={"request_id": request_id, "reason": reason})
     if access_request.get("status") != "rejected":
-        await system_message(property_id, access_request["buyer_id"], "Le cédant n'a pas donné suite à votre demande de dossier."
+        await system_message(property_id, access_request["buyer_id"], "Le vendeur n'a pas donné suite à votre demande de dossier."
                              + (f" Motif : {reason}" if reason else ""), "access_rejected", receiver_id=access_request["buyer_id"])
         await email_user(access_request.get("buyer_id"), "access_rejected", reason=reason or "non précisé", link=site_url("/"))
     return {"status": "rejected", "message": "Demande refusée"}
@@ -3580,15 +2972,15 @@ async def reject_access_request(property_id: str, request_id: str, reason: Optio
 async def declare_funds(property_id: str, data: FundsDeclaration, current_user: dict = Depends(get_current_user)):
     """Déclaration d'origine des fonds (après identité et NDA) → accès accordé automatiquement {access_granted:true}"""
     if current_user["role"] != "buyer":
-        raise api_error(403, "not_allowed", "Seuls les repreneurs déclarent l'origine des fonds")
+        raise api_error(403, "not_allowed", "Seuls les acquéreurs déclarent l'origine des fonds")
     access = await dataroom_request_for(property_id, current_user["id"])
     status = access_request_status(access)
     if status not in ("accepted", "granted"):
-        raise api_error(403, "not_allowed", "Le cédant doit d'abord accepter votre demande de dossier")
+        raise api_error(403, "not_allowed", "Le vendeur doit d'abord accepter votre demande de dossier")
     if not is_user_verified(current_user):
         raise api_error(403, "identity_required", "Vérifiez votre identité avant de déclarer l'origine des fonds")
     if not (access.get("nda_signed_at") or await has_signed_nda(property_id, current_user["id"])):
-        raise api_error(403, "nda_required", "Signez l'accord de confidentialité avant de déclarer l'origine des fonds")
+        raise api_error(403, "nda_required", "Signez l'engagement de confidentialité avant de déclarer l'origine des fonds")
     now = datetime.now(timezone.utc)
     declaration = {"source": data.source, "source_label": FUNDS_SOURCE_LABELS[data.source], "amount": float(data.amount),
                    "financing_partner": (data.financing_partner or "").strip() or None, "declared_at": now.isoformat(),
@@ -3605,7 +2997,7 @@ DATAROOM_OPEN_LISTING_STATUSES = ("published", "paused")
 
 async def close_pending_dataroom_requests(property_id: str, listing_status: Optional[str], now) -> int:
     """Clôt les demandes de dossier en attente d'une annonce qui n'est plus en ligne (retirée, vendue autrement,
-    retirée par l'administrateur) : message système au repreneur, aucune relance ni expiration ensuite."""
+    retirée par l'administrateur) : message système à l'acquéreur, aucune relance ni expiration ensuite."""
     at = now.isoformat() if isinstance(now, datetime) else str(now)
     closed = 0
     async for req in db.dataroom_access.find({"property_id": property_id, "status": "pending"}, {"_id": 0, "id": 1, "buyer_id": 1}):
@@ -3618,7 +3010,7 @@ async def close_pending_dataroom_requests(property_id: str, listing_status: Opti
     return closed
 
 async def job_dataroom_requests(now: datetime) -> int:
-    """Demandes de dossier sans réponse : relances du cédant à J+2 et J+5 (carte repreneur), expiration à J+10 avec e-mail au repreneur"""
+    """Demandes de dossier sans réponse : relances du vendeur à J+2 et J+5 (carte acquéreur), expiration à J+10 avec e-mail à l'acquéreur"""
     count = 0
     async for req in db.dataroom_access.find({"status": "pending"}, {"_id": 0}):
         requested = _parse_dt(req.get("requested_at") or req.get("created_at"))
@@ -3628,7 +3020,7 @@ async def job_dataroom_requests(now: datetime) -> int:
         if not property:
             continue
         if property.get("status") not in DATAROOM_OPEN_LISTING_STATUSES:
-            # Annonce retirée, vendue ou supprimée : la demande est close, sans relance au cédant ni e-mail d'expiration
+            # Annonce retirée, vendue ou supprimée : la demande est close, sans relance au vendeur ni e-mail d'expiration
             await close_pending_dataroom_requests(property["id"], property.get("status"), now)
             continue
         # Une demande renouvelée après expiration garde son id : les clés de relance portent la date de la demande
@@ -3640,9 +3032,9 @@ async def job_dataroom_requests(now: datetime) -> int:
                 continue
             await db.dataroom_access.update_one({"id": req["id"]}, {"$set": {"status": "expired", "expired_at": now.isoformat()}})
             await system_message(req["property_id"], req["buyer_id"],
-                                 "Le cédant n'a pas répondu à votre demande de dossier dans les 10 jours. Nous l'avons relancé ; vous pouvez renouveler votre demande.",
+                                 "Le vendeur n'a pas répondu à votre demande de dossier dans les 10 jours. Nous l'avons relancé ; vous pouvez renouveler votre demande.",
                                  "access_expired", receiver_id=req["buyer_id"])
-            await email_user(req["buyer_id"], "dataroom_request_expired", property_title=property.get("title") or "l'entreprise",
+            await email_user(req["buyer_id"], "dataroom_request_expired", property_title=property.get("title") or "le bien",
                              link=site_url(f"/dataroom/{req['property_id']}"))
             count += 1
             continue
@@ -3650,7 +3042,7 @@ async def job_dataroom_requests(now: datetime) -> int:
         if not due:
             continue
         day = due[-1]
-        # Relance d'une démarche engagée par un repreneur : transactionnelle (la page de désinscription promet que les
+        # Relance d'une démarche engagée par un acquéreur : transactionnelle (la page de désinscription promet que les
         # demandes de dossier continuent de parvenir), toujours limitée à une relance par jour et par personne
         if not await send_reminder(property.get("seller_id"), "dataroom_request_reminder", f"{cycle}:{day}", now,
                                    template="dataroom_request_reminder", transactional=True, days=str(day),
@@ -3663,7 +3055,7 @@ async def job_dataroom_requests(now: datetime) -> int:
 
 @api_router.post("/admin/dataroom/{request_id}/remind")
 async def admin_remind_dataroom_request(request_id: str, current_user: dict = Depends(require_admin)):
-    """Admin (todo « Demandes de dossier sans réponse ») : relance humaine du cédant pour une demande en attente,
+    """Admin (todo « Demandes de dossier sans réponse ») : relance humaine du vendeur pour une demande en attente,
     au plus une fois par jour et par demande (e-mail transactionnel, indépendant des relances J+2/J+5) → {sent, reminded_at}"""
     req = await db.dataroom_access.find_one({"id": request_id}, {"_id": 0})
     if not req:
@@ -3675,7 +3067,7 @@ async def admin_remind_dataroom_request(request_id: str, current_user: dict = De
         raise api_error(400, "validation", "L'annonce n'est plus en ligne")
     now = datetime.now(timezone.utc)
     if not await claim_once("dataroom_request_admin_reminder", f"{request_id}:{now.strftime('%Y-%m-%d')}"):
-        raise api_error(409, "already_reminded", "Le cédant a déjà été relancé aujourd'hui pour cette demande")
+        raise api_error(409, "already_reminded", "Le vendeur a déjà été relancé aujourd'hui pour cette demande")
     requested = _parse_dt(req.get("requested_at") or req.get("created_at")) or now
     expires = _parse_dt(req.get("expires_at")) or (requested + timedelta(days=DATAROOM_REQUEST_EXPIRY_DAYS))
     await email_user(property.get("seller_id"), "dataroom_request_reminder", days=str(max((now - requested).days, 1)),
@@ -3688,15 +3080,17 @@ async def admin_remind_dataroom_request(request_id: str, current_user: dict = De
     return {"sent": True, "reminded_at": now.isoformat()}
 
 def commission_info_for(property: dict) -> dict:
-    """Commission affichée sur la fiche : toujours à la charge du cédant (barème v2). Les anciennes annonces dont le
-    mandat (v1) désignait le repreneur comme débiteur gardent leur bandeau : aucune nouvelle ne peut l'avoir."""
-    legacy_payer = property.get("commission_payer")
-    payer = "repreneur" if legacy_payer == "repreneur" else COMMISSION_PAYER
+    """Honoraires affichés sur la fiche (SPEC §7.1) : toujours à la charge du vendeur, TTC d'abord, estimation sur le prix
+    demandé → {payer:'vendeur', rate_percent_ttc, rate_percent_ht, estimate_ht, estimate_ttc, minimum_ht, minimum_ttc,
+    terms_version}"""
+    config = commission_config()
     info = {
-        "payer": payer,
-        "rate_percent_ht": "6 %",
-        "minimum_ht": commission_minimum_ht(),
-        "terms_version": property.get("commission_terms_version") or ("v1" if legacy_payer else COMMISSION_TERMS_VERSION),
+        "payer": COMMISSION_PAYER,
+        "rate_percent_ttc": config["rate_percent_ttc"],
+        "rate_percent_ht": config["rate_percent_ht"],
+        "minimum_ht": config["minimum_ht"],
+        "minimum_ttc": config["minimum_ttc"],
+        "terms_version": property.get("commission_terms_version") or COMMISSION_TERMS_VERSION,
         "estimate_ht": None,
         "estimate_ttc": None,
     }
@@ -3704,21 +3098,6 @@ def commission_info_for(property: dict) -> dict:
         c = calculate_commission(float(property["asking_price"]))
         info.update({"estimate_ht": c["final_commission_ht"], "estimate_ttc": c["final_commission_ttc"], "base": "prix demandé"})
     return info
-
-def buyer_commission_clause(property: dict) -> str:
-    """Clause d'information de l'acquéreur, uniquement pour les anciennes annonces (mandat v1, repreneur débiteur)"""
-    info = commission_info_for(property)
-    if info["payer"] != "repreneur":
-        return ""
-    estimate = ""
-    if info.get("estimate_ttc") is not None:
-        eur = lambda v: f"{v:,.0f}".replace(",", " ") + " €"
-        estimate = (f" À titre indicatif, sur la base du prix demandé, elle s'élèverait à {eur(info['estimate_ttc'])} TTC "
-                    f"({eur(info['estimate_ht'])} HT) ; son montant définitif est calculé sur le prix de cession.")
-    return ("Commission à la charge de l'Acheteur — Information\n\n"
-            "Aux termes du mandat confié par le Vendeur, la commission de cession est à la charge de l'Acheteur, "
-            f"en cas de réalisation de l'opération uniquement, selon le barème suivant : {commission_scale_text()}.{estimate} "
-            "Aucune somme n'est due avant la signature de l'acte de cession.\n\n")
 
 # ============ CONTRATS v2 : variables, chaîne de preuve, PDF (SPEC §3.2 à §3.5) ============
 from zoneinfo import ZoneInfo
@@ -3764,94 +3143,131 @@ def fmt_address(value) -> str:
         return ", ".join(p for p in parts + [locality] if p)
     return " ".join(str(value or "").split())
 
-SALE_OBJECT_CESSION = {
-    "titres": "la cession de la totalité des titres de la société {name}",
-    "fonds": "la cession du fonds de commerce exploité par la société {name}",
-    "indifferent": "la cession de la société {name}, par cession de titres ou de fonds de commerce au choix des parties",
+# Objet de la vente dans les contrats (mandat, offre d'achat) et dans les e-mails
+SALE_OBJECT_MANDATE = {
+    "bien": "la vente du bien",
+    "parts": "la cession des parts de la société propriétaire du bien{company}",
+    "indifferent": "la vente du bien ou la cession des parts de la société propriétaire{company}, au choix des parties",
 }
-SALE_OBJECT_ACQUISITION = {
-    "titres": "la totalité des titres de la société {name}",
-    "fonds": "le fonds de commerce exploité par la société {name}",
+SALE_OBJECT_OFFER = {
+    "bien": "le bien désigné ci-dessus, vendu occupé",
+    "parts": "la totalité des parts de la société{company} propriétaire du bien désigné ci-dessus",
 }
-SALE_OBJECT_LABELS = {"titres": "cession de titres", "fonds": "cession de fonds de commerce", "indifferent": "titres ou fonds de commerce"}
-MANDANT_CAPACITY_LABELS = {"dirigeant": "dirigeant", "associe": "associé", "mandataire": "mandataire des associés"}
+SALE_OBJECT_LABELS = {"bien": "achat du bien", "parts": "achat des parts de la société propriétaire",
+                      "indifferent": "vente du bien ou des parts"}
+MANDANT_CAPACITY_LABELS = {"proprietaire": "propriétaire du bien", "coindivisaire": "co-indivisaire du bien",
+                           "gerant": "gérant de la société propriétaire", "mandataire": "mandataire du propriétaire"}
 
-def property_siege(property: dict) -> str:
-    """Siège : adresse connue, sinon département et région (jamais vide)"""
-    if property.get("address"):
-        return fmt_address(property["address"])
-    parts = []
-    if property.get("department"):
-        parts.append(taxonomy.departement_label(property["department"]))
-    if property.get("region"):
-        parts.append(str(property["region"]))
-    return ", ".join(p for p in parts if p) or "France"
+def property_address_text(property: dict) -> str:
+    """Adresse complète du bien (confidentielle) : « 12 rue X, 69007 Lyon »"""
+    locality = " ".join(str(property.get(k) or "").strip() for k in ("postal_code", "city")).strip()
+    return ", ".join(p for p in [str(property.get("address") or "").strip(), locality] if p)
 
-def property_activity_label(property: dict) -> str:
-    labels = [taxonomy.trade_label(t, short=True) for t in (property.get("trades") or []) if taxonomy.trade_by_id(t)]
-    return ", ".join(labels) if labels else "entreprise du bâtiment"
+def property_location_text(property: dict) -> str:
+    """Localisation publique : « Lyon (69) »"""
+    city = str(property.get("city") or "").strip()
+    dep = property.get("department")
+    if city and dep:
+        return f"{city} ({dep})"
+    return city or (taxonomy.departement_label(dep) if dep else "") or "France"
 
-def property_qualifications_label(property: dict) -> str:
-    rge = list(property.get("rge_types") or [])
-    others = [taxonomy.other_qualification_label(q) for q in (property.get("other_qualifications") or [])]
-    items = rge + [o for o in others if o]
-    return ", ".join(items) if items else "aucune qualification déclarée"
+def company_text(property: dict, with_siege: bool = True) -> str:
+    """« SCI des Tilleuls (SIREN 123 456 789, siège : …) » ; '' sans société"""
+    name = (property.get("company_name") or "").strip()
+    if not name:
+        return ""
+    siren = re.sub(r"\D", "", str(property.get("siret") or ""))[:9]
+    details = [f"SIREN {fmt_siren_fr(siren)}"] if len(siren) == 9 else []
+    siege = ((property.get("company_lookup") or {}).get("adresse") or "").strip()
+    if with_siege and siege:
+        details.append(f"siège : {siege}")
+    return name + (f" ({', '.join(details)})" if details else "")
 
 def mandant_capacity(property: dict, user: dict) -> str:
-    """Qualité du signataire : déclarée sur l'annonce (`mandant_capacity`), sinon déduite du contrôle de dirigeant"""
-    declared = MANDANT_CAPACITY_LABELS.get(property.get("mandant_capacity") or "")
-    if declared:
-        return declared
-    checks = property.get("property_checks") or {}
-    if property.get("president_id") == user.get("id") or property.get("dirigeant_verified") \
-            or checks.get("dirigeant_match") in ("match_exact", "match_partial"):
-        return "dirigeant"
-    return "mandataire des associés"
+    """Qualité du signataire du mandat (SPEC §7.2 art. 1), en toutes lettres"""
+    capacity = property.get("mandant_capacity") or ("gerant" if property.get("owner_type") in COMPANY_OWNER_TYPES else "proprietaire")
+    if capacity == "coindivisaire":
+        return "co-indivisaire du bien, déclarant agir avec l'accord de tous les indivisaires"
+    if capacity == "gerant":
+        return f"gérant de la société {company_text(property)}, propriétaire du bien"
+    if capacity == "mandataire":
+        return ("mandataire du propriétaire du bien, en vertu d'un pouvoir écrit qu'il s'engage à présenter au Mandataire et au "
+                "notaire à première demande")
+    return "propriétaire du bien"
+
+def lease_summary(property: dict) -> dict:
+    """Variables du bail en cours (mandat, offre d'achat)"""
+    deposit = property.get("deposit")
+    return {
+        "BAIL_TYPE": taxonomy.lease_type_label(property.get("lease_type")).lower() or "bail en cours",
+        "LOYER": fmt_eur_fr(property["rent_monthly"]) if property.get("rent_monthly") else "",
+        "BAIL_DEBUT": fmt_date_fr(property.get("lease_start")) if property.get("lease_start") else "",
+        "DEPOT": (f"dépôt de garantie versé par le locataire : {fmt_eur_fr(deposit)}" if isinstance(deposit, (int, float)) and deposit > 0
+                  else "aucun dépôt de garantie n'a été versé par le locataire"),
+    }
+
+def copro_text(property: dict) -> str:
+    if property.get("is_copro"):
+        lots = property.get("copro_lots")
+        text = f"Le bien dépend d'une copropriété de {lots} lots" if lots else "Le bien dépend d'une copropriété"
+        if property.get("copro_procedure"):
+            text += " qui fait l'objet d'une procédure en cours (articles 29-1 A et 29-1 de la loi du 10 juillet 1965)"
+        return text + "."
+    if property.get("is_copro") is False:
+        return "Le bien ne dépend pas d'une copropriété."
+    return "Le Mandant précise sur l'annonce si le bien dépend d'une copropriété."
 
 def property_contract_variables(property: dict) -> dict:
-    """Variables communes aux contrats décrivant l'entreprise (toutes renseignées, jamais de blanc)"""
-    siret = re.sub(r"\D", "", str(property.get("siret") or ""))
-    siren = re.sub(r"\D", "", str(property.get("siren") or siret[:9]))
+    """Variables communes aux contrats décrivant le bien et la plateforme (jamais de blanc)"""
+    ref = f"VL-{(property.get('id') or '')[:8].upper()}"
     return {
-        "CIBLE_DENOMINATION": property.get("company_name") or "",
-        "CIBLE_FORME_JURIDIQUE": property.get("legal_form") or property.get("legal_structure") or "société",
-        "CIBLE_SIREN": fmt_siren_fr(siren) or "non communiqué",
-        "CIBLE_SIEGE": property_siege(property),
-        "CIBLE_ACTIVITE": property_activity_label(property),
-        "CIBLE_LOCALISATION": ", ".join(p for p in [taxonomy.departement_label(property["department"]) if property.get("department") else "",
-                                                     str(property.get("region") or "")] if p) or "France",
-        "CIBLE_QUALIFICATIONS": property_qualifications_label(property),
-        "RGE_TYPES": ", ".join(property.get("rge_types") or []),
-        "PRIX_DEMANDE": fmt_eur_fr(property["asking_price"]) if property.get("asking_price") else "non communiqué",
+        "BIEN_TITRE": property.get("title") or taxonomy.property_title(property.get("property_type"), property.get("city"),
+                                                                       property.get("department"), property.get("surface"),
+                                                                       property.get("rooms"), property.get("units_count")),
+        "BIEN_ADRESSE": property_address_text(property),
+        "BIEN_LOCALISATION": property_location_text(property),
+        "BIEN_COPROPRIETE": copro_text(property),
+        **lease_summary(property),
+        "PRIX_DEMANDE": fmt_eur_fr(property["asking_price"]) if property.get("asking_price") else "",
         "BAREME_COMMISSION": commission_scale_text(),
         "MARQUE": site_name(),
         "CARTE_T": LEGAL_ENTITY["carte_t"],
         "CARTE_T_CCI": LEGAL_ENTITY["carte_t_issuer"],
         "CARTE_T_VALIDITE": LEGAL_ENTITY["carte_t_valid_until"],
         "RC_PRO": ("RC professionnelle : " + LEGAL_ENTITY["rc_pro"] + ".") if LEGAL_ENTITY.get("rc_pro")
-                  else "RC professionnelle souscrite conformément à la loi Hoguet.",
+                  else "RC professionnelle souscrite conformément à la loi n° 70-9 du 2 janvier 1970.",
         "PLATEFORME_CAPITAL": fmt_eur_fr(LEGAL_ENTITY.get("capital") or 0),
         "PLATEFORME_SIREN": fmt_siren_fr(LEGAL_ENTITY["siren"]),
-        "ANNONCE_REF": f"PRJ-{(property.get('id') or '')[:8].upper()}",
-        "PROJET_CODE": f"PRJ-{(property.get('id') or '')[:8].upper()}",
+        "ANNONCE_REF": ref,
         "LISTING_ID": property.get("id", ""),
     }
 
+def seller_identity_text(seller: Optional[dict], property: dict) -> str:
+    """Identité du vendeur (engagement après signature, offre d'achat) : nom vérifié et, le cas échéant, la société"""
+    seller = seller or {}
+    name = f"{seller.get('verified_first_name') or seller.get('first_name') or ''} {seller.get('verified_last_name') or seller.get('last_name') or ''}".strip()
+    name = name or "le vendeur de l'annonce"
+    company = company_text(property, with_siege=False)
+    if property.get("owner_type") in COMPANY_OWNER_TYPES and company:
+        return f"{name}, agissant pour la société {company}, propriétaire du bien"
+    return name
+
 def buyer_identity_text(user: dict) -> str:
-    """Identité du repreneur telle que vérifiée (rapport Stripe : nom, prénom, date de naissance si disponible),
+    """Identité de l'acquéreur telle que vérifiée (rapport Stripe : nom, prénom, date de naissance si disponible),
     adresse e-mail confirmée, société et SIREN s'ils existent. Aucune mention vide."""
     first = user.get("verified_first_name") or user.get("first_name") or ""
     last = user.get("verified_last_name") or user.get("last_name") or ""
-    text = f"{first} {last}".strip() or "Repreneur"
+    text = f"{first} {last}".strip() or "Acquéreur"
     birth = user.get("verified_birth_date") or user.get("birth_date")
     if birth:
         text += f", né(e) le {fmt_date_fr(birth) or birth}"
     text += f", adresse électronique confirmée : {user.get('email', '')}"
     profile = user.get("buyer_profile") or {}
-    property = user.get("company_name") or profile.get("company_name")
+    company = profile.get("company_name") if profile.get("project_type") in ("sci", "societe", "professionnel") else None
+    company = company or (user.get("company_name") if profile.get("siren") else None)
     siren = user.get("siren") or profile.get("siren")
-    if property:
-        text += f", agissant pour le compte de la société {property}"
+    if company:
+        text += f", agissant pour le compte de la société {company}"
         if siren:
             text += f" (SIREN {fmt_siren_fr(siren)})"
     if user.get("verified_at"):
@@ -3938,7 +3354,7 @@ def public_evidence(evidence: Optional[dict]) -> dict:
     }
 
 async def presented_buyers_view(property: dict) -> list:
-    """Repreneurs présentés (NDA signé) : pseudonyme, nom et société révélés après NDA"""
+    """Acquéreurs présentés (engagement de confidentialité signé) : pseudonyme, nom et société révélés après l'engagement"""
     rows = []
     for p in property.get("presented_buyers") or []:
         user = await db.users.find_one({"id": p.get("buyer_id")}, {"_id": 0, "first_name": 1, "last_name": 1, "company_name": 1,
@@ -3953,15 +3369,15 @@ async def presented_buyers_view(property: dict) -> list:
     return rows
 
 async def add_presented_buyer(property_id: str, buyer_id: str, contract_id: str, now: datetime) -> bool:
-    """Inscrit le repreneur sur la liste nominative des présentés (une seule fois)"""
+    """Inscrit l'acquéreur sur la liste nominative des présentés (une seule fois)"""
     res = await db.properties.update_one(
         {"id": property_id, "presented_buyers.buyer_id": {"$ne": buyer_id}},
         {"$push": {"presented_buyers": {"buyer_id": buyer_id, "at": now.isoformat(), "nda_contract_id": contract_id}}})
     return res.modified_count > 0
 
 # ---- PDF d'un document signé avec page de preuve ----
-CONTRACT_TITLES = {"mandat": "Mandat de vente simple", "nda": "Accord de confidentialité", "offer": "Offre indicative d'acquisition",
-                   "loi": "Lettre d'intention (document antérieur à la version du 10/10/2026)"}
+CONTRACT_TITLES = {"mandat": "Mandat de vente simple", "nda": "Engagement de confidentialité et de non-contournement",
+                   "offer": "Offre d'achat"}
 
 def contract_title(contract: dict) -> str:
     base = CONTRACT_TITLES.get(contract.get("type"), "Document")
@@ -4083,7 +3499,7 @@ def signed_document_pdf(title: str, subtitle: str, content: str, proofs: list, a
     return buffer.getvalue()
 
 def role_label(role: Optional[str]) -> str:
-    return {"seller": "le Mandant (cédant)", "buyer": "le Repreneur", "platform": f"{LEGAL_ENTITY['denomination']} SAS"}.get(role or "", role or "")
+    return {"seller": "le Mandant (vendeur)", "buyer": "l'Acquéreur", "platform": f"{LEGAL_ENTITY['denomination']} SAS"}.get(role or "", role or "")
 
 async def contract_proofs(contract: dict) -> list:
     """Toutes les signatures d'un contrat (db.documents) puis la contre-signature de la plateforme, dans l'ordre"""
@@ -4099,8 +3515,8 @@ async def contract_proofs(contract: dict) -> list:
                                                                     "verified_first_name": 1, "verified_last_name": 1})
         name = (f"{user.get('verified_first_name') or user.get('first_name') or ''} {user.get('verified_last_name') or user.get('last_name') or ''}".strip()
                 if user else "") or buyer_pseudonym(r.get("signer_id"))
-        proofs.append({"label": r.get("label") or {"mandat": "mandat", "mandat_renewal": "prolongation du mandat", "nda": "accord de confidentialité",
-                                                    "offer": "offre", "offer_counter_proposal": "contre-proposition du cédant",
+        proofs.append({"label": r.get("label") or {"mandat": "mandat", "mandat_renewal": "prolongation du mandat", "nda": "engagement de confidentialité",
+                                                    "offer": "offre d'achat", "offer_counter_proposal": "contre-proposition du vendeur",
                                                     "offer_counter": "acceptation de la contre-proposition"}.get(r.get("doc_type"), "document"),
                        "signer_label": name, "role_label": role_label(r.get("signer_role")),
                        "signed_at": r.get("signed_at"), "evidence": r.get("evidence"), "evidence_sha256": r.get("evidence_sha256"),
@@ -4123,10 +3539,12 @@ async def contract_pdf_bytes(contract: dict) -> bytes:
                                 f"jusqu'au {fmt_date_fr(r.get('new_tail_ends_at'))}."})
     for a in contract.get("addenda") or []:
         addenda.append({"title": a.get("title", ""), "text": a.get("text", "")})
-    if contract.get("type") == "mandat" and contract.get("status") in ("denounced", "expired", "void"):
+    if contract.get("type") == "mandat" and contract.get("status") in ("denounced", "expired", "void", "withdrawn_retractation"):
         label = {"denounced": f"Mandat dénoncé le {fmt_date_fr(contract.get('denounced_at'))}, effet le {fmt_date_fr(contract.get('effective_at'))}",
                  "expired": f"Mandat arrivé à échéance le {fmt_date_fr(contract.get('ends_at'))}",
-                 "void": f"Mandat caduc depuis le {fmt_date_fr(contract.get('void_at'))} ({contract.get('void_reason') or 'annonce retirée'})"}[contract["status"]]
+                 "void": f"Mandat caduc depuis le {fmt_date_fr(contract.get('void_at'))} ({contract.get('void_reason') or 'annonce retirée'})",
+                 "withdrawn_retractation": f"Rétractation du Mandant le {fmt_date_fr(contract.get('denounced_at'))}, avec effet immédiat : "
+                                           "aucune somme n'est due"}[contract["status"]]
         addenda.append({"title": "Fin du mandat", "text": label + f". Clause de suite jusqu'au {fmt_date_fr(contract.get('tail_ends_at'))}."
                         if contract.get("tail_ends_at") else label + "."})
     content = contract.get("content") or ""
@@ -4140,22 +3558,22 @@ async def contract_pdf_bytes(contract: dict) -> bytes:
 
 CONTRACT_STATUS_LABELS = {"pending_signature": "en attente de signature", "signed": "signé", "fully_signed": "signé par les deux parties",
                           "countersigned": "signé par les deux parties", "denounced": "dénoncé", "expired": "expiré", "void": "caduc",
-                          "rejected": "refusé", "cancelled": "annulé"}
+                          "withdrawn_retractation": "rétractation", "rejected": "refusé", "cancelled": "annulé"}
 
 def pdf_response(content: bytes, filename: str) -> Response:
     return Response(content=content, media_type="application/pdf",
                     headers={"Content-Disposition": f'inline; filename="{filename}"', "Cache-Control": "private, no-store"})
 
-# ============ ACCORD DE CONFIDENTIALITÉ v2 (SPEC §3.3) ============
+# ============ ENGAGEMENT DE CONFIDENTIALITÉ ET DE NON-CONTOURNEMENT (SPEC §7.3) ============
 class GetContractForSignatureRequest(BaseModel):
     property_id: str
-    doc_type: Literal["nda"]  # la lettre d'intention n'est plus générée (offre indicative, §3.4)
+    doc_type: Literal["nda"]  # identifiant technique conservé : engagement de confidentialité et de non-contournement
 
-# Variables qui lèvent l'anonymat : masquées dans le NDA tant qu'il n'est pas signé
-NDA_REVEALED_VARIABLES = ["CIBLE_DENOMINATION", "CIBLE_FORME_JURIDIQUE", "CIBLE_SIREN", "CIBLE_SIEGE", "VENDEUR_PRENOM", "VENDEUR_NOM"]
+# Variables qui lèvent l'anonymat (adresse du bien, identité du vendeur) : masquées tant que l'engagement n'est pas signé
+NDA_REVEALED_VARIABLES = ["BIEN_ADRESSE", "VENDEUR_IDENTITE"]
 NDA_HIDDEN_PLACEHOLDER = "[communiqué après signature]"
-# Statuts d'une demande de dossier acceptée par le cédant (`accepted` en v2 ; `validated` / `loi_pending` : données
-# antérieures à la refonte du parcours, équivalentes à `accepted`)
+# Statuts d'une demande de dossier acceptée par le vendeur (`accepted` ; `validated` / `loi_pending` : anciennes valeurs,
+# équivalentes à `accepted`)
 DATAROOM_ACCEPTED_STATUSES = ("accepted", "granted", "validated", "loi_pending")
 
 async def dataroom_request_for(property_id: str, buyer_id: str) -> Optional[dict]:
@@ -4163,26 +3581,26 @@ async def dataroom_request_for(property_id: str, buyer_id: str) -> Optional[dict
 
 @api_router.post("/contracts/generate-for-signature")
 async def generate_contract_for_signature(data: GetContractForSignatureRequest, current_user: dict = Depends(get_current_user)):
-    """Génère l'accord de confidentialité du repreneur pour une annonce (texte masqué jusqu'à la signature).
-    Exige : rôle repreneur, adresse e-mail confirmée, identité vérifiée (403 `identity_required`) et demande de dossier
-    acceptée par le cédant (403 `not_allowed`)."""
+    """Génère l'engagement de confidentialité et de non-contournement de l'acquéreur pour une annonce (adresse et identité
+    du vendeur masquées jusqu'à la signature). Exige : rôle acquéreur, adresse e-mail confirmée, identité vérifiée
+    (403 `identity_required`) et demande de dossier acceptée par le vendeur (403 `not_allowed`)."""
     if current_user.get("role") != "buyer":
-        raise api_error(403, "not_allowed", "Seuls les repreneurs signent l'accord de confidentialité")
+        raise api_error(403, "not_allowed", "Seuls les acquéreurs signent l'engagement de confidentialité")
     property = await db.properties.find_one({"id": data.property_id}, {"_id": 0})
     if not property or property.get("status") != "published":
-        raise HTTPException(status_code=404, detail="Entreprise non trouvée")
+        raise HTTPException(status_code=404, detail="Annonce introuvable")
     require_verified_email(current_user)
     if not is_user_verified(current_user):
-        raise api_error(403, "identity_required", "Vérifiez votre identité avant de signer l'accord de confidentialité")
+        raise api_error(403, "identity_required", "Vérifiez votre identité avant de signer l'engagement de confidentialité")
     access = await dataroom_request_for(data.property_id, current_user["id"])
     if not access or access.get("status") not in DATAROOM_ACCEPTED_STATUSES:
-        raise api_error(403, "not_allowed", "Le cédant doit d'abord accepter votre demande de dossier")
+        raise api_error(403, "not_allowed", "Le vendeur doit d'abord accepter votre demande de dossier")
 
     existing_signature = await db.documents.find_one({"property_id": data.property_id, "doc_type": "nda", "signer_id": current_user["id"]})
     if existing_signature:
         existing_contract = await db.generated_contracts.find_one(
             {"property_id": data.property_id, "buyer_id": current_user["id"], "type": "nda", "status": "signed"}, {"_id": 0})
-        return {"already_signed": True, "contract": existing_contract, "message": "Accord de confidentialité déjà signé"}
+        return {"already_signed": True, "contract": existing_contract, "message": "Engagement de confidentialité déjà signé"}
 
     seller = await db.users.find_one({"id": property.get("seller_id")}, {"_id": 0, "password_hash": 0})
     template_doc = await db.contract_templates.find_one({"type": "nda"}, {"_id": 0})
@@ -4193,21 +3611,22 @@ async def generate_contract_for_signature(data: GetContractForSignatureRequest, 
 
     existing_contract = await db.generated_contracts.find_one(
         {"property_id": data.property_id, "buyer_id": current_user["id"], "type": "nda", "status": {"$in": ["draft", "pending_signature"]}}, {"_id": 0})
-    contract_number = existing_contract["contract_number"] if existing_contract else f"NDA-{now.strftime('%Y%m%d')}-{str(uuid.uuid4())[:8].upper()}"
+    contract_number = existing_contract["contract_number"] if existing_contract else f"ENG-{now.strftime('%Y%m%d')}-{str(uuid.uuid4())[:8].upper()}"
     variables = {
         **settings,
-        "REPRENEUR_IDENTITE": buyer_identity_text(current_user),
-        "VENDEUR_PRENOM": (seller.get("first_name") or "") if seller else "",
-        "VENDEUR_NOM": (seller.get("last_name") or "") if seller else "",
+        "ACQUEREUR_IDENTITE": buyer_identity_text(current_user),
+        "VENDEUR_IDENTITE": seller_identity_text(seller, property),
         **property_contract_variables(property),
         "NDA_NUMERO": contract_number,
         "DATE_SIGNATURE": SIGNATURE_DATE_PENDING,
     }
+    if not variables["BIEN_ADRESSE"]:
+        variables["BIEN_ADRESSE"] = property_location_text(property)
     full_content = render_template(template, variables)
     missing = missing_template_variables(full_content)
     if missing:
-        raise api_error(400, "validation", "Le texte de l'accord ne peut pas être complété", missing=missing)
-    # L'identité du cédant et de la société n'est révélée qu'une fois l'accord signé (Annexe A)
+        raise api_error(400, "validation", "Le texte de l'engagement ne peut pas être complété", missing=missing)
+    # L'adresse du bien et l'identité du vendeur ne sont révélées qu'une fois l'engagement signé (Annexe A)
     generated_content = render_template(template, {**variables, **{k: NDA_HIDDEN_PLACEHOLDER for k in NDA_REVEALED_VARIABLES}})
     nda_test = is_test_context(current_user, property, existing_contract)
     full_content = with_test_banner(full_content, nda_test)
@@ -4220,7 +3639,8 @@ async def generate_contract_for_signature(data: GetContractForSignatureRequest, 
             regenerated["is_test"] = True
         await db.generated_contracts.update_one({"id": existing_contract["id"]}, {"$set": regenerated})
         return {"already_signed": False, "contract_id": existing_contract["id"], "contract_number": contract_number,
-                "content": generated_content, "type": "nda", "terms_version": "v2", "terms_date": CONTRACT_TERMS_DATE}
+                "content": generated_content, "type": "nda", "title": CONTRACT_TITLES["nda"], "terms_version": NDA_TERMS_VERSION,
+                "terms_date": CONTRACT_TERMS_DATE}
 
     contract_doc = {
         "id": str(uuid.uuid4()),
@@ -4233,7 +3653,7 @@ async def generate_contract_for_signature(data: GetContractForSignatureRequest, 
         "content_after_signature": full_content,
         "status": "pending_signature",
         "signers_pending": [current_user["id"]],
-        "terms_version": "v2",
+        "terms_version": NDA_TERMS_VERSION,
         "terms_date": CONTRACT_TERMS_DATE,
         "created_at": now.isoformat(),
         "auto_generated": True,
@@ -4242,7 +3662,8 @@ async def generate_contract_for_signature(data: GetContractForSignatureRequest, 
         contract_doc["is_test"] = True
     await db.generated_contracts.insert_one(contract_doc)
     return {"already_signed": False, "contract_id": contract_doc["id"], "contract_number": contract_number,
-            "content": generated_content, "type": "nda", "terms_version": "v2", "terms_date": CONTRACT_TERMS_DATE}
+            "content": generated_content, "type": "nda", "title": CONTRACT_TITLES["nda"], "terms_version": NDA_TERMS_VERSION,
+            "terms_date": CONTRACT_TERMS_DATE}
 
 # ============ SIGNATURE ÉLECTRONIQUE PAR CODE À USAGE UNIQUE ============
 OTP_TTL_SECONDS = 600
@@ -4277,7 +3698,7 @@ class SignatureCodeRequest(BaseModel):
 class ContractSignature(BaseModel):
     otp_code: Optional[str] = None
 
-DOC_LABELS = {"mandat": "mandat de vente simple", "nda": "accord de confidentialité", "offer": "offre indicative"}
+DOC_LABELS = {"mandat": "mandat de vente simple", "nda": "engagement de confidentialité et de non-contournement", "offer": "offre d'achat"}
 
 @api_router.post("/signatures/request-code")
 @limiter.limit("10/minute")
@@ -4285,7 +3706,7 @@ async def request_signature_code(request: Request, data: SignatureCodeRequest, b
                                  current_user: dict = Depends(get_current_user)):
     """Envoie par e-mail un code à 6 chiffres permettant de signer ce document (10 minutes, 5 essais).
     Exige une adresse e-mail confirmée (double opt-in) et une identité vérifiée. Sert aussi à la contre-signature
-    d'une offre par le cédant et à la prolongation d'un mandat."""
+    d'une offre par le vendeur et à la prolongation d'un mandat."""
     contract = await db.generated_contracts.find_one({"id": data.contract_id}, {"_id": 0})
     if not contract or current_user["id"] not in contract_parties(contract):
         raise HTTPException(status_code=404, detail="Document introuvable")
@@ -4376,9 +3797,10 @@ def finalize_signed_text(content: str, now: datetime) -> str:
 @api_router.post("/contracts/{contract_id}/sign")
 async def sign_contract(contract_id: str, request: Request, signature: Optional[ContractSignature] = None,
                         current_user: dict = Depends(get_current_user)):
-    """Signature par le repreneur d'un accord de confidentialité ou d'une offre indicative (code reçu par e-mail).
-    NDA signé : identité du cédant révélée, repreneur inscrit sur la liste des présentés, PDF envoyé aux deux parties.
-    Offre signée : passe à `pending`, le cédant est prévenu. Le mandat se signe par POST /seller/mandat/{id}/sign."""
+    """Signature par l'acquéreur d'un engagement de confidentialité ou d'une offre d'achat (code reçu par e-mail).
+    Engagement signé : adresse du bien et identité du vendeur révélées, acquéreur inscrit sur la liste des présentés, PDF
+    envoyé aux deux parties. Offre signée : passe à `pending`, le vendeur est prévenu. Le mandat se signe par
+    POST /seller/mandat/{id}/sign."""
     contract = await db.generated_contracts.find_one({"id": contract_id}, {"_id": 0})
     if not contract:
         raise HTTPException(status_code=404, detail="Contrat non trouvé")
@@ -4397,7 +3819,7 @@ async def sign_contract(contract_id: str, request: Request, signature: Optional[
     if contract.get("type") == "offer":
         return await _offer_after_buyer_signature(contract, property, current_user, evidence, now)
 
-    # ---- Accord de confidentialité ----
+    # ---- Engagement de confidentialité et de non-contournement ----
     presented_content = finalize_signed_text(contract.get("content"), now)
     signed_content = finalize_signed_text(contract.get("content_after_signature") or contract.get("content"), now)
     evidence["document_presented_sha256"] = hashlib.sha256(presented_content.encode()).hexdigest()
@@ -4408,7 +3830,7 @@ async def sign_contract(contract_id: str, request: Request, signature: Optional[
         {"$set": {"status": "signed", "signed_at": now.isoformat(), "signed_by": current_user["email"],
                   "signature_hash": record["signature_hash"], "signature_evidence": record["evidence"],
                   "signature_record_id": record["id"], "signers_pending": [],
-                  # Le NDA signé révèle l'identité de la cible (Annexe A)
+                  # L'engagement signé révèle l'adresse du bien et l'identité du vendeur (Annexe A)
                   "content": signed_content, "content_after_signature": signed_content}})
 
     # Liste nominative des présentés, identité révélée dans la conversation et la demande de dossier
@@ -4422,7 +3844,7 @@ async def sign_contract(contract_id: str, request: Request, signature: Optional[
     if nda_access and nda_access.get("funds_declaration"):
         await grant_dataroom_access({**nda_access, "nda_signed_at": now.isoformat()}, now)
     await db.contact_reveal_logs.insert_many([
-        {"id": str(uuid.uuid4()), "who": current_user["id"], "what": "identite_cible", "subject_id": contract.get("property_id"),
+        {"id": str(uuid.uuid4()), "who": current_user["id"], "what": "adresse_et_vendeur", "subject_id": contract.get("property_id"),
          "property_id": contract.get("property_id"), "justification": {"nda_id": contract_id, "contract_number": contract.get("contract_number")},
          "when": now.isoformat()},
         {"id": str(uuid.uuid4()), "who": property.get("seller_id") if property else None, "what": "identite_acquereur",
@@ -4432,7 +3854,7 @@ async def sign_contract(contract_id: str, request: Request, signature: Optional[
     await db.messages.insert_one({
         "id": str(uuid.uuid4()), "sender_id": current_user["id"], "sender_email": current_user["email"],
         "receiver_id": property.get("seller_id") if property else None, "property_id": contract.get("property_id"),
-        "content": f"J'ai signé l'accord de confidentialité n° {contract.get('contract_number')}. Mon identité vous est communiquée.",
+        "content": f"J'ai signé l'engagement de confidentialité et de non-contournement n° {contract.get('contract_number')}. Mon identité vous est communiquée.",
         "message_type": "nda_signed", "kind": "system", "contract_number": contract.get("contract_number"), "read": False, "created_at": now.isoformat()})
     await create_audit_log(action="NDA_SIGNED", property_id=contract.get("property_id"), actor_id=current_user["id"],
                            actor_email=current_user["email"], details={"contract_id": contract_id, "contract_number": contract.get("contract_number")})
@@ -4443,8 +3865,8 @@ async def sign_contract(contract_id: str, request: Request, signature: Optional[
         await email_user(property.get("seller_id"), "nda_signed_seller", buyer_name=buyer_name,
                          contract_number=contract.get("contract_number", ""), pdf_link=pdf_link)
     await email_user(current_user["id"], "nda_signed_buyer", contract_number=contract.get("contract_number", ""), pdf_link=pdf_link,
-                     next_step="déclarez l'origine des fonds envisagés depuis votre espace ; l'accès au dossier s'ouvre ensuite automatiquement.")
-    return {"message": "Accord de confidentialité signé avec succès", "contract_number": contract.get("contract_number"),
+                     next_step="déclarez l'origine des fonds envisagés depuis votre espace ; l'accès au dossier du bien s'ouvre ensuite automatiquement.")
+    return {"message": "Engagement de confidentialité signé avec succès", "contract_number": contract.get("contract_number"),
             "signature_hash": record["signature_hash"], "signed_at": now.isoformat(), "document_id": record["id"],
             "pdf_url": document_pdf_path(record), "identity_revealed": True}
 
@@ -4453,7 +3875,7 @@ async def signed_documents_query(property_id: str, current_user: dict) -> dict:
     """Le vendeur de l'annonce et l'admin voient toutes les signatures, les autres uniquement les leurs"""
     query = {"property_id": property_id}
     if current_user.get("role") != "admin":
-        property = await db.properties.find_one({"id": property_id}, {"_id": 0, "seller_id": 1, "president_id": 1})
+        property = await db.properties.find_one({"id": property_id}, {"_id": 0, "seller_id": 1})
         if not property or not is_property_owner(property, current_user):
             query["signer_id"] = current_user["id"]
     return query
@@ -4472,7 +3894,7 @@ async def get_signed_documents(property_id: str, current_user: dict = Depends(ge
     [{id, doc_type, signed_at, evidence: {document_sha256, previous_evidence_sha256, ip, user_agent, identity}, pdf_url}]"""
     query = await signed_documents_query(property_id, current_user)
     docs = await db.documents.find(query, {"_id": 0}).sort("signed_at", 1).to_list(200)
-    property = await db.properties.find_one({"id": property_id}, {"_id": 0, "id": 1, "seller_id": 1, "president_id": 1})
+    property = await db.properties.find_one({"id": property_id}, {"_id": 0, "id": 1, "seller_id": 1})
     labels = PartyLabels(current_user)
     rows = []
     for d in docs:
@@ -4490,7 +3912,7 @@ async def _document_access_allowed(record: dict, contract: Optional[dict], user:
         return True
     if contract and user["id"] in contract_parties(contract):
         return True
-    property = await db.properties.find_one({"id": record.get("property_id")}, {"_id": 0, "seller_id": 1, "president_id": 1})
+    property = await db.properties.find_one({"id": record.get("property_id")}, {"_id": 0, "seller_id": 1})
     return bool(property) and is_property_owner(property, user)
 
 @api_router.get("/documents/{property_id}/{doc_id}/pdf")
@@ -4541,10 +3963,10 @@ async def get_access_status(property_id: str, current_user: dict = Depends(get_c
     }
 
 # ============ CONVERSATIONS ET MESSAGES (API.md §3) ============
-# Une conversation par couple (annonce, repreneur) dans `db.conversations` ; les messages antérieurs (sans
-# `conversation_id`) sont rattachés à la volée par `migrate_legacy_conversations` en les regroupant par (property_id, repreneur).
+# Une conversation par couple (annonce, acquéreur) dans `db.conversations` ; les messages antérieurs (sans
+# `conversation_id`) sont rattachés à la volée par `migrate_legacy_conversations` en les regroupant par (property_id, acquéreur).
 async def get_or_create_conversation(property: dict, buyer_id: str, now: Optional[datetime] = None) -> tuple:
-    """(conversation, créée ?) du couple annonce / repreneur"""
+    """(conversation, créée ?) du couple annonce / acquéreur"""
     now = now or datetime.now(timezone.utc)
     existing = await db.conversations.find_one({"property_id": property["id"], "buyer_id": buyer_id}, {"_id": 0})
     if existing:
@@ -4552,7 +3974,7 @@ async def get_or_create_conversation(property: dict, buyer_id: str, now: Optiona
     nda = await has_signed_nda(property["id"], buyer_id)
     doc = {
         "id": str(uuid.uuid4()), "property_id": property["id"], "buyer_id": buyer_id,
-        "seller_id": property.get("seller_id") or property.get("president_id"),
+        "seller_id": property.get("seller_id"),
         "created_at": now.isoformat(), "last_at": now.isoformat(), "last_message": "", "last_sender_id": None,
         "nda_signed": nda, "identity_revealed": nda,
     }
@@ -4562,7 +3984,7 @@ async def get_or_create_conversation(property: dict, buyer_id: str, now: Optiona
     return doc, True
 
 async def migrate_legacy_conversations(user: dict) -> None:
-    """Rattache les messages historiques de l'utilisateur (sans conversation_id) à une conversation par (annonce, repreneur)"""
+    """Rattache les messages historiques de l'utilisateur (sans conversation_id) à une conversation par (annonce, acquéreur)"""
     query = {"conversation_id": {"$exists": False}, "$or": [{"sender_id": user["id"]}, {"receiver_id": user["id"]}]}
     legacy = await db.messages.find(query, {"_id": 0, "id": 1, "property_id": 1, "sender_id": 1, "receiver_id": 1, "created_at": 1, "content": 1}).to_list(5000)
     if not legacy:
@@ -4573,11 +3995,11 @@ async def migrate_legacy_conversations(user: dict) -> None:
         if not cid:
             continue
         if cid not in properties:
-            properties[cid] = await db.properties.find_one({"id": cid}, {"_id": 0, "id": 1, "seller_id": 1, "president_id": 1})
+            properties[cid] = await db.properties.find_one({"id": cid}, {"_id": 0, "id": 1, "seller_id": 1})
         property = properties[cid]
         if not property:
             continue
-        owners = {property.get("seller_id"), property.get("president_id")} - {None}
+        owners = {property.get("seller_id")} - {None}
         buyer_id = m.get("receiver_id") if m.get("sender_id") in owners else m.get("sender_id")
         if not buyer_id or buyer_id in owners:
             continue
@@ -4593,7 +4015,7 @@ async def conversation_for_user(conversation_id: str, user: dict) -> dict:
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation introuvable")
     if user.get("role") != "admin" and user["id"] not in (conversation.get("buyer_id"), conversation.get("seller_id")):
-        property = await db.properties.find_one({"id": conversation["property_id"]}, {"_id": 0, "seller_id": 1, "president_id": 1})
+        property = await db.properties.find_one({"id": conversation["property_id"]}, {"_id": 0, "seller_id": 1})
         if not property or not is_property_owner(property, user):
             raise api_error(403, "not_allowed", "Vous n'êtes pas partie à cette conversation")
     return conversation
@@ -4602,8 +4024,8 @@ def conversation_receiver(conversation: dict, sender: dict) -> Optional[str]:
     return conversation.get("seller_id") if sender["id"] == conversation.get("buyer_id") else conversation.get("buyer_id")
 
 async def buyer_card(buyer_id: str, revealed: bool = False) -> dict:
-    """Carte repreneur (API.md §3) : pseudonymisée avant NDA (projet, budget, financement, zones, métiers, horizon,
-    société vérifiée, score), nom et société après NDA. Jamais de coordonnées."""
+    """Carte acquéreur (SPEC §4) : pseudonymisée avant l'engagement (projet, budget, apport, financement, zones, types de
+    biens, rendement minimum, horizon, société vérifiée, score), nom et société après l'engagement. Jamais de coordonnées."""
     user = await db.users.find_one({"id": buyer_id}, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "company_name": 1,
                                                        "verified_first_name": 1, "verified_last_name": 1, "phone": 1,
                                                        "buyer_profile": 1, "identity_verified": 1, "kyc_status": 1, "created_at": 1})
@@ -4611,8 +4033,8 @@ async def buyer_card(buyer_id: str, revealed: bool = False) -> dict:
     card = {
         "buyer_id": buyer_id, "label": buyer_pseudonym(buyer_id),
         "project_type": profile.get("project_type"), "budget_max": profile.get("budget_max"), "apport": profile.get("apport"),
-        "financing": profile.get("financing"), "zones": profile.get("zones") or [], "trades": profile.get("trades") or [],
-        "horizon": profile.get("horizon"), "experience": profile.get("experience"),
+        "financing": profile.get("financing"), "zones": profile.get("zones") or [], "property_types": profile.get("property_types") or [],
+        "min_yield": profile.get("min_yield"), "horizon": profile.get("horizon"), "experience": profile.get("experience"),
         "siren_verified": profile.get("siren_verified") is True, "profile_score": buyer_profile_score(user or {}),
         "identity_verified": is_user_verified(user or {}), "member_since": (user or {}).get("created_at"),
     }
@@ -4623,14 +4045,12 @@ async def buyer_card(buyer_id: str, revealed: bool = False) -> dict:
     return card
 
 def buyer_card_html(card: dict) -> str:
-    """Carte repreneur en HTML pour les e-mails (valeurs échappées)"""
-    labels = {"reprise-individuelle": "Reprise individuelle", "croissance-externe": "Croissance externe",
-              "groupe-investisseur": "Groupe ou investisseur", "autre": "Autre projet",
-              "fonds-propres": "Fonds propres", "emprunt": "Emprunt", "mixte": "Apport et emprunt", "a-definir": "À définir",
+    """Carte acquéreur en HTML pour les e-mails (valeurs échappées)"""
+    labels = {**{p["id"]: p["label"] for p in taxonomy.BUYER_PROJECT_TYPES}, **{f["id"]: f["label"] for f in taxonomy.FINANCING_TYPES},
               "0-6": "Dans les 6 mois", "6-12": "Dans 6 à 12 mois", "12+": "Dans plus d'un an"}
     rows = []
     if card.get("name"):
-        rows.append(("Repreneur", card["name"] + (f" — {card['company_name']}" if card.get("company_name") else "")))
+        rows.append(("Acquéreur", card["name"] + (f" — {card['company_name']}" if card.get("company_name") else "")))
     if card.get("project_type"):
         rows.append(("Projet", labels.get(card["project_type"], card["project_type"])))
     if card.get("budget_max"):
@@ -4641,8 +4061,10 @@ def buyer_card_html(card: dict) -> str:
         rows.append(("Financement", labels.get(card["financing"], card["financing"])))
     if card.get("zones"):
         rows.append(("Zones", ", ".join(card["zones"])))
-    if card.get("trades"):
-        rows.append(("Métiers", ", ".join(taxonomy.trade_label(t, short=True) for t in card["trades"])))
+    if card.get("property_types"):
+        rows.append(("Types de biens", ", ".join(taxonomy.property_type_label(t, short=True) for t in card["property_types"])))
+    if card.get("min_yield"):
+        rows.append(("Rendement brut visé", f"au moins {fmt_percent_fr(card['min_yield'])}"))
     if card.get("horizon"):
         rows.append(("Horizon", labels.get(card["horizon"], card["horizon"])))
     rows.append(("Société vérifiée", "oui (SIREN contrôlé au registre national)" if card.get("siren_verified") else "non"))
@@ -4660,7 +4082,7 @@ async def register_contact(property: dict, buyer_id: str, now: datetime) -> None
 
 async def store_message(conversation: dict, sender: dict, content: str, now: Optional[datetime] = None,
                         kind: str = "message", message_type: Optional[str] = None, **extra) -> dict:
-    """Enregistre un message dans la conversation : coordonnées masquées tant que le NDA n'est pas signé (contournement),
+    """Enregistre un message dans la conversation : coordonnées masquées tant que l'engagement n'est pas signé (contournement),
     dernier message mémorisé sur la conversation. `kind: 'system'` pour les messages automatiques."""
     now = now or datetime.now(timezone.utc)
     receiver_id = conversation_receiver(conversation, sender) if sender.get("id") != "system" else None
@@ -4687,7 +4109,7 @@ async def store_message(conversation: dict, sender: dict, content: str, now: Opt
 
 async def system_message(property_id: str, buyer_id: str, content: str, message_type: str, receiver_id: Optional[str] = None) -> Optional[dict]:
     """Message automatique (kind:'system') dans la conversation du couple ; la conversation est créée si besoin"""
-    property = await db.properties.find_one({"id": property_id}, {"_id": 0, "id": 1, "seller_id": 1, "president_id": 1})
+    property = await db.properties.find_one({"id": property_id}, {"_id": 0, "id": 1, "seller_id": 1})
     if not property or not buyer_id:
         return None
     conversation, _ = await get_or_create_conversation(property, buyer_id)
@@ -4697,7 +4119,7 @@ async def system_message(property_id: str, buyer_id: str, content: str, message_
     return doc
 
 async def notify_first_contact(conversation: dict, buyer: dict, extract: str) -> None:
-    """E-mail « premier contact » au cédant : extrait du message + carte repreneur pseudonymisée"""
+    """E-mail « premier contact » au vendeur : extrait du message + carte acquéreur pseudonymisée"""
     property = await db.properties.find_one({"id": conversation["property_id"]}, {"_id": 0, "title": 1})
     card = await buyer_card(buyer["id"], revealed=bool(conversation.get("identity_revealed")))
     await email_user(conversation.get("seller_id"), "first_contact", property_title=(property or {}).get("title") or "votre annonce",
@@ -4727,26 +4149,26 @@ async def send_message(message: MessageCreate, background_tasks: BackgroundTasks
         raise HTTPException(status_code=400, detail="Message trop long (5000 caractères maximum)")
     role = current_user.get("role")
     if role == "buyer":
-        # Un repreneur n'écrit qu'avec une adresse e-mail confirmée (aucun paiement : loi Hoguet)
+        # Un acquéreur n'écrit qu'avec une adresse e-mail confirmée (aucun paiement : loi Hoguet)
         require_verified_email(current_user)
     
     if message.conversation_id:
         conversation = await conversation_for_user(message.conversation_id, current_user)
         property = await db.properties.find_one({"id": conversation["property_id"]}, {"_id": 0})
         if not property:
-            raise HTTPException(status_code=404, detail="Entreprise introuvable")
+            raise HTTPException(status_code=404, detail="Annonce introuvable")
         if role == "buyer" and property.get("status") not in ("published", "paused", "sold", "sold_elsewhere", "withdrawn"):
-            raise HTTPException(status_code=404, detail="Entreprise introuvable")
+            raise HTTPException(status_code=404, detail="Annonce introuvable")
     else:
         if not message.property_id or not message.receiver_id:
             raise api_error(400, "validation", "Indiquez la conversation (conversation_id) ou l'annonce et le destinataire")
         property = await db.properties.find_one({"id": message.property_id}, {"_id": 0})
         if not property:
-            raise HTTPException(status_code=404, detail="Entreprise introuvable")
+            raise HTTPException(status_code=404, detail="Annonce introuvable")
         if role == "buyer":
             if property.get("status") != "published":
-                raise HTTPException(status_code=404, detail="Entreprise introuvable")
-            if message.receiver_id not in (property.get("seller_id"), property.get("president_id")):
+                raise HTTPException(status_code=404, detail="Annonce introuvable")
+            if message.receiver_id != property.get("seller_id"):
                 raise HTTPException(status_code=400, detail="Destinataire invalide pour cette annonce")
             existing = await db.conversations.find_one({"property_id": property["id"], "buyer_id": current_user["id"]}, {"_id": 0})
             if not existing:
@@ -4788,7 +4210,7 @@ async def label_messages(messages: list, viewer: dict) -> list:
     for m in messages:
         cid = m.get("property_id")
         if cid not in properties:
-            properties[cid] = await db.properties.find_one({"id": cid}, {"_id": 0, "id": 1, "seller_id": 1, "president_id": 1})
+            properties[cid] = await db.properties.find_one({"id": cid}, {"_id": 0, "id": 1, "seller_id": 1})
         m["sender_label"] = await labels.label(m.get("sender_id"), properties[cid])
         m["receiver_label"] = await labels.label(m.get("receiver_id"), properties[cid])
         m["is_mine"] = m.get("sender_id") == viewer.get("id")
@@ -4813,16 +4235,16 @@ async def get_messages(conversation_id: Optional[str] = None, property_id: Optio
 async def conversation_view(conversation: dict, viewer: dict, labels: PartyLabels, properties: dict) -> dict:
     cid = conversation.get("property_id")
     if cid not in properties:
-        properties[cid] = await db.properties.find_one({"id": cid}, {"_id": 0, "id": 1, "title": 1, "seller_id": 1, "president_id": 1,
-                                                                   "trades": 1, "region": 1, "staff_count": 1, "status": 1})
+        properties[cid] = await db.properties.find_one({"id": cid}, {"_id": 0, "id": 1, "title": 1, "seller_id": 1, "status": 1,
+                                                                   "property_type": 1, "city": 1, "department": 1})
     property = properties[cid] or {"id": cid}
     is_seller_side = viewer["id"] != conversation.get("buyer_id")
     other_id = conversation.get("buyer_id") if is_seller_side else conversation.get("seller_id")
     unread = await db.messages.count_documents({"conversation_id": conversation["id"], "receiver_id": viewer["id"], "read": False})
     access = await db.dataroom_access.find_one({"property_id": cid, "buyer_id": conversation.get("buyer_id")}, {"_id": 0, "status": 1, "id": 1})
     nda_signed = bool(conversation.get("nda_signed")) or await has_signed_nda(cid, conversation.get("buyer_id"))
-    title = property.get("title") or (taxonomy.listing_title(property.get("trades") or [], property.get("region"), property.get("staff_count"))
-                                     if property.get("trades") else "Annonce")
+    title = property.get("title") or (taxonomy.property_title(property.get("property_type"), property.get("city"), property.get("department"))
+                                     if property.get("property_type") else "Annonce")
     view = {
         "id": conversation["id"], "property_id": cid, "property_title": title, "property_status": property.get("status"),
         "buyer_id": conversation.get("buyer_id"), "seller_id": conversation.get("seller_id"),
@@ -4840,13 +4262,13 @@ async def conversation_view(conversation: dict, viewer: dict, labels: PartyLabel
 @api_router.get("/messages/conversations")
 async def get_conversations(current_user: dict = Depends(get_current_user)):
     """Conversations de l'utilisateur (API.md §3), triées par dernier message : [{id, property_id, property_title, buyer_id,
-    seller_id, other_party_label, buyer_card? (côté cédant), last_message, last_at, unread_count, nda_signed,
+    seller_id, other_party_label, buyer_card? (côté vendeur), last_message, last_at, unread_count, nda_signed,
     identity_revealed, access_status}]"""
     await migrate_legacy_conversations(current_user)
     if current_user.get("role") == "admin":
         query = {}
     else:
-        owned = [c["id"] async for c in db.properties.find({"$or": [{"seller_id": current_user["id"]}, {"president_id": current_user["id"]}]}, {"_id": 0, "id": 1})]
+        owned = [c["id"] async for c in db.properties.find({"seller_id": current_user["id"]}, {"_id": 0, "id": 1})]
         query = {"$or": [{"buyer_id": current_user["id"]}, {"seller_id": current_user["id"]}, {"property_id": {"$in": owned}}]}
     conversations = await db.conversations.find(query, {"_id": 0}).sort("last_at", -1).to_list(500)
     labels = PartyLabels(current_user)
@@ -4922,7 +4344,8 @@ async def health_check():
 
 @api_router.get("/config")
 async def get_public_config(request: Request):
-    """Configuration publique : marque, barème de la commission (cédant débiteur), version des conditions, mode test.
+    """Configuration publique : marque, barème des honoraires (vendeur débiteur, bloc `commission`), version des
+    conditions, mode test.
     En mode test : `test_panel_protected` (panneau réservé à la clé TEST_PANEL_KEY), `test_panel_access` (panneau
     accessible : bonne clé dans X-Test-Key, ou pas de clé) et `test_panel_admin` (connexion à l'admin démo permise)."""
     test_mode = test_mode_enabled()
@@ -4935,29 +4358,38 @@ async def get_public_config(request: Request):
         "commission_scale": commission_scale(),
         "commission_scale_text": commission_scale_text(),
         "commission_terms_version": COMMISSION_TERMS_VERSION,
+        "commission": {k: v for k, v in commission_config().items() if k in ("rate_percent_ht", "rate_percent_ttc", "minimum_ht",
+                                                                          "minimum_ttc", "vat_rate")},
         "test_mode": test_mode,
         **({"test_panel_protected": test_panel_protected(), "test_panel_access": test_panel_access(request),
             "test_panel_admin": test_panel_access(request, admin=True)} if test_mode else {}),
     }
 
-# ============ OFFRE INDICATIVE (SPEC §3.4, API.md §5) ============
-# Formulaire structuré → document généré (gabarit DEFAULT_OFFER_TEMPLATE) signé par code par le repreneur
-# (POST /contracts/{id}/sign), contresigné par le cédant à l'acceptation (PUT /offers/{id}/respond {action:'accept', otp_code}),
+# ============ OFFRE D'ACHAT (SPEC §7.3, API.md §5) ============
+# Formulaire structuré → document généré (gabarit DEFAULT_OFFER_TEMPLATE) signé par code par l'acquéreur
+# (POST /contracts/{id}/sign), contresigné par le vendeur à l'acceptation (PUT /offers/{id}/respond {action:'accept', otp_code}),
 # refus motivé, contre-proposition acceptée par code (PUT /offers/{id}/accept-counter), expiration par tâche quotidienne.
+# L'offre, même acceptée, n'emporte pas vente : elle engage à négocier de bonne foi l'avant-contrat chez le notaire.
 class OfferFinancing(BaseModel):
     equity: float = Field(0, ge=0, description="Apport personnel")
-    loan: float = Field(0, ge=0, description="Emprunt bancaire")
-    vendor_loan: float = Field(0, ge=0, description="Crédit vendeur")
-    earn_out: float = Field(0, ge=0, description="Complément de prix conditionnel")
+    loan: float = Field(0, ge=0, description="Emprunt")
+
+class LoanCondition(BaseModel):
+    """Condition suspensive d'obtention de prêt (art. L313-40 C. conso.)"""
+    required: bool = False
+    amount: Optional[float] = Field(None, ge=0, le=1_000_000_000)
+    max_rate: Optional[float] = Field(None, ge=0, le=20, description="Taux maximum hors assurance, en %")
+    duration_years: Optional[int] = Field(None, ge=1, le=40)
 
 class OfferCreate(BaseModel):
     property_id: str
     amount: float = Field(gt=0)
-    sale_object: Literal["titres", "fonds"]
+    sale_object: Literal["bien", "parts"] = "bien"
     financing: OfferFinancing = Field(default_factory=OfferFinancing)
+    loan_condition: LoanCondition = Field(default_factory=LoanCondition)
     conditions: List[str] = Field(default_factory=list, max_length=20)
-    target_date: str = Field(..., description="Date cible de signature de l'acte (AAAA-MM-JJ)")
-    validity_days: int = Field(30, ge=15, le=60)
+    target_date: str = Field(..., description="Date souhaitée pour l'avant-contrat (AAAA-MM-JJ)")
+    validity_days: int = Field(10, ge=5, le=30)
     message: Optional[str] = Field(None, max_length=2000)
 
 class OfferRespond(BaseModel):
@@ -5006,44 +4438,54 @@ async def _offer_message(sender: dict, receiver_id: Optional[str], offer: dict, 
 
 @api_router.post("/offers")
 async def create_offer(offer: OfferCreate, current_user: dict = Depends(get_current_user)):
-    """Repreneur : dépose une offre indicative (accès au dossier accordé obligatoire). Crée le document à signer et renvoie
+    """Acquéreur : dépose une offre d'achat (accès au dossier accordé obligatoire). Crée le document à signer et renvoie
     {offer, contract_id} ; l'offre reste `pending_signature` jusqu'à la signature par code."""
     if current_user.get("role") != "buyer":
-        raise api_error(403, "not_allowed", "Seuls les repreneurs peuvent faire une offre")
+        raise api_error(403, "not_allowed", "Seuls les acquéreurs peuvent faire une offre d'achat")
     require_verified_email(current_user)
     property = await db.properties.find_one({"id": offer.property_id}, {"_id": 0})
     if not property or property.get("status") != "published":
-        raise HTTPException(status_code=404, detail="Entreprise non trouvée")
+        raise HTTPException(status_code=404, detail="Annonce introuvable")
     if not await dataroom_access_granted(offer.property_id, current_user["id"]):
-        raise api_error(403, "not_allowed", "L'accès au dossier de l'entreprise doit être accordé avant de faire une offre")
+        raise api_error(403, "not_allowed", "L'accès au dossier du bien doit être ouvert avant de faire une offre d'achat")
     target = _parse_date_iso(offer.target_date)
     if not target:
-        raise api_error(400, "validation", "Date cible invalide (format AAAA-MM-JJ)", missing=["target_date"])
+        raise api_error(400, "validation", "Date souhaitée pour l'avant-contrat invalide (format AAAA-MM-JJ)", missing=["target_date"])
+    if offer.sale_object == "parts" and property.get("owner_type") not in COMPANY_OWNER_TYPES:
+        raise api_error(400, "validation", "Ce bien n'appartient pas à une société : l'offre porte sur le bien lui-même", field="sale_object")
+    if property.get("sale_object") in ("bien", "parts") and offer.sale_object != property["sale_object"]:
+        raise api_error(400, "validation", "L'objet de l'offre doit correspondre à celui de l'annonce", field="sale_object")
     existing = await db.offers.find_one({"property_id": offer.property_id, "buyer_id": current_user["id"], "status": {"$in": list(OFFER_OPEN_STATUSES)}}, {"_id": 0})
     if existing:
-        raise api_error(400, "validation", "Vous avez déjà une offre en cours pour cette entreprise", offer_id=existing["id"])
+        raise api_error(400, "validation", "Vous avez déjà une offre en cours pour ce bien", offer_id=existing["id"])
 
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(days=offer.validity_days)
-    seller = await db.users.find_one({"id": property.get("seller_id")}, {"_id": 0, "first_name": 1, "last_name": 1, "company_name": 1}) or {}
+    seller = await db.users.find_one({"id": property.get("seller_id")}, {"_id": 0, "first_name": 1, "last_name": 1, "company_name": 1,
+                                                                         "verified_first_name": 1, "verified_last_name": 1}) or {}
     settings_doc = await db.platform_settings.find_one({"type": "contracts"}, {"_id": 0})
     settings = {**DEFAULT_PLATFORM_SETTINGS, **(settings_doc["settings"] if settings_doc else {})}
     contract_number = f"OFFRE-{now.strftime('%Y%m%d')}-{str(uuid.uuid4())[:8].upper()}"
     conditions = [c.strip() for c in offer.conditions if c and c.strip()]
     financing = offer.financing.model_dump()
+    loan_condition = offer.loan_condition.model_dump()
+    if loan_condition["required"] and not loan_condition.get("amount"):
+        loan_condition["amount"] = financing["loan"] or None
+    if not loan_condition["required"]:
+        loan_condition = {"required": False, "amount": None, "max_rate": None, "duration_years": None}
+    company = company_text(property, with_siege=False)
     variables = {
         **settings,
         **property_contract_variables(property),
-        "REPRENEUR_IDENTITE": buyer_identity_text(current_user),
-        "VENDEUR_PRENOM": seller.get("first_name") or "",
-        "VENDEUR_NOM": seller.get("last_name") or "",
-        "OBJET": SALE_OBJECT_ACQUISITION[offer.sale_object].format(name=property.get("company_name") or ""),
+        "ACQUEREUR_IDENTITE": buyer_identity_text(current_user),
+        "VENDEUR_IDENTITE": seller_identity_text(seller, property),
+        "OBJET": SALE_OBJECT_OFFER[offer.sale_object].format(company=f" {company}" if company else ""),
         "MONTANT": fmt_eur_fr(offer.amount),
         "FIN_APPORT": fmt_eur_fr(financing["equity"]),
         "FIN_EMPRUNT": fmt_eur_fr(financing["loan"]),
-        "FIN_CREDIT_VENDEUR": fmt_eur_fr(financing["vendor_loan"]),
-        "FIN_COMPLEMENT": fmt_eur_fr(financing["earn_out"]),
-        "CONDITIONS": "\n".join(f"{i}. {c}" for i, c in enumerate(conditions, 1)) if conditions else "Aucune condition particulière.",
+        "CONDITION_PRET": loan_condition_text(loan_condition),
+        "RETRACTATION_ACQUEREUR": buyer_withdrawal_text(property, offer.sale_object),
+        "CONDITIONS": "\n".join(f"{i}. {c}" for i, c in enumerate(conditions, 1)) if conditions else "Aucune autre condition particulière.",
         "DATE_CIBLE": fmt_date_fr(target),
         "VALIDITE_JOURS": str(offer.validity_days),
         "DATE_EXPIRATION": fmt_date_fr(expires_at),
@@ -5060,15 +4502,15 @@ async def create_offer(offer: OfferCreate, current_user: dict = Depends(get_curr
     offer_doc = {
         "id": str(uuid.uuid4()), "property_id": offer.property_id, "buyer_id": current_user["id"], "buyer_email": current_user["email"],
         "seller_id": property.get("seller_id"), "amount": float(offer.amount), "sale_object": offer.sale_object, "financing": financing,
-        "conditions": conditions, "target_date": target.date().isoformat(), "validity_days": offer.validity_days,
-        "expires_at": expires_at.isoformat(), "message": (offer.message or "").strip() or None, "status": "pending_signature",
-        "counter_amount": None, "contract_id": None, "contract_number": contract_number, "signed_at": None, "countersigned_at": None,
-        "closing_id": None, "created_at": now.isoformat(), "terms_version": "v2",
+        "loan_condition": loan_condition, "conditions": conditions, "target_date": target.date().isoformat(),
+        "validity_days": offer.validity_days, "expires_at": expires_at.isoformat(), "message": (offer.message or "").strip() or None,
+        "status": "pending_signature", "counter_amount": None, "contract_id": None, "contract_number": contract_number,
+        "signed_at": None, "countersigned_at": None, "closing_id": None, "created_at": now.isoformat(), "terms_version": OFFER_TERMS_VERSION,
     }
     contract_doc = {
         "id": str(uuid.uuid4()), "contract_number": contract_number, "type": "offer", "offer_id": offer_doc["id"],
         "property_id": offer.property_id, "buyer_id": current_user["id"], "seller_id": property.get("seller_id"),
-        "content": content, "status": "pending_signature", "signers_pending": [current_user["id"]], "terms_version": "v2",
+        "content": content, "status": "pending_signature", "signers_pending": [current_user["id"]], "terms_version": OFFER_TERMS_VERSION,
         "terms_date": CONTRACT_TERMS_DATE, "created_at": now.isoformat(), "auto_generated": True, "addenda": [],
     }
     offer_doc["contract_id"] = contract_doc["id"]
@@ -5076,10 +4518,38 @@ async def create_offer(offer: OfferCreate, current_user: dict = Depends(get_curr
         offer_doc["is_test"] = contract_doc["is_test"] = True
     await db.generated_contracts.insert_one(contract_doc)
     await db.offers.insert_one(offer_doc)
-    return {"offer": offer_view(offer_doc), "contract_id": contract_doc["id"], "content": content, "contract_number": contract_number}
+    return {"offer": offer_view(offer_doc), "contract_id": contract_doc["id"], "content": content, "contract_number": contract_number,
+            "title": CONTRACT_TITLES["offer"]}
+
+def loan_condition_text(loan: dict) -> str:
+    """Clause de l'offre sur le financement par emprunt (condition suspensive, art. L313-40 et L313-42 C. conso.)"""
+    if not loan.get("required"):
+        return ("L'Acquéreur déclare financer l'acquisition sans recourir à un prêt ; l'avant-contrat comportera la mention "
+                "prévue à l'article L313-42 du code de la consommation.")
+    parts = []
+    parts.append(f"d'un montant de {fmt_eur_fr(loan['amount'])}" if loan.get("amount") else "d'un montant à préciser dans l'avant-contrat")
+    parts.append(f"sur {loan['duration_years']} ans" if loan.get("duration_years") else "sur une durée à préciser dans l'avant-contrat")
+    rate = loan.get("max_rate")
+    parts.append(f"au taux maximum de {fmt_percent_fr(rate)} hors assurance" if rate else "au taux du marché")
+    return ("Condition suspensive d'obtention de prêt : l'Acquéreur entend financer l'acquisition au moyen d'un prêt "
+            + " ".join(parts) + ". L'avant-contrat sera conclu sous la condition suspensive de son obtention, conformément "
+            "aux articles L313-40 et suivants du code de la consommation.")
+
+def buyer_withdrawal_text(property: dict, sale_object: str) -> str:
+    """Rappel du délai de rétractation de l'acquéreur non professionnel d'un logement (art. L271-1 CCH)"""
+    if sale_object == "parts":
+        return ("La cession de parts sociales n'ouvre pas le délai de rétractation de dix jours prévu par l'article L271-1 du "
+                "code de la construction et de l'habitation.")
+    ptype = taxonomy.property_type_by_id(property.get("property_type")) or {}
+    if ptype.get("category") == "habitation" or property.get("property_type") == "residence-geree":
+        return ("L'Acquéreur non professionnel d'un bien à usage d'habitation dispose d'un délai de rétractation de dix jours à "
+                "compter du lendemain de la première présentation ou de la remise de l'avant-contrat (article L271-1 du code de "
+                "la construction et de l'habitation).")
+    return ("Le délai de rétractation de dix jours de l'article L271-1 du code de la construction et de l'habitation ne "
+            "s'applique qu'à l'acquisition d'un bien à usage d'habitation par un acquéreur non professionnel.")
 
 async def _offer_after_buyer_signature(contract: dict, property: Optional[dict], user: dict, evidence: dict, now: datetime) -> dict:
-    """Appelée par POST /contracts/{id}/sign pour un document `offer` : l'offre passe à `pending`, le cédant est prévenu"""
+    """Appelée par POST /contracts/{id}/sign pour un document `offer` : l'offre passe à `pending`, le vendeur est prévenu"""
     offer = await db.offers.find_one({"id": contract.get("offer_id")}, {"_id": 0})
     if not offer:
         raise HTTPException(status_code=404, detail="Offre introuvable")
@@ -5105,7 +4575,7 @@ async def _offer_after_buyer_signature(contract: dict, property: Optional[dict],
     await email_user(offer.get("seller_id"), "offer_received", buyer_name=buyer_name, amount=fmt_eur_fr(offer["amount"]),
                      sale_object=SALE_OBJECT_LABELS.get(offer.get("sale_object"), ""), expires_at=fmt_date_fr(offer.get("expires_at")))
     await _offer_message(user, offer.get("seller_id"), offer,
-                         f"Offre indicative n° {contract.get('contract_number')} signée : {fmt_eur_fr(offer['amount'])} "
+                         f"Offre d'achat n° {contract.get('contract_number')} signée : {fmt_eur_fr(offer['amount'])} "
                          f"({SALE_OBJECT_LABELS.get(offer.get('sale_object'), '')}), valable jusqu'au {fmt_date_fr(offer.get('expires_at'))}.",
                          "offer", now)
     await create_audit_log(action="OFFER_SIGNED", property_id=offer["property_id"], actor_id=user["id"], actor_email=user["email"],
@@ -5115,9 +4585,9 @@ async def _offer_after_buyer_signature(contract: dict, property: Optional[dict],
 
 @api_router.get("/offers/my")
 async def get_my_offers(current_user: dict = Depends(get_current_user)):
-    """Offres du repreneur, les plus récentes d'abord"""
+    """Offres de l'acquéreur, les plus récentes d'abord ; chaque offre porte `property` (titre, type, ville, prix)"""
     if current_user.get("role") != "buyer":
-        raise HTTPException(status_code=403, detail="Endpoint réservé aux repreneurs")
+        raise api_error(403, "not_allowed", "Réservé aux acquéreurs")
     offers = await db.offers.find({"buyer_id": current_user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(100)
     for offer in offers:
         if offer.get("status") == "pending_signature" and offer.get("contract_id"):
@@ -5127,18 +4597,20 @@ async def get_my_offers(current_user: dict = Depends(get_current_user)):
                 offer["content"] = contract.get("content")
                 offer["contract_number"] = contract.get("contract_number")
                 offer["terms_date"] = contract.get("terms_date")
-        property = await db.properties.find_one({"id": offer["property_id"]}, {"_id": 0, "title": 1, "rge_types": 1, "region": 1, "asking_price": 1, "trades": 1})
+        property = await db.properties.find_one({"id": offer["property_id"]}, {"_id": 0, "title": 1, "property_type": 1, "city": 1,
+                                                                               "department": 1, "region": 1, "asking_price": 1})
         if property:
-            offer["company"] = {"title": property.get("title"), "trades": property.get("trades"), "rge_types": property.get("rge_types"),
-                                "region": property.get("region"), "asking_price": property.get("asking_price")}
+            offer["property"] = {"title": property.get("title"), "property_type": property.get("property_type"), "city": property.get("city"),
+                                 "department": property.get("department"), "region": property.get("region"),
+                                 "asking_price": property.get("asking_price")}
     return {"offers": offers}
 
 @api_router.get("/offers/property/{property_id}")
 async def get_property_offers(property_id: str, current_user: dict = Depends(get_current_user)):
-    """Offres reçues pour une annonce (cédant, admin) ; un repreneur ne voit que les siennes"""
+    """Offres reçues pour une annonce (vendeur, admin) ; un acquéreur ne voit que les siennes"""
     property = await db.properties.find_one({"id": property_id}, {"_id": 0})
     if not property:
-        raise HTTPException(status_code=404, detail="Entreprise non trouvée")
+        raise HTTPException(status_code=404, detail="Annonce introuvable")
     if is_property_owner(property, current_user) or current_user.get("role") == "admin":
         offers = await db.offers.find({"property_id": property_id}, {"_id": 0}).sort("created_at", -1).to_list(100)
     else:
@@ -5150,7 +4622,7 @@ async def get_property_offers(property_id: str, current_user: dict = Depends(get
 
 async def _accept_offer(offer: dict, contract: Optional[dict], seller: dict, evidence: Optional[dict], now: datetime, amount: float,
                         buyer_signed_counter: Optional[dict] = None) -> dict:
-    """Offre acceptée : contre-signature du cédant (ou signature du repreneur sur la contre-proposition), étape de vente"""
+    """Offre acceptée : contre-signature du vendeur (ou signature de l'acquéreur sur la contre-proposition), étape de vente"""
     record = None
     if contract and evidence is not None:
         document_sha256 = hashlib.sha256((contract.get("content") or "").encode()).hexdigest()
@@ -5159,7 +4631,7 @@ async def _accept_offer(offer: dict, contract: Optional[dict], seller: dict, evi
             "status": "fully_signed", "countersigned_at": now.isoformat(), "countersignature_record_id": record["id"],
             "countersignature_evidence": record["evidence"], "signers_pending": []}})
     elif contract:
-        # Contre-proposition acceptée : l'engagement du cédant est la contre-proposition enregistrée avec son dossier de preuve
+        # Contre-proposition acceptée : l'engagement du vendeur est la contre-proposition enregistrée avec son dossier de preuve
         seller_record_id = (offer.get("counter") or {}).get("record_id")
         await db.generated_contracts.update_one({"id": contract["id"]}, {"$set": {
             "status": "fully_signed", "countersigned_at": now.isoformat(), "signers_pending": [],
@@ -5172,7 +4644,7 @@ async def _accept_offer(offer: dict, contract: Optional[dict], seller: dict, evi
     await db.offers.update_one({"id": offer["id"]}, {"$set": update})
     offer_doc = await db.offers.find_one({"id": offer["id"]}, {"_id": 0}) or {**offer, **update}
     property = await db.properties.find_one({"id": offer["property_id"]}, {"_id": 0}) or {}
-    # Étape de vente (closing.py, SPEC §4.5) : créée une seule fois, checklist envoyée aux deux parties
+    # Étape de vente (closing.py, SPEC §7.4) : créée une seule fois, checklist envoyée aux deux parties
     closing_module = LOADED_MODULES.get("closing")
     if closing_module and property:
         try:
@@ -5184,16 +4656,16 @@ async def _accept_offer(offer: dict, contract: Optional[dict], seller: dict, evi
 
 @api_router.put("/offers/{offer_id}/respond")
 async def respond_to_offer(offer_id: str, response: OfferRespond, request: Request, current_user: dict = Depends(get_current_user)):
-    """Cédant : accepte (contre-signature par code → `accepted` + étape de vente), refuse avec motif ou fait une
-    contre-proposition (`countered`, acceptée ensuite par le repreneur avec un code)."""
+    """Vendeur : accepte (contre-signature par code → `accepted` + étape de vente), refuse avec motif ou fait une
+    contre-proposition (`countered`, acceptée ensuite par l'acquéreur avec un code)."""
     offer = await db.offers.find_one({"id": offer_id}, {"_id": 0})
     if not offer:
         raise HTTPException(status_code=404, detail="Offre non trouvée")
     if current_user["id"] != offer.get("seller_id") and current_user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Seul le cédant peut répondre à cette offre")
+        raise api_error(403, "not_allowed", "Seul le vendeur peut répondre à cette offre")
     if offer.get("status") != "pending":
         raise api_error(400, "validation", "Cette offre n'est pas en attente de votre réponse" if offer.get("status") != "pending_signature"
-                        else "Le repreneur n'a pas encore signé cette offre")
+                        else "L'acquéreur n'a pas encore signé cette offre")
     now = datetime.now(timezone.utc)
     expires = _parse_dt(offer.get("expires_at"))
     if response.action != "reject" and expires and expires < now:
@@ -5209,7 +4681,8 @@ async def respond_to_offer(offer_id: str, response: OfferRespond, request: Reque
         offer_doc = await _accept_offer(offer, contract, current_user, evidence, now, offer["amount"])
         record = await _latest_offer_record(contract["id"]) if contract else None
         await email_user(offer["buyer_id"], "offer_accepted", amount=amount_text, pdf_link=_offer_pdf_link(record))
-        await _offer_message(current_user, offer["buyer_id"], offer, f"Offre de {amount_text} acceptée et contresignée. L'étape de vente est ouverte.", "offer_response", now)
+        await _offer_message(current_user, offer["buyer_id"], offer, f"Offre de {amount_text} acceptée et contresignée. L'étape de vente est "
+                             "ouverte : l'avant-contrat se prépare maintenant chez le notaire.", "offer_response", now)
         await create_audit_log(action="OFFER_ACCEPTED", property_id=offer["property_id"], actor_id=current_user["id"], actor_email=current_user["email"],
                                details={"offer_id": offer_id, "amount": offer["amount"]})
         return {"message": "Offre acceptée", "status": "accepted", "offer": offer_view(offer_doc), "closing_id": offer_doc.get("closing_id")}
@@ -5225,7 +4698,7 @@ async def respond_to_offer(offer_id: str, response: OfferRespond, request: Reque
         await _offer_message(current_user, offer["buyer_id"], offer, f"Offre de {amount_text} refusée. Motif : {reason}", "offer_response", now)
         return {"message": "Offre refusée", "status": "rejected"}
 
-    # Contre-proposition : nouvelle proposition de prix du cédant, horodatée depuis son espace, à accepter par le repreneur (code)
+    # Contre-proposition : nouvelle proposition de prix du vendeur, horodatée depuis son espace, à accepter par l'acquéreur (code)
     if not response.counter_amount:
         raise api_error(400, "validation", "Indiquez le montant de la contre-proposition", missing=["counter_amount"])
     counter = {"amount": float(response.counter_amount), "message": (response.message or "").strip() or None, "at": now.isoformat(),
@@ -5234,16 +4707,16 @@ async def respond_to_offer(offer_id: str, response: OfferRespond, request: Reque
     await db.offers.update_one({"id": offer_id}, {"$set": {"status": "countered", "responded_at": now.isoformat(), "counter_amount": counter["amount"],
                                                         "counter": counter, "response_message": counter["message"]}})
     if contract:
-        text = (f"Le Cédant propose un prix de {fmt_eur_fr(counter['amount'])} en lieu et place de {amount_text}, "
+        text = (f"Le Vendeur propose un prix de {fmt_eur_fr(counter['amount'])} en lieu et place de {amount_text}, "
                 f"depuis son espace authentifié le {fmt_datetime_paris(now)}." + (f" Message : {counter['message']}" if counter["message"] else ""))
-        # Dossier de preuve de la contre-proposition (horodatage, IP, navigateur, identité), chaîné aux actes du cédant
+        # Dossier de preuve de la contre-proposition (horodatage, IP, navigateur, identité), chaîné aux actes du vendeur
         is_seller = current_user["id"] == offer.get("seller_id")
         record = await record_signature(contract, current_user, session_evidence(current_user, contract, request, "authenticated_session"),
                                         "offer_counter_proposal", "seller" if is_seller else "platform", now,
                                         hashlib.sha256(text.encode()).hexdigest(), extra={"addendum": text})
         counter["record_id"] = record["id"]
         await db.offers.update_one({"id": offer_id}, {"$set": {"counter.record_id": record["id"]}})
-        addendum = {"title": f"Contre-proposition du cédant du {fmt_date_fr(now)}", "text": text, "at": now.isoformat(), "kind": "counter",
+        addendum = {"title": f"Contre-proposition du vendeur du {fmt_date_fr(now)}", "text": text, "at": now.isoformat(), "kind": "counter",
                     "record_id": record["id"]}
         await db.generated_contracts.update_one({"id": contract["id"]}, {"$push": {"addenda": addendum}, "$set": {"signers_pending": [offer["buyer_id"]]}})
     await email_user(offer["buyer_id"], "offer_countered", amount=amount_text, counter_amount=fmt_eur_fr(counter["amount"]),
@@ -5254,12 +4727,12 @@ async def respond_to_offer(offer_id: str, response: OfferRespond, request: Reque
 
 @api_router.put("/offers/{offer_id}/accept-counter")
 async def accept_counter_offer(offer_id: str, data: OfferCounterAccept, request: Request, current_user: dict = Depends(get_current_user)):
-    """Repreneur : accepte la contre-proposition du cédant par code → `accepted` + étape de vente"""
+    """Acquéreur : accepte la contre-proposition du vendeur par code → `accepted` + étape de vente"""
     offer = await db.offers.find_one({"id": offer_id}, {"_id": 0})
     if not offer:
         raise HTTPException(status_code=404, detail="Offre non trouvée")
     if current_user["id"] != offer.get("buyer_id"):
-        raise HTTPException(status_code=403, detail="Seul le repreneur peut accepter cette contre-proposition")
+        raise api_error(403, "not_allowed", "Seul l'acquéreur peut accepter cette contre-proposition")
     if offer.get("status") != "countered" or not offer.get("counter_amount"):
         raise api_error(400, "validation", "Aucune contre-proposition en attente sur cette offre")
     now = datetime.now(timezone.utc)
@@ -5272,7 +4745,7 @@ async def accept_counter_offer(offer_id: str, data: OfferCounterAccept, request:
         raise api_error(400, "validation", "Cette offre n'a pas de document à signer")
     evidence = await verify_signature_code(current_user, contract, data.otp_code, request)
     counter_amount = float(offer["counter_amount"])
-    text = (f"Le Repreneur accepte la contre-proposition du Cédant : prix de {fmt_eur_fr(counter_amount)} en lieu et place de "
+    text = (f"L'Acquéreur accepte la contre-proposition du Vendeur : prix de {fmt_eur_fr(counter_amount)} en lieu et place de "
             f"{fmt_eur_fr(offer['amount'])}, les autres conditions de l'offre n° {contract.get('contract_number')} demeurant inchangées. "
             f"Signé électroniquement par code le {fmt_datetime_paris(now)}.")
     document_sha256 = hashlib.sha256(text.encode()).hexdigest()
@@ -5302,16 +4775,12 @@ async def download_offer_pdf(offer_id: str, current_user: dict = Depends(get_cur
         raise api_error(400, "validation", "Le PDF est disponible une fois l'offre signée")
     contract = await _offer_contract(offer)
     if not contract:
-        # Offres antérieures à la version du 10/10/2026 : PDF d'acceptation archivé
-        legacy = await db.offer_pdfs.find_one({"offer_id": offer_id}, {"_id": 0})
-        if not legacy:
-            raise HTTPException(status_code=404, detail="PDF non trouvé")
-        return {"filename": f"offre_{offer_id[:8]}.pdf", "content": legacy["content"]}
+        raise HTTPException(status_code=404, detail="PDF non trouvé")
     pdf = await contract_pdf_bytes(contract)
     return {"filename": f"offre_{contract.get('contract_number', offer_id[:8])}.pdf", "content": base64.b64encode(pdf).decode("utf-8")}
 
 async def job_offers_expiry(now: datetime) -> int:
-    """Offres arrivées au terme de leur validité sans acceptation : `expired`, e-mail au repreneur (et au cédant si elle était signée)"""
+    """Offres arrivées au terme de leur validité sans acceptation : `expired`, e-mail à l'acquéreur (et au vendeur si elle était signée)"""
     count = 0
     async for offer in db.offers.find({"status": {"$in": list(OFFER_OPEN_STATUSES)}}, {"_id": 0}):
         expires = _parse_dt(offer.get("expires_at"))
@@ -5325,8 +4794,8 @@ async def job_offers_expiry(now: datetime) -> int:
         await email_user(offer.get("buyer_id"), "offer_expired", amount=amount, role_text="que vous avez adressée", expires_at=fmt_date_fr(expires),
                          next_step="Vous pouvez formuler une nouvelle offre depuis votre espace si votre projet se poursuit.")
         if previous in ("pending", "countered"):
-            await email_user(offer.get("seller_id"), "offer_expired", amount=amount, role_text="reçue pour votre entreprise", expires_at=fmt_date_fr(expires),
-                             next_step="Le repreneur peut vous adresser une nouvelle offre depuis son espace.")
+            await email_user(offer.get("seller_id"), "offer_expired", amount=amount, role_text="reçue pour votre bien", expires_at=fmt_date_fr(expires),
+                             next_step="L'acquéreur peut vous adresser une nouvelle offre depuis son espace.")
         count += 1
     return count
 # ============ ADMIN ROUTES ============
@@ -5360,9 +4829,9 @@ def _todo_row(kind: str, key: str, title: str, detail: str = "", since: str = ""
     return {"type": kind, "id": key, "title": title, "detail": detail, "since": since, "ref": ref or {}, "actions": actions or []}
 
 async def build_admin_todo(now: Optional[datetime] = None) -> dict:
-    """Agrège tout ce qui attend l'administrateur : annonces publiées < 48 h à relire (drapeaux), demandes de dossier sans
-    réponse > 7 j, offres acceptées > 60 j sans vente, ventes déclarées / contestées, factures en retard, mandats < 30 j,
-    incidents BODACC, échecs de jobs, identités en repli."""
+    """Agrège tout ce qui attend l'administrateur : annonces publiées < 48 h à relire (drapeaux), justificatifs de propriété
+    à contrôler, demandes de dossier sans réponse > 7 j, offres acceptées > 60 j sans vente, ventes déclarées / contestées,
+    factures en retard, mandats < 30 j, échecs de jobs, identités en repli."""
     now = now or datetime.now(timezone.utc)
     now_iso = now.isoformat()
     sections = []
@@ -5386,26 +4855,44 @@ async def build_admin_todo(now: Optional[datetime] = None) -> dict:
     rows = []
     for c in await db.properties.find({"status": "published", "moderation.status": "pending", "moderation.review_until": {"$gte": now_iso}},
                                      {"_id": 0, "id": 1, "title": 1, "moderation": 1, "siret": 1, "company_name": 1, "region": 1,
-                                      "trades": 1, "published_at": 1, "asking_price": 1}).sort("published_at", -1).to_list(200):
+                                      "published_at": 1, "asking_price": 1, "gross_yield": 1, "ownership": 1}).sort("published_at", -1).to_list(200):
         flags = [LISTING_FLAG_LABELS.get(f, f) for f in (c.get("moderation") or {}).get("flags") or []]
         rows.append(_todo_row("listing_review", c["id"], c.get("title") or "Annonce à relire",
                               detail=("Drapeaux : " + " · ".join(flags)) if flags else "Aucun drapeau", since=c.get("published_at") or "",
                               ref={"property_id": c["id"], "company_name": c.get("company_name"), "siret": c.get("siret"),
-                                   "flags": (c.get("moderation") or {}).get("flags") or [], "asking_price": c.get("asking_price")},
+                                   "flags": (c.get("moderation") or {}).get("flags") or [], "asking_price": c.get("asking_price"),
+                                   "gross_yield": c.get("gross_yield"), "ownership_status": (c.get("ownership") or {}).get("status")},
                               actions=[{"label": "Valider", "method": "PUT", "url": f"/api/properties/{c['id']}/status?status=published"},
                                        {"label": "Retirer avec motif", "method": "PUT",
                                         "url": f"/api/properties/{c['id']}/status?status=removed&reason=<motif>&reason_text=<texte>",
                                         "reasons": REMOVAL_REASONS}]))
     sections.append({"key": "listings_review", "title": "Annonces publiées à relire (48 h)", "rows": rows})
 
+    # 1 bis. Justificatifs de propriété à contrôler (SPEC §9) : aperçu du fichier, valider ou refuser avec motif
+    rows = []
+    for c in await db.properties.find({"ownership.status": "pending", "status": {"$nin": ["removed", "archived"]}},
+                                     {"_id": 0, "id": 1, "title": 1, "ownership": 1, "status": 1, "seller_id": 1}).sort("ownership.uploaded_at", 1).to_list(200):
+        o = c.get("ownership") or {}
+        rows.append(_todo_row("ownership_proof", c["id"], f"Justificatif de propriété à contrôler — {c.get('title') or 'annonce'}",
+                              detail=f"{OWNERSHIP_DOC_TYPES.get(o.get('doc_type'), o.get('doc_type') or '')} · {o.get('filename') or ''} · annonce {c.get('status')}",
+                              since=o.get("uploaded_at") or "",
+                              ref={"property_id": c["id"], "doc_type": o.get("doc_type"), "filename": o.get("filename"),
+                                   "file_url": f"/api/properties/{c['id']}/ownership-proof/file"},
+                              actions=[{"label": "Voir le justificatif", "method": "GET", "url": f"/api/properties/{c['id']}/ownership-proof/file"},
+                                       {"label": "Valider", "method": "PUT", "url": f"/api/admin/properties/{c['id']}/ownership",
+                                        "body": {"status": "verified"}},
+                                       {"label": "Refuser avec motif", "method": "PUT", "url": f"/api/admin/properties/{c['id']}/ownership",
+                                        "body": {"status": "rejected", "note": "<motif>"}}]))
+    sections.append({"key": "ownership_proofs", "title": "Justificatifs de propriété à contrôler", "rows": rows})
+
     # 2. Demandes de dossier sans réponse depuis plus de 7 jours
     rows = []
     limit = (now - timedelta(days=7)).isoformat()
     for a in await db.dataroom_access.find({"status": "pending", "requested_at": {"$lte": limit}}, {"_id": 0}).sort("requested_at", 1).to_list(200):
-        rows.append(_todo_row("dataroom_unanswered", a["id"], "Demande de dossier sans réponse du cédant",
-                              detail=f"Annonce {a.get('property_id', '')[:8]} · repreneur {a.get('buyer_email') or a.get('buyer_id', '')}",
+        rows.append(_todo_row("dataroom_unanswered", a["id"], "Demande de dossier sans réponse du vendeur",
+                              detail=f"Annonce {a.get('property_id', '')[:8]} · acquéreur {a.get('buyer_email') or a.get('buyer_id', '')}",
                               since=a.get("requested_at") or "", ref={"property_id": a.get("property_id"), "buyer_id": a.get("buyer_id")},
-                              actions=[{"label": "Relancer le cédant", "method": "POST", "url": f"/api/admin/dataroom/{a['id']}/remind"}]))
+                              actions=[{"label": "Relancer le vendeur", "method": "POST", "url": f"/api/admin/dataroom/{a['id']}/remind"}]))
     sections.append({"key": "dataroom_unanswered", "title": "Demandes de dossier sans réponse (> 7 j)", "rows": rows})
 
     # 3. Offres acceptées depuis plus de 60 jours sans vente déclarée ; ventes déclarées / contestées (closing.py)
@@ -5450,16 +4937,6 @@ async def build_admin_todo(now: Optional[datetime] = None) -> dict:
                               actions=[{"label": "Voir le registre", "method": "GET", "url": "/api/admin/mandates"}]))
     sections.append({"key": "mandates_expiring", "title": "Mandats à moins de 30 jours", "rows": rows})
 
-    # 6. Incidents BODACC (veille.py)
-    rows = []
-    for i in await db.incidents.find({"status": "open"}, {"_id": 0}).sort("created_at", -1).to_list(100):
-        ev = i.get("event") or {}
-        rows.append(_todo_row("bodacc_incident", i["id"], f"BODACC {ev.get('famille_label') or ev.get('famille', '')} — {i.get('property_label') or i.get('siren', '')}",
-                              detail=(ev.get("description") or "")[:300], since=i.get("created_at") or "",
-                              ref={"incident_id": i["id"], "property_id": i.get("property_id"), "siren": i.get("siren"), "url": ev.get("url")},
-                              actions=[{"label": "Clore", "method": "PUT", "url": f"/api/admin/incidents/{i['id']}", "body": {"status": "closed"}}]))
-    sections.append({"key": "incidents", "title": "Incidents BODACC", "rows": rows})
-
     # 7. Échecs de tâches planifiées (7 derniers jours)
     rows = []
     limit7 = (now - timedelta(days=7)).isoformat()
@@ -5483,12 +4960,12 @@ async def build_admin_todo(now: Optional[datetime] = None) -> dict:
                               actions=[{"label": "Marquer vérifiée", "method": "PUT", "url": f"/api/admin/kyc/{u['id']}/validate?status=verified"}]))
     sections.append({"key": "kyc_manual", "title": "Identités en repli", "rows": rows})
 
-    # 9. Demandes de dossier expirées sans réponse (cédants muets, 30 derniers jours) : relance humaine possible
+    # 9. Demandes de dossier expirées sans réponse (vendeurs muets, 30 derniers jours) : relance humaine possible
     rows = []
     limit30d = (now - timedelta(days=30)).isoformat()
     for a in await db.dataroom_access.find({"status": "expired", "expired_at": {"$gte": limit30d}}, {"_id": 0}).sort("expired_at", -1).to_list(100):
-        rows.append(_todo_row("dataroom_expired", a["id"], "Demande de dossier expirée sans réponse du cédant",
-                              detail=f"Annonce {a.get('property_id', '')[:8]} · repreneur {buyer_pseudonym(a.get('buyer_id'))}",
+        rows.append(_todo_row("dataroom_expired", a["id"], "Demande de dossier expirée sans réponse du vendeur",
+                              detail=f"Annonce {a.get('property_id', '')[:8]} · {buyer_pseudonym(a.get('buyer_id'))}",
                               since=a.get("expired_at") or "", ref={"property_id": a.get("property_id"), "buyer_id": a.get("buyer_id")},
                               actions=[{"label": "Voir l'annonce", "method": "GET", "url": f"/api/properties/{a.get('property_id')}"}]))
     sections.append({"key": "dataroom_expired", "title": "Demandes de dossier expirées (30 j)", "rows": rows})
@@ -5534,7 +5011,7 @@ KPI_TARGETS = {
     "listings_published": 1, "listings_blocked": 0, "estimates_completed": 3, "estimate_to_listing_pct": 30, "listing_to_mandate_pct": 65,
     "publish_delay_median_h": 1, "auto_publish_pct": 90, "contacts": 5, "contacts_per_listing_30d": 5, "nda_signed": 2,
     "nda_per_listing_30d": 2, "offers": 1, "seller_response_48h_pct": 80, "requests_expired": 0, "offers_accepted": 1,
-    "sales_declared": 1, "invoices_issued": 1, "invoices_paid": 1, "invoices_overdue": 0, "bodacc_incidents": 0, "costs": 600,
+    "sales_declared": 1, "invoices_issued": 1, "invoices_paid": 1, "invoices_overdue": 0, "ownership_pending": 0, "costs": 600,
     "blocking_actions": 3,
 }
 
@@ -5561,7 +5038,8 @@ async def compute_kpis(weeks: int, now: Optional[datetime] = None) -> dict:
     since_iso = (first - timedelta(days=60)).isoformat()
     dt = _parse_dt
     properties = await db.properties.find({}, {"_id": 0, "id": 1, "status": 1, "created_at": 1, "published_at": 1, "submitted_at": 1,
-                                             "blocking": 1, "auto_published": 1, "seller_id": 1, "mandate_id": 1}).to_list(100000)
+                                             "blocking": 1, "auto_published": 1, "seller_id": 1, "mandate_id": 1,
+                                             "ownership": 1}).to_list(100000)
     mandates = await db.generated_contracts.find({"type": "mandat", "status": {"$in": ["signed", "denounced", "expired", "void"]}},
                                                  {"_id": 0, "property_id": 1, "signed_at": 1}).to_list(100000)
     estimates = await db.estimates.find({"created_at": {"$gte": since_iso}}, {"_id": 0, "created_at": 1, "email": 1, "siret": 1}).to_list(100000)
@@ -5571,7 +5049,6 @@ async def compute_kpis(weeks: int, now: Optional[datetime] = None) -> dict:
     requests = await db.dataroom_access.find({}, {"_id": 0, "status": 1, "expired_at": 1}).to_list(100000)
     closings = await db.closings.find({}, {"_id": 0, "status": 1, "declaration": 1, "confirmed_at": 1}).to_list(100000)
     invoices = await db.invoices.find({}, {"_id": 0, "status": 1, "issued_on": 1, "paid_on": 1, "due_on": 1, "total_ht": 1}).to_list(100000)
-    incidents = await db.incidents.find({}, {"_id": 0, "created_at": 1}).to_list(100000)
     audits = await db.audit_logs.find({"action": {"$in": ["LISTING_REMOVED"]}}, {"_id": 0, "timestamp": 1}).to_list(100000)
     todos_done = await db.todos.find({"status": "done"}, {"_id": 0, "done_at": 1, "updated_at": 1}).to_list(100000)
     costs = {c["month"]: c async for c in db.costs.find({}, {"_id": 0})}
@@ -5645,7 +5122,9 @@ async def compute_kpis(weeks: int, now: Optional[datetime] = None) -> dict:
             "invoices_issued": len(week_invoices),
             "invoices_paid": sum(1 for inv in invoices if inv.get("status") == "paid" and in_week(inv.get("paid_on"), start, end)),
             "invoices_overdue": len(overdue),
-            "bodacc_incidents": sum(1 for inc in incidents if in_week(inc.get("created_at"), start, end)),
+            # Justificatifs déposés pendant la semaine et toujours en attente de contrôle
+            "ownership_pending": sum(1 for c in properties if (c.get("ownership") or {}).get("status") == "pending"
+                                     and in_week((c.get("ownership") or {}).get("uploaded_at"), start, end)),
             "costs": float((costs.get(month) or {}).get("amount") or 0),
             "blocking_actions": sum(1 for a in audits if in_week(a.get("timestamp"), start, end))
             + sum(1 for t in todos_done if in_week(t.get("done_at") or t.get("updated_at"), start, end)),
@@ -5722,30 +5201,23 @@ async def public_legal_info():
 
 @api_router.get("/public/listing-stats")
 async def public_listing_stats():
-    """Nombre d'annonces en ligne par métier, département, région et activité RGE (hubs, pages d'atterrissage, pré-rendu).
+    """Nombre d'annonces en ligne par type de bien, type de bail, département et région (page des annonces, pré-rendu).
     Seules les valeurs > 0 sont renvoyées : le front décide de l'affichage et n'écrit jamais « 0 »."""
-    by_rge, by_region, by_trade, by_department, total, rge_total = {}, {}, {}, {}, 0, 0
+    by_type, by_lease, by_region, by_department, total = {}, {}, {}, {}, 0
     async for c in db.properties.find(hide_test_listings({"status": "published"}),
-                                     {"_id": 0, "rge_types": 1, "region": 1, "trades": 1, "department": 1, "is_rge": 1}):
+                                     {"_id": 0, "property_type": 1, "lease_type": 1, "region": 1, "department": 1}):
         total += 1
-        if c.get("is_rge") or c.get("rge_types"):
-            rge_total += 1
-        for t in c.get("rge_types") or []:
-            by_rge[t] = by_rge.get(t, 0) + 1
-        for t in c.get("trades") or taxonomy.trades_for_rge(c.get("rge_types")):
-            by_trade[t] = by_trade.get(t, 0) + 1
-        if c.get("region"):
-            by_region[c["region"]] = by_region.get(c["region"], 0) + 1
-        if c.get("department"):
-            by_department[c["department"]] = by_department.get(c["department"], 0) + 1
+        for value, bucket in ((c.get("property_type"), by_type), (c.get("lease_type"), by_lease), (c.get("region"), by_region),
+                              (c.get("department"), by_department)):
+            if value:
+                bucket[value] = bucket.get(value, 0) + 1
     rows = lambda d: [{"value": k, "count": v} for k, v in sorted(d.items(), key=lambda x: -x[1]) if v > 0]
     return {
         "total": total,
-        "rge_total": rge_total,
-        "by_trade": [{**r, "slug": taxonomy.trade_slug(r["value"]), "label": taxonomy.trade_label(r["value"])} for r in rows(by_trade)],
+        "by_property_type": [{**r, "label": taxonomy.property_type_label(r["value"])} for r in rows(by_type)],
+        "by_lease_type": [{**r, "label": taxonomy.lease_type_label(r["value"])} for r in rows(by_lease)],
         "by_department": [{**r, "label": taxonomy.departement_name(r["value"]), "region": taxonomy.region_for_departement(r["value"])} for r in rows(by_department)],
         "by_region": [{**r, "slug": slugify(r["value"])} for r in rows(by_region)],
-        "by_rge": rows(by_rge),
     }
 
 def load_seo_routes() -> list:
@@ -5756,27 +5228,24 @@ def load_seo_routes() -> list:
     except (OSError, ValueError):
         return [{"path": "/", "changefreq": "daily"}]
 
-# Anciennes pages marketing (MODE-TEST-ET-APP.md §A.1) : redirigées (301) vers la page des annonces, jamais dans le plan
-LEGACY_REDIRECT_PATHS = ("/entreprises-a-vendre", "/search", "/buyer/search", "/verifier-entreprise-rge")
-LEGACY_REDIRECT_PREFIXES = ("/entreprises-batiment-a-vendre", "/entreprises-rge-a-vendre", "/vendre-mon-entreprise-",
-                            "/reprendre-une-entreprise-", "/guides")
+# Pages techniques ou privées, jamais dans le plan du site
+SITEMAP_EXCLUDED_PREFIXES = ("/annonce/", "/embed/", "/test/", "/seller/", "/buyer/", "/admin/", "/dataroom/", "/vente/",
+                             "/messages", "/profile", "/suivi/", "/reset-password/", "/confirmer-email/")
+SITEMAP_EXCLUDED_PATHS = ("/test", "/login", "/register", "/mot-de-passe-oublie")
 
 def sitemap_static_path(path: Optional[str]) -> bool:
-    """Route statique publiable dans le plan du site : ni fiche d'annonce, ni ancienne page redirigée, ni page technique"""
-    if not path or not path.startswith("/") or path.startswith(("/property/", "/embed/", "/test/")) or path == "/test":
+    """Route statique publiable dans le plan du site : ni fiche d'annonce (ajoutée à part), ni page privée ou technique"""
+    if not path or not path.startswith("/"):
         return False
-    if path in LEGACY_REDIRECT_PATHS:
+    if path in SITEMAP_EXCLUDED_PATHS:
         return False
-    for prefix in LEGACY_REDIRECT_PREFIXES:
-        if path.startswith(prefix) if prefix.endswith("-") else (path == prefix or path.startswith(prefix + "/")):
-            return False
-    return True
+    return not path.startswith(SITEMAP_EXCLUDED_PREFIXES)
 
 @api_router.get("/sitemap.xml")
 async def sitemap():
-    """Plan du site : routes statiques de seo_routes.json (page des annonces, estimateur, pages légales) puis fiches des
-    annonces publiées (/property/{id}, date de dernière modification). Les annonces de test n'y figurent jamais, même en
-    mode test ; les anciennes pages marketing redirigées non plus."""
+    """Plan du site : routes statiques de seo_routes.json (page des annonces, page vendeur, estimateur, pages légales) puis
+    fiches des annonces publiées (/annonce/{id}, date de dernière modification). Les annonces de test n'y figurent jamais,
+    même en mode test."""
     from xml.sax.saxutils import escape as xml_escape
     urls = []
     seen = set()
@@ -5788,11 +5257,11 @@ async def sitemap():
         lastmod = f"<lastmod>{route['lastmod']}</lastmod>" if route.get("lastmod") else ""
         urls.append(f"<url><loc>{xml_escape(site_url(path))}</loc>{lastmod}"
                     f"<changefreq>{route.get('changefreq', 'weekly')}</changefreq></url>")
-    async for c in db.properties.find({"status": "published", "is_test": {"$ne": True}},
+    async for c in db.properties.find({"status": "published", "is_test": {"$ne": True}, "mandate_is_test": {"$ne": True}},
                                      {"_id": 0, "id": 1, "updated_at": 1, "published_at": 1}).sort("published_at", -1):
         lastmod = str(c.get("updated_at") or c.get("published_at") or "")[:10]
         lastmod = f"<lastmod>{lastmod}</lastmod>" if re.fullmatch(r"\d{4}-\d{2}-\d{2}", lastmod) else ""
-        urls.append(f"<url><loc>{xml_escape(site_url('/property/' + c['id']))}</loc>{lastmod}<changefreq>weekly</changefreq></url>")
+        urls.append(f"<url><loc>{xml_escape(site_url('/annonce/' + c['id']))}</loc>{lastmod}<changefreq>weekly</changefreq></url>")
     xml = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + "".join(urls) + "</urlset>"
     return Response(content=xml, media_type="application/xml")
 
@@ -5800,8 +5269,8 @@ async def sitemap():
 
 FOLLOWUP_ANSWERS = {
     "en_discussion": "Toujours en discussion",
-    "rencontre": "Rencontre prévue ou faite",
-    "accord": "Accord ou offre en cours",
+    "rencontre": "Visite prévue ou faite",
+    "accord": "Accord ou offre d'achat en cours",
     "pas_de_suite": "Pas de suite",
 }
 
@@ -5871,9 +5340,9 @@ async def get_admin_metrics(days: int = 30, current_user: dict = Depends(get_cur
         {"step": "Identité vérifiée", "count": len(verified_ids)},
         {"step": "Premier contact", "count": len(contacted_ids)},
         {"step": "Réponse du vendeur", "count": len(contacted_ids & replied_buyers)},
-        {"step": "NDA signé", "count": len(buyer_ids & {c["buyer_id"] for c in contracts if c["type"] == "nda"})},
-        {"step": "Offre signée", "count": len(buyer_ids & {c["buyer_id"] for c in contracts if c["type"] == "offer"})},
-        {"step": "Offre", "count": len(buyer_ids & {o["buyer_id"] for o in offers})},
+        {"step": "Engagement de confidentialité signé", "count": len(buyer_ids & {c["buyer_id"] for c in contracts if c["type"] == "nda"})},
+        {"step": "Offre d'achat signée", "count": len(buyer_ids & {c["buyer_id"] for c in contracts if c["type"] == "offer"})},
+        {"step": "Offre d'achat", "count": len(buyer_ids & {o["buyer_id"] for o in offers})},
     ]
     
     sources = {}
@@ -6017,11 +5486,11 @@ async def get_favorites(current_user: dict = Depends(get_current_user)):
         {"_id": 0}
     ).sort("created_at", -1).to_list(100)
     
-    # Enrich with property info
+    # Annonce associée (vue publique, ou révélée après l'engagement)
     for fav in favorites:
         property = await db.properties.find_one({"id": fav["property_id"]}, {"_id": 0})
         if property:
-            fav["company"] = await sanitize_property(property, current_user)
+            fav["property"] = await sanitize_property(property, current_user)
     
     return {"favorites": favorites}
 
@@ -6034,41 +5503,35 @@ async def check_favorite(property_id: str, current_user: dict = Depends(get_curr
     })
     return {"favorited": existing is not None}
 
-# ============ ALERTES (avec compte et sans compte, SPEC §4.3.2, API.md §8) ============
-# Alertes avec compte : db.alerts {user_id, trades, regions, max_price, rge, rge_types (héritage), region (héritage), active}.
-# Alertes sans compte : db.public_alerts {email, trades, regions, max_price, rge, status: pending|active|unsubscribed} ;
+# ============ ALERTES (avec compte et sans compte, SPEC §5.3, API.md §8) ============
+# Alertes avec compte : db.alerts {user_id, property_types, regions, max_price, min_yield, active}.
+# Alertes sans compte : db.public_alerts {email, property_types, regions, max_price, min_yield, status: pending|active|unsubscribed} ;
 # confirmation et désinscription par lien signé (JWT_SECRET), pages HTML minimales en français.
 ALERT_CONFIRM_TTL = timedelta(days=7)
 MAX_ALERTS_PER_USER = 5
 
 class AlertCreate(BaseModel):
     name: Optional[str] = Field(None, max_length=120)
-    trades: Optional[List[str]] = None
+    property_types: Optional[List[str]] = None
     regions: Optional[List[str]] = None
     max_price: Optional[float] = Field(None, ge=0)
-    rge: Optional[bool] = None
-    # Champs historiques (toujours acceptés)
-    rge_types: Optional[List[str]] = None
-    region: Optional[str] = None
-    min_price: Optional[float] = Field(None, ge=0)
-    min_ca: Optional[float] = None
-    max_ca: Optional[float] = None
+    min_yield: Optional[float] = Field(None, ge=0, le=20)
 
 class AlertUpdate(AlertCreate):
     active: Optional[bool] = None
 
 class PublicAlertCreate(BaseModel):
     email: EmailStr
-    trades: Optional[List[str]] = None
+    property_types: Optional[List[str]] = None
     regions: Optional[List[str]] = None
     max_price: Optional[float] = Field(None, ge=0)
-    rge: Optional[bool] = None
+    min_yield: Optional[float] = Field(None, ge=0, le=20)
 
 def normalize_alert_fields(data: dict) -> dict:
-    """Métiers de la taxonomie, régions connues (nom ou slug), prix maximum > 0"""
+    """Types de biens du référentiel, régions connues (nom ou slug), prix maximum et rendement minimum > 0"""
     out = {}
-    if "trades" in data and data["trades"] is not None:
-        out["trades"] = [t for t in dict.fromkeys(data["trades"]) if taxonomy.trade_by_id(t)]
+    if "property_types" in data and data["property_types"] is not None:
+        out["property_types"] = [t for t in dict.fromkeys(data["property_types"]) if taxonomy.property_type_by_id(t)]
     if "regions" in data and data["regions"] is not None:
         regions = []
         for r in data["regions"]:
@@ -6076,53 +5539,37 @@ def normalize_alert_fields(data: dict) -> dict:
             if name and name not in regions:
                 regions.append(name)
         out["regions"] = regions
-    if "region" in data and data["region"]:
-        out["region"] = data["region"]
-        out.setdefault("regions", [])
-        if data["region"] in taxonomy.REGIONS and data["region"] not in out["regions"]:
-            out["regions"] = out["regions"] + [data["region"]]
-    for key in ("max_price", "min_price", "min_ca", "max_ca"):
+    for key in ("max_price", "min_yield"):
         if key in data and data[key] is not None:
             out[key] = float(data[key]) if data[key] and data[key] > 0 else None
-    if "rge" in data:
-        out["rge"] = data["rge"]
-    if "rge_types" in data and data["rge_types"] is not None:
-        out["rge_types"] = list(data["rge_types"])
     return out
 
 def alert_name_for(alert: dict) -> str:
-    parts = [", ".join(taxonomy.trade_label(t, short=True) for t in alert.get("trades") or []) or "Tous les métiers",
+    parts = [", ".join(taxonomy.property_type_label(t, short=True) for t in alert.get("property_types") or []) or "Tous les biens",
              ", ".join(alert.get("regions") or []) or "Toute la France"]
-    if alert.get("rge") is True:
-        parts.append("RGE")
     if alert.get("max_price"):
         parts.append(f"≤ {fmt_eur_fr(alert['max_price'])}")
+    if alert.get("min_yield"):
+        parts.append(f"rendement brut ≥ {fmt_percent_fr(alert['min_yield'])}")
     return " · ".join(parts)
 
 def alert_matches(alert: dict, property: dict) -> bool:
-    """Une annonce correspond à une alerte : métiers (OU), régions (OU), RGE oui/non, prix maximum (+ critères historiques)"""
-    trades = alert.get("trades") or []
-    if trades and not set(trades) & set(property.get("trades") or []):
+    """Une annonce correspond à une alerte : types de biens (OU), régions (OU), prix maximum, rendement brut minimum"""
+    types = alert.get("property_types") or []
+    if types and property.get("property_type") not in types:
         return False
-    regions = alert.get("regions") or ([alert["region"]] if alert.get("region") else [])
+    regions = alert.get("regions") or []
     if regions and property.get("region") not in regions:
-        return False
-    if alert.get("rge") is True and not property.get("is_rge", bool(property.get("rge_types"))):
-        return False
-    if alert.get("rge") is False and property.get("is_rge", bool(property.get("rge_types"))):
-        return False
-    if alert.get("rge_types") and not set(alert["rge_types"]) & set(property.get("rge_types") or []):
         return False
     price = float(property.get("asking_price") or 0)
     if alert.get("max_price") and price > float(alert["max_price"]):
         return False
-    if alert.get("min_price") and price < float(alert["min_price"]):
-        return False
-    ca = float(property.get("ca_n") or 0)
-    if alert.get("min_ca") and ca < float(alert["min_ca"]):
-        return False
-    if alert.get("max_ca") and ca > float(alert["max_ca"]):
-        return False
+    if alert.get("min_yield"):
+        gross = property.get("gross_yield")
+        if gross is None:
+            gross = taxonomy.gross_yield(property.get("rent_monthly"), property.get("asking_price"))
+        if gross is None or gross < float(alert["min_yield"]):
+            return False
     return True
 
 def alert_token(payload: dict, ttl: Optional[timedelta] = None) -> str:
@@ -6146,24 +5593,25 @@ def unsubscribe_link_for_public_alert(alert_id: str) -> str:
     return site_url(f"/api/alerts/unsubscribe/{alert_token({'action': 'unsubscribe', 'alert': alert_id})}")
 
 def listing_card_html(property: dict) -> str:
-    """Résumé d'une annonce dans un e-mail (titre généré, métiers, localisation, effectif, CA, prix, badge RGE)"""
-    title = property.get("title") or taxonomy.listing_title(property.get("trades") or [], property.get("region"), property.get("staff_count"))
-    trades = ", ".join(taxonomy.trade_label(t, short=True) for t in property.get("trades") or [])
-    place = " · ".join(x for x in [property.get("region"), taxonomy.departement_label(property.get("department")) if property.get("department") else ""] if x)
-    rge = "RGE vérifié ADEME" if (property.get("property_checks") or {}).get("in_ademe_list") else ("Qualifications RGE déclarées" if property.get("rge_types") else "")
-    lines = [f"<strong>{html_escape(title)}</strong>"]
-    if trades:
-        lines.append(html_escape(trades))
-    if place:
-        lines.append(html_escape(place))
-    details = [f"CA {fmt_eur_fr(property['ca_n'])}" if property.get("ca_n") else "", f"Prix demandé {fmt_eur_fr(property['asking_price'])}" if property.get("asking_price") else "", rge]
-    lines.append(" · ".join(html_escape(d) for d in details if d))
-    link = site_url("/property/" + property["id"])
-    return "<p>" + "<br>".join(lines) + f'<br><a href="{link}">Voir l\'annonce</a></p>'
+    """Résumé d'une annonce dans un e-mail (titre généré, bail, loyer, rendement brut, prix) ; jamais l'adresse"""
+    title = property.get("title") or taxonomy.property_title(property.get("property_type"), property.get("city"), property.get("department"),
+                                                             property.get("surface"), property.get("rooms"), property.get("units_count"))
+    lease = taxonomy.lease_type_label(property.get("lease_type"), short=True)
+    gross = property.get("gross_yield")
+    if gross is None:
+        gross = taxonomy.gross_yield(property.get("rent_monthly"), property.get("asking_price"))
+    details = [lease,
+               f"Loyer {fmt_eur_fr(property['rent_monthly'])} HC par mois" if property.get("rent_monthly") else "",
+               f"Rendement brut {fmt_percent_fr(gross)}" if gross is not None else "",
+               f"Prix {fmt_eur_fr(property['asking_price'])}" if property.get("asking_price") else "",
+               "Propriétaire vérifié" if (property.get("ownership") or {}).get("status") == "verified" else ""]
+    lines = [f"<strong>{html_escape(title)}</strong>", " · ".join(html_escape(d) for d in details if d)]
+    link = site_url("/annonce/" + property["id"])
+    return "<p>" + "<br>".join(line for line in lines if line) + f'<br><a href="{link}">Voir l\'annonce</a></p>'
 
 @api_router.post("/alerts")
 async def create_alert(alert: AlertCreate, current_user: dict = Depends(get_current_user)):
-    """Alerte avec compte (adresse e-mail confirmée obligatoire) : métiers, régions, prix maximum, RGE"""
+    """Alerte avec compte (adresse e-mail confirmée obligatoire) : types de biens, régions, prix maximum, rendement minimum"""
     require_verified_email(current_user)
     count = await db.alerts.count_documents({"user_id": current_user["id"]})
     if count >= MAX_ALERTS_PER_USER:
@@ -6171,8 +5619,7 @@ async def create_alert(alert: AlertCreate, current_user: dict = Depends(get_curr
     fields = normalize_alert_fields(alert.model_dump())
     alert_doc = {
         "id": str(uuid.uuid4()), "user_id": current_user["id"], "user_email": current_user["email"],
-        "trades": [], "regions": [], "max_price": None, "rge": None, "rge_types": [], "region": None,
-        "min_price": None, "min_ca": None, "max_ca": None, **fields,
+        "property_types": [], "regions": [], "max_price": None, "min_yield": None, **fields,
         "active": True, "created_at": datetime.now(timezone.utc).isoformat(), "last_triggered": None,
     }
     alert_doc["name"] = (alert.name or "").strip() or alert_name_for(alert_doc)
@@ -6219,8 +5666,8 @@ async def create_public_alert(request: Request, data: PublicAlertCreate, backgro
     fields = normalize_alert_fields(data.model_dump())
     now = datetime.now(timezone.utc)
     alert_doc = {
-        "id": str(uuid.uuid4()), "email": email, "trades": fields.get("trades") or [], "regions": fields.get("regions") or [],
-        "max_price": fields.get("max_price"), "rge": fields.get("rge"), "status": "pending",
+        "id": str(uuid.uuid4()), "email": email, "property_types": fields.get("property_types") or [], "regions": fields.get("regions") or [],
+        "max_price": fields.get("max_price"), "min_yield": fields.get("min_yield"), "status": "pending",
         "created_at": now.isoformat(), "confirmed_at": None, "last_triggered": None, "ip": client_ip(request),
     }
     existing = await db.public_alerts.find_one({"email": email, "status": {"$in": ["pending", "active"]}}, {"_id": 0})
@@ -6259,7 +5706,7 @@ main{{max-width:560px;margin:40px auto;background:#fff;border:1px solid #e3e7ee;
 h1{{font-size:22px;margin:0 0 12px}}p{{font-size:16px;line-height:1.5}}.btn{{display:inline-block;margin-top:16px;padding:12px 20px;background:#0b1220;color:#fff;border:0;border-radius:8px;text-decoration:none;font:inherit;font-weight:600;cursor:pointer}}
 .btn:focus{{outline:3px solid #1d4ed8;outline-offset:2px}}small{{display:block;margin-top:24px;color:#6b7280;font-size:13px}}</style></head>
 <body><main><h1>{html_escape(title)}</h1><p>{html_escape(text)}</p>{action_html}
-<small>{html_escape(site_name())} est opéré par AlterEgo SAS, carte professionnelle T. Aucune somme n'est due avant la signature de l'acte de cession.</small></main></body></html>"""
+<small>{html_escape(site_name())} est opéré par AlterEgo SAS, carte professionnelle T. Aucune somme n'est due avant la signature de l'acte authentique.</small></main></body></html>"""
     return Response(content=html, media_type="text/html; charset=utf-8")
 
 @api_router.get("/alerts/confirm/{token}")
@@ -6391,7 +5838,7 @@ async def job_alerts_weekly_digest(now: datetime) -> int:
     return sent
 
 async def notify_price_drop(property: dict, old_price: float, new_price: float) -> int:
-    """Baisse de prix d'une annonce en ligne : repreneurs qui l'ont mise en favori ou contactée (une fois par prix)"""
+    """Baisse de prix d'une annonce en ligne : acquéreurs qui l'ont mise en favori ou contactée (une fois par prix)"""
     buyer_ids = {f["user_id"] async for f in db.favorites.find({"property_id": property["id"]}, {"_id": 0, "user_id": 1})}
     buyer_ids |= {c["buyer_id"] async for c in db.conversations.find({"property_id": property["id"]}, {"_id": 0, "buyer_id": 1})}
     sent = 0
@@ -6483,7 +5930,7 @@ class NewsletterSubscribe(BaseModel):
 
 @api_router.post("/newsletter/subscribe")
 async def subscribe_newsletter(data: NewsletterSubscribe):
-    """Inscription à la newsletter RGE - Intégration Brevo"""
+    """Inscription à la lettre d'information (Brevo)"""
     email = data.email.lower().strip()
     first_name = (data.first_name or "").strip()[:100]
     
@@ -6527,208 +5974,224 @@ async def subscribe_newsletter(data: NewsletterSubscribe):
     
     return {"message": "Inscription réussie", "subscriber_id": subscriber["id"]}
 
-# ============ CONTRACT TEMPLATES MANAGEMENT ============
-
-# Default Mandat Vendeur Template
-# ============ GABARITS CONTRACTUELS (SPEC §3.2 à §3.4) ============
+# ============ GABARITS CONTRACTUELS (SPEC §7.2, §7.3) ============
 # Textes complets en français, sans case à cocher ni blanc : toutes les variables {{...}} sont renseignées à la
 # génération, sinon la génération échoue en nommant le champ manquant. Version des conditions : CONTRACT_TERMS_DATE.
-CONTRACT_TERMS_DATE = "10/10/2026"
-# Art. 10.4 : un seul texte pour tous les mandants. Le mandat est signé 100 % en ligne (contrat à distance) : l'art. L221-3
-# C. conso ne vise que les contrats hors établissement (cadre-legal §2.6) ; la demande d'exécution immédiate est conservée.
-MANDATE_EXECUTION_CLAUSE = ("Le présent mandat est conclu à distance, par voie électronique : il n'ouvre pas de droit de rétractation au titre "
-                            "de l'article L221-3 du code de la consommation, qui ne vise que les contrats conclus hors établissement. "
-                            "Le Mandant demande expressément que l'exécution du mandat (diffusion de l'annonce) commence dès sa signature ; "
-                            "aucune somme ne lui est demandée à ce titre (article 6 de la loi n° 70-9 du 2 janvier 1970).")
-MANDATE_TERMS_VERSION = "v2"
+CONTRACT_TERMS_DATE = "14/10/2026"
+MANDATE_TERMS_VERSION = "v1"
+NDA_TERMS_VERSION = "v1"
+OFFER_TERMS_VERSION = "v1"
 MANDATE_DURATION_MONTHS = 12
-MANDATE_TAIL_MONTHS = 18
+MANDATE_TAIL_MONTHS = 12
 MANDATE_NOTICE_DAYS = 15
+MANDATE_WITHDRAWAL_DAYS = 14
 NDA_DURATION_MONTHS = 24
-# Phrases remplacées à la signature (numéro de registre et horodatage ne sont connus qu'à ce moment-là)
+# Phrases remplacées à la signature (numéro de registre, horodatage et fin du délai de rétractation ne sont connus qu'à ce moment-là)
 MANDATE_REGISTRY_PENDING = "attribué automatiquement lors de la signature électronique et reporté sur l'exemplaire signé"
 SIGNATURE_DATE_PENDING = "à la date et à l'heure de l'horodatage du code de signature, qui font foi entre les parties"
+WITHDRAWAL_END_PENDING = "quatorze jours après la date de signature, la date exacte étant reportée sur l'exemplaire signé"
 
-# Mandat de vente simple (non exclusif) : aucune clause d'exclusivité, de pénalité ni de garantie de rémunération
-# (rien qui relève de l'art. 78 du décret n° 72-678).
-DEFAULT_MANDAT_TEMPLATE = """MANDAT DE VENTE SIMPLE (NON EXCLUSIF)
+# Mandat de vente simple (non exclusif) d'un bien loué : aucune clause d'exclusivité, de pénalité ni de garantie de
+# rémunération (rien qui relève de l'art. 78 du décret n° 72-678).
+DEFAULT_MANDAT_TEMPLATE = """MANDAT DE VENTE SIMPLE (NON EXCLUSIF) — BIEN LOUÉ
 
-Mandat n° {{MANDAT_NUMERO}} — Annonce {{ANNONCE_REF}} — Conditions du {{VERSION_CONDITIONS}}
+Mandat n° {{MANDAT_NUMERO}} — Annonce {{ANNONCE_REF}} — Conditions du {{VERSION_CONDITIONS}} (version {{VERSION_MANDAT}})
 Numéro d'inscription au registre des mandats : {{REGISTRE}}
 
-ENTRE LES SOUSSIGNÉS
-
-1. Le Mandataire
-{{PLATEFORME_DENOMINATION}} SAS, {{PLATEFORME_FORME_JURIDIQUE}} au capital de {{PLATEFORME_CAPITAL}}, immatriculée au RCS de {{PLATEFORME_RCS_VILLE}} sous le numéro {{PLATEFORME_SIREN}}, dont le siège est {{PLATEFORME_ADRESSE_COMPLETE}}, exploitant la plateforme {{MARQUE}}, titulaire de la carte professionnelle n° {{CARTE_T}} portant la mention « Transactions sur immeubles et fonds de commerce », délivrée par la {{CARTE_T_CCI}}, valable jusqu'au {{CARTE_T_VALIDITE}}, représentée par sa Présidente, {{PLATEFORME_REPR_NOM}}.
-{{PLATEFORME_DENOMINATION}} SAS déclare ne recevoir ni détenir d'autres fonds, effets ou valeurs que ceux représentatifs de sa rémunération. {{RC_PRO}}
+Article 1 – Les parties
+1.1. Le Mandataire
+{{PLATEFORME_DENOMINATION}} SAS, {{PLATEFORME_FORME_JURIDIQUE}} au capital de {{PLATEFORME_CAPITAL}}, immatriculée au RCS de {{PLATEFORME_RCS_VILLE}} sous le numéro {{PLATEFORME_SIREN}}, dont le siège est {{PLATEFORME_ADRESSE_COMPLETE}}, exploitant la plateforme {{MARQUE}}, titulaire de la carte professionnelle n° {{CARTE_T}} portant la mention « Transactions sur immeubles et fonds de commerce », délivrée par la {{CARTE_T_CCI}}, valable jusqu'au {{CARTE_T_VALIDITE}}, représentée par sa Présidente, {{PLATEFORME_REPR_NOM}}. {{RC_PRO}}
+{{PLATEFORME_DENOMINATION}} SAS déclare ne recevoir ni détenir d'autres fonds, effets ou valeurs que ceux représentatifs de sa rémunération.
 Ci-après « le Mandataire ».
-
-2. Le Mandant
-{{MANDANT_PRENOM}} {{MANDANT_NOM}}, adresse électronique confirmée : {{MANDANT_EMAIL}}, demeurant {{MANDANT_ADRESSE}}, agissant en qualité de {{MANDANT_QUALITE}} de la société {{CIBLE_DENOMINATION}} ({{CIBLE_FORME_JURIDIQUE}}, SIREN {{CIBLE_SIREN}}, siège : {{CIBLE_SIEGE}}).
-Le Mandant déclare avoir qualité et pouvoir pour engager l'ensemble des titulaires des titres ou le propriétaire du fonds.
+1.2. Le Mandant
+{{MANDANT_PRENOM}} {{MANDANT_NOM}}, adresse électronique confirmée : {{MANDANT_EMAIL}}, demeurant {{MANDANT_ADRESSE}}, agissant en qualité de {{MANDANT_QUALITE}}.
+Le Mandant déclare avoir la qualité et les pouvoirs nécessaires pour vendre le bien désigné à l'article 2{{POUVOIR_PARTS}} et pour conclure le présent mandat.
 Ci-après « le Mandant ».
 
 IL A ÉTÉ CONVENU CE QUI SUIT
 
-Article 1 – Objet du mandat
-Le Mandant confie au Mandataire, qui l'accepte, la mission de rechercher un acquéreur en vue de {{OBJET}}.
-Prix demandé : {{PRIX_DEMANDE}}. Ce prix est indicatif : le Mandant reste libre d'accepter ou de refuser toute offre, quel qu'en soit le montant.
+Article 2 – Le bien
+2.1. Désignation : {{BIEN_TITRE}}, situé {{BIEN_ADRESSE}}. {{BIEN_COPROPRIETE}}
+2.2. Bien vendu occupé : le bien est loué ({{BAIL_TYPE}}) moyennant un loyer mensuel de {{LOYER}} hors charges, en vertu d'un bail ayant pris effet le {{BAIL_DEBUT}} ; {{DEPOT}}. Le bail en cours se poursuit avec l'acquéreur.
+2.3. Le Mandant déclare qu'aucun congé n'a été délivré ni reçu à ce jour, qu'il n'a connaissance d'aucun litige avec le locataire autre que ceux déclarés sur l'annonce, et que le locataire sera informé des visites, organisées par le Mandant avec l'accord du locataire.
 
-Article 2 – Nature du mandat : mandat simple, non exclusif
-Le présent mandat est un mandat simple. Le Mandant conserve la faculté de rechercher lui-même un acquéreur ou de confier des mandats à d'autres intermédiaires. Aucune indemnité, pénalité ni commission n'est due au Mandataire si la vente est conclue avec un acquéreur qui ne lui a pas été présenté par le Mandataire.
+Article 3 – Objet du mandat
+Le Mandant confie au Mandataire, qui l'accepte, la mission de rechercher un acquéreur en vue de {{OBJET}}, au prix demandé de {{PRIX_DEMANDE}}, honoraires inclus, à la charge du Mandant. Le Mandant reste libre d'accepter ou de refuser toute offre, quel qu'en soit le montant.
 
-Article 3 – Durée, prolongation, dénonciation
-3.1. Le mandat est conclu pour une durée de {{DUREE_MOIS}} mois à compter de sa signature. Il n'est pas reconduit tacitement.
-3.2. Il peut être prolongé par périodes de {{DUREE_MOIS}} mois par accord exprès du Mandant, donné dans son espace en ligne par une nouvelle signature par code à usage unique ; chaque prolongation est horodatée et jointe au dossier de preuve.
-3.3. Chacune des parties peut dénoncer le mandat à tout moment, par notification dans l'espace en ligne ou par courrier électronique à l'adresse de l'autre partie, avec un préavis de {{PREAVIS_JOURS}} jours. L'horodatage de la plateforme fait foi entre les parties. À la date d'effet, l'annonce est retirée.
-3.4. Le mandat prend fin de plein droit, sans préavis, si l'annonce est retirée par la modération de la plateforme ; le Mandant en est informé par courrier électronique avec le motif du retrait.
+Article 4 – Mandat simple, non exclusif
+Le présent mandat est un mandat simple. Le Mandant conserve la faculté de vendre lui-même le bien ou de confier des mandats à d'autres intermédiaires. Aucune indemnité, pénalité ni rémunération n'est due au Mandataire si la vente est conclue avec un acquéreur qui ne lui a pas été présenté par le Mandataire.
 
-Article 4 – Mission du Mandataire
+Article 5 – Durée, prolongation, dénonciation
+5.1. Le mandat est conclu pour une durée de {{DUREE_MOIS}} mois à compter de sa signature. Il n'est pas reconduit tacitement.
+5.2. Il peut être prolongé par périodes de {{DUREE_MOIS}} mois par accord exprès du Mandant, donné dans son espace en ligne par une nouvelle signature par code à usage unique ; chaque prolongation est horodatée et jointe au dossier de preuve.
+5.3. Chacune des parties peut dénoncer le mandat à tout moment, dans l'espace en ligne ou par courrier électronique adressé à l'autre partie, avec un préavis de {{PREAVIS_JOURS}} jours. L'horodatage de la plateforme fait foi entre les parties. À la date d'effet, l'annonce est retirée.
+5.4. Le mandat prend fin de plein droit, sans préavis, si l'annonce est retirée par la modération de la plateforme ; le Mandant en est informé par courrier électronique avec le motif du retrait.
+
+Article 6 – Droit de rétractation
+6.1. Le présent mandat est conclu à distance, par voie électronique. Lorsque le Mandant agit en qualité de consommateur, il dispose d'un délai de {{RETRACTATION_JOURS}} jours à compter de la signature pour se rétracter, sans avoir à motiver sa décision (article L221-18 du code de la consommation). Le Mandataire accorde la même faculté, dans les mêmes conditions, au Mandant qui n'agit pas en qualité de consommateur.
+6.2. Le Mandant exerce ce droit par le bouton « Résilier » de son espace en ligne, qui prend effet immédiatement pendant ce délai, ou par une déclaration dénuée d'ambiguïté adressée par courrier électronique à {{CONTACT_EMAIL}}, par exemple au moyen du formulaire type reproduit en annexe. Le délai expire {{FIN_RETRACTATION}}.
+6.3. Le Mandant demande expressément que la diffusion de l'annonce commence dès la signature, avant la fin du délai de rétractation (article L221-25 du code de la consommation). En cas de rétractation, l'annonce est retirée immédiatement et aucune somme n'est due au Mandataire.
+
+Article 7 – Mission du Mandataire
 Le Mandataire s'engage à :
-a) diffuser sur la plateforme {{MARQUE}} une annonce anonyme ne révélant ni le nom de la société ni celui du Mandant ;
-b) contrôler les qualifications déclarées sur les bases publiques (annuaire des professionnels RGE de l'ADEME, registres des entreprises) ;
-c) qualifier les repreneurs : profil de projet, adresse électronique confirmée et identité vérifiée avant toute révélation du nom de la société ;
-d) mettre à disposition du Mandant et des repreneurs une messagerie, un accord de confidentialité signé électroniquement, un espace documentaire sécurisé (data room) et des outils d'offre ;
-e) informer le Mandant de tout contact, de toute demande d'accès au dossier et de toute offre ;
-f) tenir la liste nominative des repreneurs présentés au Mandant, c'est-à-dire des repreneurs ayant signé l'accord de confidentialité relatif à l'entreprise.
-Le Mandataire ne négocie pas, ne rédige pas les actes et ne fournit pas de conseil juridique, fiscal ou financier. Le Mandant et le repreneur conduisent la négociation et la rédaction des actes avec leurs propres conseils.
+a) diffuser sur la plateforme {{MARQUE}} une annonce qui ne révèle ni l'adresse exacte du bien ni l'identité du Mandant ;
+b) contrôler le justificatif de propriété déposé par le Mandant ;
+c) qualifier les acquéreurs (profil de projet, adresse électronique confirmée, identité vérifiée, origine des fonds déclarée) avant toute révélation de l'adresse du bien et de l'identité du Mandant ;
+d) faire signer à chaque acquéreur un engagement de confidentialité et de non-contournement avant toute révélation ;
+e) mettre à la disposition du Mandant et des acquéreurs une messagerie, un dossier du bien sécurisé et des offres d'achat signées électroniquement ;
+f) informer le Mandant de tout contact, de toute demande d'accès au dossier et de toute offre d'achat ;
+g) tenir la liste nominative des acquéreurs présentés au Mandant, c'est-à-dire des acquéreurs ayant signé l'engagement de confidentialité relatif au bien ;
+h) transmettre au notaire chargé de la vente les éléments utiles à l'établissement de l'avant-contrat et de l'acte.
+Le Mandataire ne négocie pas, ne rédige ni l'avant-contrat ni l'acte de vente et ne donne aucun conseil juridique, fiscal ou financier ; il ne fait pas visiter le bien. Le Mandant et l'acquéreur conduisent la négociation et la rédaction des actes avec le notaire et leurs propres conseils.
 
-Article 5 – Obligations du Mandant
+Article 8 – Obligations du Mandant
 Le Mandant s'engage à :
-a) fournir des informations exactes et à les tenir à jour pendant toute la durée du mandat ;
-b) signaler au Mandataire, sans délai, toute vente, promesse ou négociation directe avec un repreneur présenté ;
-c) répondre aux demandes des repreneurs et du Mandataire dans un délai raisonnable ;
-d) respecter la confidentialité des informations reçues sur les repreneurs ; le Mandataire respecte réciproquement celle des informations reçues sur l'entreprise ;
-e) accepter que le Mandataire consulte les publications légales de la société (BODACC) pendant la durée du mandat et la période visée à l'article 7, afin de vérifier qu'aucune cession conclue avec un repreneur présenté n'est restée non déclarée ; toute publication de cession ou de changement de dirigeant donne lieu à une demande d'explication au Mandant.
+a) fournir des informations exactes sur le bien, le bail, les loyers, les charges, le diagnostic de performance énergétique, la copropriété et la situation du locataire, et à les tenir à jour pendant toute la durée du mandat ;
+b) tenir à disposition un dossier de diagnostic technique à jour au plus tard à la signature de l'avant-contrat ;
+c) informer le Mandataire, sans délai, de toute vente ou promesse de vente du bien, quel que soit l'acquéreur ;
+d) informer le Mandataire de toute négociation directe avec un acquéreur présenté ;
+e) organiser les visites avec l'accord du locataire et dans le respect de ses droits ;
+f) ne communiquer aux acquéreurs aucune donnée personnelle du locataire qui ne soit pas nécessaire à l'étude de l'acquisition.
 
-Article 6 – Rémunération du Mandataire
-6.1. Barème : {{BAREME_COMMISSION}} {{ESTIMATION_COMMISSION}}
-6.2. La rémunération est à la charge du Mandant. Elle est due uniquement si la cession (cession de titres ou de fonds, totale ou partielle, y compris au profit d'une société liée au repreneur) est conclue avec un repreneur nommément présenté par le Mandataire, c'est-à-dire inscrit sur la liste des présentations visée à l'article 4 f). Elle est exigible à la signature de l'acte définitif de cession. Aucune somme n'est due avant cette signature (article 6 de la loi n° 70-9 du 2 janvier 1970).
-6.3. Paiement : en cas de cession de titres, sous trente jours à compter de la signature de l'acte ; en cas de cession de fonds de commerce, par prélèvement du séquestre sur le prix lors de sa libération, avant toute distribution au Mandant, et au plus tard cent quatre-vingts jours après l'acte.
-6.4. Le Mandant donne ordre irrévocable au rédacteur de l'acte (notaire, avocat ou expert-comptable) de régler la rémunération du Mandataire sur le prix de cession. Il s'engage à reproduire dans l'acte de cession la désignation du Mandataire et le montant de sa rémunération, et à communiquer au Mandataire l'identité du rédacteur de l'acte ainsi que la date de signature.
+Article 9 – Rémunération du Mandataire
+9.1. Barème : {{BAREME_COMMISSION}} {{ESTIMATION_COMMISSION}}
+9.2. La rémunération est à la charge du Mandant. Elle est due uniquement si la vente du bien, ou la cession des parts de la société qui en est propriétaire, est conclue avec un acquéreur nommément présenté par le Mandataire, c'est-à-dire inscrit sur la liste visée à l'article 7 g), y compris lorsque l'acquisition est réalisée par une personne ou une société interposée.
+9.3. Elle est exigible à la signature de l'acte authentique de vente. Aucune somme n'est versée au Mandataire avant cette signature (article 6 de la loi n° 70-9 du 2 janvier 1970).
+9.4. Le Mandant donne ordre irrévocable au notaire chargé de la vente de prélever la rémunération du Mandataire sur le prix de vente et de la lui verser. Il s'engage à faire mentionner le Mandataire et le montant de sa rémunération dans l'avant-contrat et dans l'acte authentique, et à communiquer au Mandataire l'identité du notaire ainsi que la date de signature.
 
-Article 7 – Clause de suite
-La rémunération prévue à l'article 6 reste due si la cession est conclue, dans les {{SUITE_MOIS}} mois suivant la fin du mandat, quelle qu'en soit la cause, avec un repreneur nommément présenté par le Mandataire. La liste nominative des repreneurs présentés est communiquée au Mandant à la fin du mandat.
+Article 10 – Clause de suite
+La rémunération prévue à l'article 9 reste due si la vente est conclue, dans les {{SUITE_MOIS}} mois suivant la fin du mandat, quelle qu'en soit la cause, avec un acquéreur nommément présenté par le Mandataire. La liste nominative des acquéreurs présentés est communiquée au Mandant à la fin du mandat. La présente clause ne s'applique pas en cas de rétractation (article 6).
 
-Article 8 – Registre des mandats
-Le présent mandat est inscrit par ordre chronologique au registre des mandats du Mandataire sous le numéro {{REGISTRE}}. Ce numéro est reporté sur l'exemplaire remis au Mandant.
-
-Article 9 – Signature électronique et preuve
-Le mandat est signé par un code à usage unique envoyé à l'adresse électronique confirmée du Mandant. Le dossier de preuve (empreinte SHA-256 du document, horodatage, adresse IP, navigateur, identité vérifiée du signataire, référence du code) est conservé dix ans et annexé à l'exemplaire PDF. Les parties conviennent que ce procédé identifie le signataire et garantit l'intégrité de l'acte, conformément aux articles 1366 et 1367 du code civil. Le Mandataire contresigne le mandat par voie électronique dès la signature du Mandant.
-
-Article 10 – Mentions
-10.1. Aucune somme d'argent, commission, frais de recherche, de démarche, de publicité ou d'entremise ne peut être exigée ni acceptée par le Mandataire avant la conclusion de l'opération (article 6 de la loi n° 70-9 du 2 janvier 1970).
-10.2. Données personnelles : le Mandataire traite les données du Mandant pour l'exécution du mandat, la tenue du registre et le respect de ses obligations légales ; elles sont conservées dix ans pour le mandat et les preuves de signature. Le Mandant dispose des droits d'accès, de rectification, d'effacement et d'opposition, qu'il exerce à l'adresse {{CONTACT_EMAIL}}. Politique de confidentialité : {{URL_POLITIQUE_CONFIDENTIALITE}}.
-10.3. {{MEDIATEUR}}
-10.4. {{EXECUTION_IMMEDIATE}}
-10.5. Le présent mandat est soumis au droit français. Tout litige relatif à sa validité, son interprétation ou son exécution relève, à défaut d'accord amiable, de la compétence des tribunaux de {{TRIBUNAL_COMPETENT}}.
+Article 11 – Registre, signature électronique, données personnelles, litiges
+11.1. Registre : le présent mandat est inscrit par ordre chronologique au registre des mandats du Mandataire sous le numéro {{REGISTRE}}. Ce numéro est reporté sur l'exemplaire remis au Mandant.
+11.2. Signature électronique : le mandat est signé par un code à usage unique envoyé à l'adresse électronique confirmée du Mandant. Le dossier de preuve (empreinte SHA-256 du document, horodatage, adresse IP, navigateur, identité vérifiée du signataire, référence du code) est conservé dix ans et annexé à l'exemplaire PDF. Les parties conviennent que ce procédé identifie le signataire et garantit l'intégrité de l'acte, conformément aux articles 1366 et 1367 du code civil. Le Mandataire contresigne le mandat par voie électronique dès la signature du Mandant.
+11.3. Données personnelles : le Mandataire traite les données du Mandant pour l'exécution du mandat, la tenue du registre et le respect de ses obligations légales, notamment en matière de lutte contre le blanchiment des capitaux ; elles sont conservées dix ans pour le mandat et les preuves de signature. Le Mandant dispose des droits d'accès, de rectification, d'effacement et d'opposition, qu'il exerce à l'adresse {{CONTACT_EMAIL}}. Politique de confidentialité : {{URL_POLITIQUE_CONFIDENTIALITE}}.
+11.4. Médiation : {{MEDIATEUR}}
+11.5. Le présent mandat est soumis au droit français. Tout litige relatif à sa validité, son interprétation ou son exécution relève, à défaut d'accord amiable, des tribunaux de {{TRIBUNAL_COMPETENT}}, sous réserve des règles d'ordre public qui permettent au Mandant consommateur de saisir la juridiction du lieu où il demeurait au moment de la conclusion du mandat.
 
 SIGNATURES
 Fait par voie électronique, en un exemplaire conservé par le Mandataire et remis au Mandant au format PDF, {{DATE_SIGNATURE}}.
-Référence : mandat n° {{MANDAT_NUMERO}} — registre n° {{REGISTRE}} — annonce {{ANNONCE_REF}}."""
+Référence : mandat n° {{MANDAT_NUMERO}} — registre n° {{REGISTRE}} — annonce {{ANNONCE_REF}}.
 
-# Accord de confidentialité v2 : signé par le repreneur (identité vérifiée) avec AlterEgo pour le compte du cédant,
-# désigné par la référence de l'annonce jusqu'à la révélation (Annexe A, jointe après signature).
-DEFAULT_NDA_TEMPLATE = """ACCORD DE CONFIDENTIALITÉ
+ANNEXE — Formulaire type de rétractation
+À utiliser uniquement si le Mandant souhaite se rétracter par courrier électronique ; le bouton « Résilier » de l'espace en ligne produit le même effet pendant le délai de rétractation.
+À l'attention de {{PLATEFORME_DENOMINATION}} SAS, {{PLATEFORME_ADRESSE_COMPLETE}}, {{CONTACT_EMAIL}} :
+« Je vous notifie par la présente ma rétractation du mandat de vente simple n° {{MANDAT_NUMERO}}, conclu à la date de sa signature électronique indiquée ci-dessus. »
+Nom du Mandant : {{MANDANT_PRENOM}} {{MANDANT_NOM}}.
+Adresse du Mandant : {{MANDANT_ADRESSE}}.
+Date et signature : celles de l'envoi du courrier électronique depuis l'adresse confirmée du Mandant."""
 
-Accord n° {{NDA_NUMERO}} — Annonce {{ANNONCE_REF}} — Conditions du {{VERSION_CONDITIONS}}
+# Engagement de confidentialité et de non-contournement (v1) : signé par l'acquéreur (identité vérifiée) avec AlterEgo
+# pour le compte du vendeur, désigné par le titre de l'annonce jusqu'à la révélation (Annexe A, jointe après signature).
+DEFAULT_NDA_TEMPLATE = """ENGAGEMENT DE CONFIDENTIALITÉ ET DE NON-CONTOURNEMENT
+
+Engagement n° {{NDA_NUMERO}} — Annonce {{ANNONCE_REF}} — Conditions du {{VERSION_CONDITIONS}}
 
 ENTRE LES SOUSSIGNÉS
 
 1. L'Opérateur
-{{PLATEFORME_DENOMINATION}} SAS, {{PLATEFORME_FORME_JURIDIQUE}} au capital de {{PLATEFORME_CAPITAL}}, RCS {{PLATEFORME_RCS_VILLE}} {{PLATEFORME_SIREN}}, siège {{PLATEFORME_ADRESSE_COMPLETE}}, exploitant la plateforme {{MARQUE}}, titulaire de la carte professionnelle n° {{CARTE_T}} (Transactions sur immeubles et fonds de commerce) délivrée par la {{CARTE_T_CCI}}, agissant pour le compte du cédant de l'annonce {{ANNONCE_REF}} en vertu du mandat qui lui a été confié.
+{{PLATEFORME_DENOMINATION}} SAS, {{PLATEFORME_FORME_JURIDIQUE}} au capital de {{PLATEFORME_CAPITAL}}, RCS {{PLATEFORME_RCS_VILLE}} {{PLATEFORME_SIREN}}, siège {{PLATEFORME_ADRESSE_COMPLETE}}, exploitant la plateforme {{MARQUE}}, titulaire de la carte professionnelle n° {{CARTE_T}} (Transactions sur immeubles et fonds de commerce) délivrée par la {{CARTE_T_CCI}}, agissant pour le compte du vendeur du bien présenté sous l'annonce {{ANNONCE_REF}}, en vertu du mandat de vente qui lui a été confié.
 Ci-après « l'Opérateur ».
 
-2. Le Repreneur
-{{REPRENEUR_IDENTITE}}
-Ci-après « le Repreneur ».
+2. L'Acquéreur
+{{ACQUEREUR_IDENTITE}}
+Ci-après « l'Acquéreur ».
 
-3. Le Cédant bénéficiaire
-Le cédant est désigné par la référence de l'annonce {{ANNONCE_REF}} jusqu'à la signature du présent accord. Son identité et celle de la société sont communiquées au Repreneur immédiatement après signature, en Annexe A, qui fait partie intégrante de l'accord. L'Opérateur stipule le présent accord au bénéfice du cédant, qui peut s'en prévaloir directement.
+3. Le Vendeur bénéficiaire
+Le vendeur est désigné par la référence de l'annonce {{ANNONCE_REF}} jusqu'à la signature du présent engagement. Son identité et l'adresse du bien sont communiquées à l'Acquéreur immédiatement après la signature, en Annexe A, qui fait partie intégrante de l'engagement. L'Opérateur stipule le présent engagement au bénéfice du vendeur, qui peut s'en prévaloir directement.
 
 IL A ÉTÉ CONVENU CE QUI SUIT
 
 Article 1 – Objet
-Le présent accord encadre la communication au Repreneur d'informations confidentielles relatives à l'entreprise présentée sous l'annonce {{ANNONCE_REF}} (entreprise du bâtiment, {{CIBLE_ACTIVITE}}, {{CIBLE_LOCALISATION}}, prix demandé indicatif : {{PRIX_DEMANDE}}), dans le seul but d'étudier sa reprise.
+Le présent engagement encadre la communication à l'Acquéreur d'informations confidentielles relatives au bien présenté sous l'annonce {{ANNONCE_REF}} ({{BIEN_TITRE}}, prix demandé : {{PRIX_DEMANDE}}), dans le seul but d'étudier son acquisition.
 
 Article 2 – Informations couvertes
-Sont confidentielles toutes les informations communiquées au Repreneur, par quelque moyen que ce soit, par l'Opérateur ou le cédant, et notamment : l'identité du cédant et de la société ; les données financières, commerciales, juridiques, sociales et techniques ; les qualifications et leurs numéros ; les clients, fournisseurs, salariés, contrats, carnet de commandes et prix ; les documents de l'espace documentaire ; l'existence même des discussions.
-Ne sont pas confidentielles les informations dont le Repreneur démontre qu'elles sont publiques sans faute de sa part, qu'il les détenait avant leur communication ou qu'il les a reçues licitement d'un tiers non tenu au secret.
+Sont confidentielles toutes les informations communiquées à l'Acquéreur, par quelque moyen que ce soit, par l'Opérateur ou par le vendeur, et notamment : l'adresse exacte du bien ; l'identité du vendeur et, le cas échéant, de la société propriétaire ; les documents du dossier du bien (bail, quittances, diagnostics, documents de copropriété, titre de propriété) ; les données relatives au locataire ; l'existence même des discussions.
+Ne sont pas confidentielles les informations dont l'Acquéreur démontre qu'elles sont publiques sans faute de sa part, qu'il les détenait avant leur communication ou qu'il les a reçues licitement d'un tiers non tenu au secret.
 
-Article 3 – Engagements du Repreneur
-Pendant {{NDA_DUREE_MOIS}} mois à compter de la signature, le Repreneur s'engage à :
-a) garder strictement confidentielles les informations couvertes et ne les communiquer qu'à ses conseils (expert-comptable, avocat, banque) tenus à une obligation de confidentialité équivalente, pour les seuls besoins de l'étude ;
-b) n'utiliser les informations couvertes qu'aux fins d'étudier la reprise de l'entreprise, à l'exclusion de toute autre finalité, notamment concurrentielle ;
-c) ne pas contacter les salariés, clients, fournisseurs ou partenaires de l'entreprise sans l'accord écrit préalable du cédant ;
-d) conduire les échanges et la négociation par la plateforme {{MARQUE}} ou, s'il négocie directement avec le cédant, en informer sans délai le cédant et l'Opérateur ; la présentation du Repreneur au cédant est faite par l'Opérateur, en exécution du mandat du cédant ;
-e) restituer ou détruire, à première demande ou à la fin des discussions, les documents reçus et leurs copies, sous réserve des obligations légales de conservation de ses conseils.
+Article 3 – Engagements de confidentialité
+Pendant {{NDA_DUREE_MOIS}} mois à compter de la signature, l'Acquéreur s'engage à :
+a) garder strictement confidentielles les informations couvertes et ne les communiquer qu'à ses conseils (notaire, avocat, expert-comptable, banque, courtier) tenus à une obligation de confidentialité équivalente, pour les seuls besoins de l'étude ;
+b) n'utiliser les informations couvertes que pour étudier l'acquisition du bien, à l'exclusion de toute autre finalité ;
+c) ne pas contacter le locataire, le syndic de copropriété ou l'exploitant de la résidence, et ne pas se rendre dans le bien, sans l'accord préalable du vendeur ; les visites sont organisées par le vendeur avec l'accord du locataire ;
+d) restituer ou détruire, à première demande ou à la fin des discussions, les documents reçus et leurs copies, sous réserve des obligations légales de conservation de ses conseils.
 
-Article 4 – Accès à l'espace documentaire
-L'accès aux documents de l'entreprise est ouvert après signature du présent accord et après la déclaration par le Repreneur de l'origine des fonds envisagés pour la reprise (apport, emprunt, investisseurs), demandée dans son espace. Les documents consultés portent un filigrane nominatif ; l'Opérateur tient un journal horodaté des consultations (utilisateur, adresse IP, navigateur, empreinte du document), qui fait foi entre les parties.
+Article 4 – Non-contournement
+Pendant la même durée, l'Acquéreur s'engage à ne pas acquérir le bien, ni les parts de la société qui en est propriétaire, directement ou par une personne ou une société interposée, en dehors de la plateforme {{MARQUE}} sans en informer préalablement le vendeur et l'Opérateur. La présentation de l'Acquéreur au vendeur est faite par l'Opérateur en exécution du mandat du vendeur et inscrite sur la liste des acquéreurs présentés. Le présent article ne prévoit aucune pénalité forfaitaire : tout manquement engage la responsabilité de l'Acquéreur dans les conditions du droit commun.
 
-Article 5 – Absence d'engagement de conclure
-Le présent accord ne constitue ni promesse de vente ni promesse d'achat. Chaque partie reste libre de mettre fin aux discussions à tout moment. Les droits sur les informations communiquées restent la propriété du cédant.
+Article 5 – Données personnelles du locataire
+Les données personnelles du locataire éventuellement contenues dans les documents du dossier ne sont traitées par l'Acquéreur que pour l'étude de l'acquisition. Il s'interdit de les utiliser à d'autres fins et les supprime s'il ne donne pas suite à l'acquisition.
 
-Article 6 – Responsabilité
-Tout manquement du Repreneur ou de ses conseils engage sa responsabilité envers le cédant et l'Opérateur, qui pourront demander réparation du préjudice subi devant la juridiction compétente. Le Repreneur informe immédiatement l'Opérateur de toute divulgation imposée par la loi ou une autorité et la limite au strict nécessaire.
+Article 6 – Accès au dossier du bien
+L'accès aux documents du dossier est ouvert après la signature du présent engagement et la déclaration par l'Acquéreur de l'origine des fonds envisagés pour l'acquisition (apport, emprunt, investisseurs), demandée dans son espace au titre des obligations de lutte contre le blanchiment des capitaux. Les documents consultés portent un filigrane nominatif ; l'Opérateur tient un journal horodaté des consultations, qui fait foi entre les parties.
 
-Article 7 – Signature électronique et preuve
-L'accord est signé par un code à usage unique envoyé à l'adresse électronique confirmée du Repreneur, dont l'identité a été vérifiée. Le dossier de preuve (empreinte SHA-256 du document, horodatage, adresse IP, navigateur, identité vérifiée, référence du code) est conservé dix ans et annexé à l'exemplaire PDF remis aux deux parties. Les parties conviennent que ce procédé identifie le signataire et garantit l'intégrité de l'acte (articles 1366 et 1367 du code civil).
+Article 7 – Absence d'engagement de conclure
+Le présent engagement ne constitue ni promesse de vente ni promesse d'achat. Chaque partie reste libre de mettre fin aux discussions à tout moment. Aucune somme n'est due par l'Acquéreur à l'Opérateur : la rémunération de l'Opérateur est à la charge du vendeur.
 
-Article 8 – Données personnelles
-L'Opérateur traite les données d'identité et de contact du Repreneur pour l'exécution du présent accord, la sécurité de l'espace documentaire et le respect de ses obligations légales (lutte contre le blanchiment). Les images des pièces d'identité ne sont jamais conservées. Droits d'accès, de rectification, d'effacement et d'opposition : {{CONTACT_EMAIL}}. Politique de confidentialité : {{URL_POLITIQUE_CONFIDENTIALITE}}.
+Article 8 – Responsabilité
+Tout manquement de l'Acquéreur ou de ses conseils engage sa responsabilité envers le vendeur et l'Opérateur, qui pourront demander réparation du préjudice subi devant la juridiction compétente. L'Acquéreur informe immédiatement l'Opérateur de toute divulgation imposée par la loi ou une autorité et la limite au strict nécessaire.
 
-Article 9 – Droit applicable
-Le présent accord est soumis au droit français. Tout litige relève, à défaut d'accord amiable, de la compétence des tribunaux de {{TRIBUNAL_COMPETENT}}.
+Article 9 – Signature électronique et preuve
+L'engagement est signé par un code à usage unique envoyé à l'adresse électronique confirmée de l'Acquéreur, dont l'identité a été vérifiée. Le dossier de preuve (empreinte SHA-256 du document, horodatage, adresse IP, navigateur, identité vérifiée, référence du code) est conservé dix ans et annexé à l'exemplaire PDF remis aux deux parties. Les parties conviennent que ce procédé identifie le signataire et garantit l'intégrité de l'acte (articles 1366 et 1367 du code civil).
+
+Article 10 – Données personnelles de l'Acquéreur
+L'Opérateur traite les données d'identité et de contact de l'Acquéreur pour l'exécution du présent engagement, la sécurité du dossier du bien et le respect de ses obligations légales (lutte contre le blanchiment des capitaux). Les images des pièces d'identité ne sont jamais conservées. Droits d'accès, de rectification, d'effacement et d'opposition : {{CONTACT_EMAIL}}. Politique de confidentialité : {{URL_POLITIQUE_CONFIDENTIALITE}}.
+
+Article 11 – Droit applicable
+Le présent engagement est soumis au droit français. Tout litige relève, à défaut d'accord amiable, des tribunaux de {{TRIBUNAL_COMPETENT}}, sous réserve des règles d'ordre public protectrices du consommateur.
 
 SIGNATURE
 Fait par voie électronique, {{DATE_SIGNATURE}}.
-Référence : accord n° {{NDA_NUMERO}} — annonce {{ANNONCE_REF}}.
+Référence : engagement n° {{NDA_NUMERO}} — annonce {{ANNONCE_REF}}.
 
-ANNEXE A — Identité du cédant et de la société (communiquée après signature)
-Société : {{CIBLE_DENOMINATION}} ({{CIBLE_FORME_JURIDIQUE}}), SIREN {{CIBLE_SIREN}}, siège : {{CIBLE_SIEGE}}.
-Cédant : {{VENDEUR_PRENOM}} {{VENDEUR_NOM}}.
-Qualifications déclarées : {{CIBLE_QUALIFICATIONS}}.
-Le Repreneur reconnaît que ces informations constituent des informations couvertes au sens de l'article 2."""
+ANNEXE A — Le bien et le vendeur (communiqués après signature)
+Adresse du bien : {{BIEN_ADRESSE}}.
+Vendeur : {{VENDEUR_IDENTITE}}.
+L'Acquéreur reconnaît que ces informations constituent des informations couvertes au sens de l'article 2."""
 
-# Offre indicative (remplace la lettre d'intention) : signée par le repreneur, contresignée par le cédant à l'acceptation
-DEFAULT_OFFER_TEMPLATE = """OFFRE INDICATIVE D'ACQUISITION
+# Offre d'achat (remplace l'offre indicative de CessionRGE) : signée par l'acquéreur, contresignée par le vendeur à l'acceptation ;
+# même acceptée, elle n'emporte pas vente (avant-contrat et acte chez le notaire)
+DEFAULT_OFFER_TEMPLATE = """OFFRE D'ACHAT
 
 Offre n° {{OFFRE_NUMERO}} — Annonce {{ANNONCE_REF}} — Conditions du {{VERSION_CONDITIONS}}
 
-1. Le Repreneur
-{{REPRENEUR_IDENTITE}}
+1. L'Acquéreur
+{{ACQUEREUR_IDENTITE}}
 
-2. Le Cédant
-{{VENDEUR_PRENOM}} {{VENDEUR_NOM}}, pour la société {{CIBLE_DENOMINATION}} ({{CIBLE_FORME_JURIDIQUE}}, SIREN {{CIBLE_SIREN}}, siège : {{CIBLE_SIEGE}}).
+2. Le Vendeur
+{{VENDEUR_IDENTITE}}.
 
-3. Plateforme
-L'offre est transmise par {{PLATEFORME_DENOMINATION}} SAS, exploitant la plateforme {{MARQUE}}, carte professionnelle n° {{CARTE_T}} délivrée par la {{CARTE_T_CCI}}, en exécution du mandat de vente simple confié par le Cédant. {{PLATEFORME_DENOMINATION}} SAS ne négocie pas, ne rédige pas les actes et ne fournit aucun conseil juridique, fiscal ou financier.
+3. Le bien
+{{BIEN_TITRE}}, situé {{BIEN_ADRESSE}}, vendu occupé ({{BAIL_TYPE}}, loyer mensuel de {{LOYER}} hors charges).
+
+4. La plateforme
+L'offre est transmise par {{PLATEFORME_DENOMINATION}} SAS, exploitant la plateforme {{MARQUE}}, carte professionnelle n° {{CARTE_T}} délivrée par la {{CARTE_T_CCI}}, en exécution du mandat de vente simple confié par le Vendeur. {{PLATEFORME_DENOMINATION}} SAS ne négocie pas, ne rédige ni l'avant-contrat ni l'acte de vente et ne fournit aucun conseil juridique, fiscal ou financier.
 
 Article 1 – Objet
-Le Repreneur propose au Cédant d'acquérir {{OBJET}}.
+L'Acquéreur propose au Vendeur d'acquérir {{OBJET}}.
 
-Article 2 – Prix proposé
-Prix proposé : {{MONTANT}}.
-Financement envisagé : apport personnel {{FIN_APPORT}} ; emprunt bancaire {{FIN_EMPRUNT}} ; crédit vendeur {{FIN_CREDIT_VENDEUR}} ; complément de prix conditionnel {{FIN_COMPLEMENT}}.
+Article 2 – Prix proposé et financement
+Prix proposé : {{MONTANT}}, honoraires de négociation compris, à la charge du Vendeur.
+Financement envisagé : apport personnel {{FIN_APPORT}} ; emprunt {{FIN_EMPRUNT}}.
+{{CONDITION_PRET}}
 
-Article 3 – Conditions
+Article 3 – Autres conditions
 {{CONDITIONS}}
 
-Article 4 – Calendrier
-Date cible de signature de l'acte : {{DATE_CIBLE}}.
+Article 4 – Calendrier et validité
+Date souhaitée pour la signature de l'avant-contrat (promesse ou compromis de vente) : {{DATE_CIBLE}}.
 Validité de l'offre : {{VALIDITE_JOURS}} jours à compter de sa signature, soit jusqu'au {{DATE_EXPIRATION}}. Passé ce délai sans acceptation, l'offre est caduque.
 
-Article 5 – Message du Repreneur
+Article 5 – Message de l'Acquéreur
 {{MESSAGE}}
 
 Article 6 – Portée de l'offre
-La présente offre est indicative. Elle exprime l'intention du Repreneur d'acquérir l'entreprise aux conditions ci-dessus et ne constitue pas une promesse d'achat ; l'acceptation du Cédant ne constitue pas une promesse de vente. Les parties conviennent de poursuivre de bonne foi la négociation, les vérifications et la rédaction des actes avec leurs conseils. Restent applicables : l'accord de confidentialité signé par le Repreneur, le mandat de vente simple du Cédant (la rémunération de {{PLATEFORME_DENOMINATION}} SAS est à la charge du Cédant, due uniquement à la signature de l'acte de cession ; rien n'est dû par le Repreneur) et les présentes stipulations relatives à la signature.
+La présente offre, même acceptée, n'emporte pas vente : elle engage les parties à négocier de bonne foi un avant-contrat (promesse unilatérale ou compromis de vente) chez le notaire, qui en fixera toutes les conditions (prix, conditions suspensives, date de l'acte authentique, transfert du dépôt de garantie, prorata des loyers, des charges et de la taxe foncière). {{RETRACTATION_ACQUEREUR}} Aucune somme n'est versée à {{PLATEFORME_DENOMINATION}} SAS ni au Vendeur à ce stade. Restent applicables l'engagement de confidentialité et de non-contournement signé par l'Acquéreur et le mandat de vente simple du Vendeur : la rémunération de {{PLATEFORME_DENOMINATION}} SAS est à la charge du Vendeur, due uniquement à la signature de l'acte authentique ; rien n'est dû par l'Acquéreur.
 
 Article 7 – Signature électronique et preuve
-L'offre est signée par le Repreneur, puis acceptée et contresignée par le Cédant, par un code à usage unique envoyé à l'adresse électronique confirmée de chaque signataire. Le dossier de preuve de chaque signature (empreinte SHA-256, horodatage, adresse IP, navigateur, identité vérifiée, référence du code) est conservé dix ans et annexé à l'exemplaire PDF remis aux deux parties (articles 1366 et 1367 du code civil). Une contre-proposition du Cédant est horodatée depuis son espace et prend effet à son acceptation par le Repreneur, signée par code.
+L'offre est signée par l'Acquéreur, puis acceptée et contresignée par le Vendeur, par un code à usage unique envoyé à l'adresse électronique confirmée de chaque signataire. Le dossier de preuve de chaque signature (empreinte SHA-256, horodatage, adresse IP, navigateur, identité vérifiée, référence du code) est conservé dix ans et annexé à l'exemplaire PDF remis aux deux parties (articles 1366 et 1367 du code civil). Une contre-proposition du Vendeur est horodatée depuis son espace et prend effet à son acceptation par l'Acquéreur, signée par code.
 
-SIGNATURE DU REPRENEUR
+SIGNATURE DE L'ACQUÉREUR
 Fait par voie électronique, {{DATE_SIGNATURE}}.
 Référence : offre n° {{OFFRE_NUMERO}} — annonce {{ANNONCE_REF}}."""
 # Default Platform Settings
@@ -6790,18 +6253,39 @@ DEFAULT_PLATFORM_SETTINGS = {
     "URL_POLITIQUE_CONFIDENTIALITE": site_url("/confidentialite"),
     "TRIBUNAL_COMPETENT": "Versailles",
     "VERSION_CONDITIONS": CONTRACT_TERMS_DATE,
-    # Mandat simple (SPEC §3.2) et accord de confidentialité (SPEC §3.3)
+    # Mandat simple (SPEC §7.2) et engagement de confidentialité (SPEC §7.3)
     "DUREE_MOIS": str(MANDATE_DURATION_MONTHS),
     "PREAVIS_JOURS": str(MANDATE_NOTICE_DAYS),
     "SUITE_MOIS": str(MANDATE_TAIL_MONTHS),
+    "RETRACTATION_JOURS": str(MANDATE_WITHDRAWAL_DAYS),
+    "VERSION_MANDAT": MANDATE_TERMS_VERSION,
     "NDA_DUREE_MOIS": str(NDA_DURATION_MONTHS),
 }
 
-# ============ NEW WORKFLOW ENDPOINTS ============
+# ============ MANDAT DE VENTE SIMPLE v1 (SPEC §7.2, API.md §6) ============
+MANDATE_REQUIRED_FIELDS = {
+    "mandant_address": "adresse postale du mandant", "mandant_capacity": "qualité du signataire",
+    "sale_object": "objet de la vente (bien ou parts)", "property_type": "type de bien", "address": "adresse du bien",
+    "postal_code": "code postal du bien", "city": "ville du bien", "lease_type": "type de bail", "rent_monthly": "loyer mensuel",
+    "lease_start": "date de prise d'effet du bail", "asking_price": "prix de vente",
+    "company_name": "dénomination de la société propriétaire", "siret": "SIRET de la société propriétaire",
+}
 
-# ============ MANDAT DE VENTE SIMPLE v2 (SPEC §3.2, API.md §6) ============
-MANDATE_REQUIRED_FIELDS = {"mandant_address": "adresse postale du mandant", "sale_object": "objet de la cession (titres, fonds ou indifférent)",
-                           "company_name": "dénomination de la société", "siret": "SIRET de la société"}
+def mandate_missing_fields(property: dict) -> list:
+    """Champs à compléter avant de générer le mandat (texte sans blanc) ; la société n'est exigée que pour une SCI ou
+    une société, une cession de parts ou un signataire gérant"""
+    company_needed = (property.get("owner_type") in COMPANY_OWNER_TYPES or property.get("sale_object") == "parts"
+                      or property.get("mandant_capacity") == "gerant")
+    missing = []
+    for field in MANDATE_REQUIRED_FIELDS:
+        if field in ("company_name", "siret") and not company_needed:
+            continue
+        value = property.get(field)
+        if field == "mandant_address":
+            value = fmt_address(value) if value else ""
+        if value in (None, "", 0) or (field in ("rent_monthly", "asking_price") and not (value or 0) > 0):
+            missing.append(field)
+    return missing
 
 def mandate_pdf_path(contract_id: str) -> str:
     return f"/api/seller/mandat/{contract_id}/pdf"
@@ -6810,30 +6294,34 @@ def mandate_pdf_link(contract: dict) -> str:
     """Lien de téléchargement authentifié par jeton (e-mail envoyé au mandant à la signature)"""
     return site_url(f"{mandate_pdf_path(contract['id'])}?token={contract.get('pdf_token', '')}")
 
+def mandate_object_text(property: dict) -> str:
+    company = (property.get("company_name") or "").strip()
+    return SALE_OBJECT_MANDATE.get(property.get("sale_object") or "bien", SALE_OBJECT_MANDATE["bien"]).format(
+        company=f" ({company})" if company else "")
+
 def mandate_summary(property: dict) -> list:
-    """Résumé en 5 lignes affiché avant le texte dépliable (SPEC §4.2.3)"""
-    objet = SALE_OBJECT_CESSION.get(property.get("sale_object") or "indifferent", SALE_OBJECT_CESSION["indifferent"]).format(name=property.get("company_name") or "")
+    """Résumé en 5 lignes affiché avant le texte dépliable (SPEC §5.2.4)"""
     prix = fmt_eur_fr(property["asking_price"]) if property.get("asking_price") else "à fixer sur l'annonce"
     return [
-        "Mandat simple, sans exclusivité : vous restez libre de vendre par vous-même ou par un autre intermédiaire, sans indemnité ni pénalité.",
-        f"Objet : {objet} ; prix demandé {prix}, indicatif : vous restez libre d'accepter ou de refuser toute offre.",
-        f"Durée {MANDATE_DURATION_MONTHS} mois, prolongeable par périodes de {MANDATE_DURATION_MONTHS} mois, résiliable à tout moment depuis votre espace avec un préavis de {MANDATE_NOTICE_DAYS} jours.",
-        f"Rémunération à votre charge, due uniquement si la vente se fait avec un repreneur que nous vous avons nommément présenté : "
-        f"6 % HT du prix (3 % HT au-delà d'un million), minimum {fmt_eur_fr(commission_minimum_ht())} HT, exigible à la signature de l'acte, rien avant.",
-        f"Clause de suite de {MANDATE_TAIL_MONTHS} mois sur les repreneurs présentés ; signature par code reçu par e-mail, contre-signée par AlterEgo SAS, "
-        "dossier de preuve conservé dix ans, numéro de registre attribué à la signature.",
+        "Mandat simple, sans exclusivité : vous restez libre de vendre vous-même ou par un autre intermédiaire, sans indemnité ni pénalité.",
+        f"Objet : {mandate_object_text(property)} ; prix demandé {prix}, honoraires inclus : vous restez libre d'accepter ou de refuser toute offre.",
+        f"Durée {MANDATE_DURATION_MONTHS} mois, prolongeable, résiliable à tout moment avec un préavis de {MANDATE_NOTICE_DAYS} jours ; "
+        f"rétractation possible pendant {MANDATE_WITHDRAWAL_DAYS} jours, avec effet immédiat.",
+        f"Honoraires à votre charge, dus uniquement si la vente se fait avec un acquéreur que nous vous avons nommément présenté : "
+        f"{commission_scale_text()}",
+        f"Clause de suite de {MANDATE_TAIL_MONTHS} mois sur les acquéreurs présentés ; signature par code reçu par e-mail, contresignée par "
+        f"{LEGAL_ENTITY['denomination']} SAS, dossier de preuve conservé dix ans, numéro de registre attribué à la signature.",
     ]
 
 async def mandate_variables(property: dict, user: dict, contract_number: str) -> dict:
     settings_doc = await db.platform_settings.find_one({"type": "contracts"}, {"_id": 0})
     settings = {**DEFAULT_PLATFORM_SETTINGS, **(settings_doc["settings"] if settings_doc else {})}
-    name = property.get("company_name") or ""
     if property.get("asking_price"):
         c = calculate_commission(float(property["asking_price"]))
-        estimation = (f"À titre indicatif, sur la base du prix demandé, la rémunération s'élèverait à {fmt_eur_fr(c['final_commission_ht'])} HT "
-                      f"({fmt_eur_fr(c['final_commission_ttc'])} TTC) ; son montant définitif est calculé sur le prix de cession effectif.")
+        estimation = (f"À titre indicatif, sur la base du prix demandé, la rémunération s'élèverait à {fmt_eur_fr(c['final_commission_ttc'])} TTC "
+                      f"({fmt_eur_fr(c['final_commission_ht'])} HT) ; son montant définitif est calculé sur le prix de vente figurant dans l'acte authentique.")
     else:
-        estimation = "Son montant définitif est calculé sur le prix de cession effectif."
+        estimation = "Son montant définitif est calculé sur le prix de vente figurant dans l'acte authentique."
     mediateur = LEGAL_ENTITY.get("mediateur")
     return {
         **settings,
@@ -6843,13 +6331,18 @@ async def mandate_variables(property: dict, user: dict, contract_number: str) ->
         "MANDANT_ADRESSE": fmt_address(property.get("mandant_address")),
         "MANDANT_QUALITE": mandant_capacity(property, user),
         **property_contract_variables(property),
-        "OBJET": SALE_OBJECT_CESSION.get(property.get("sale_object") or "indifferent", SALE_OBJECT_CESSION["indifferent"]).format(name=name),
+        "OBJET": mandate_object_text(property),
+        "POUVOIR_PARTS": (" ou pour céder les parts de la société qui en est propriétaire"
+                          if property.get("sale_object") in ("parts", "indifferent") and property.get("owner_type") in COMPANY_OWNER_TYPES else ""),
         "ESTIMATION_COMMISSION": estimation,
-        "MEDIATEUR": (f"Médiateur de la consommation : {mediateur}. Le Mandant peut y recourir gratuitement en cas de litige non résolu à l'amiable."
-                      if mediateur else "En cas de difficulté, les parties recherchent d'abord une solution amiable par échange dans l'espace en ligne ou par courrier électronique."),
-        "EXECUTION_IMMEDIATE": MANDATE_EXECUTION_CLAUSE,
+        "MEDIATEUR": (f"le Mandant consommateur peut recourir gratuitement au médiateur de la consommation {mediateur} en cas de litige "
+                      "non résolu à l'amiable." if mediateur else
+                      "en cas de difficulté, les parties recherchent d'abord une solution amiable par échange dans l'espace en ligne ou "
+                      "par courrier électronique ; le Mandant consommateur peut en outre recourir gratuitement à un médiateur de la "
+                      "consommation, dont les coordonnées lui sont communiquées sur simple demande."),
         "MANDAT_NUMERO": contract_number,
         "REGISTRE": MANDATE_REGISTRY_PENDING,
+        "FIN_RETRACTATION": WITHDRAWAL_END_PENDING,
         "DATE_SIGNATURE": SIGNATURE_DATE_PENDING,
     }
 
@@ -6861,13 +6354,13 @@ async def latest_mandate(property_id: str, seller_id: Optional[str] = None) -> O
 
 @api_router.post("/seller/mandat/generate")
 async def generate_seller_mandat(property_id: str, current_user: dict = Depends(get_current_user)):
-    """Cédant : génère le mandat de vente simple à signer. Exige l'e-mail confirmé (403 `email_not_verified`), l'identité
-    vérifiée (403 `identity_required`), `mandant_address` et `sale_object` sur l'annonce (400 `validation`, `missing`)."""
+    """Vendeur : génère le mandat de vente simple à signer. Exige l'e-mail confirmé (403 `email_not_verified`), l'identité
+    vérifiée (403 `identity_required`) et les champs du mandat sur l'annonce (400 `validation`, `missing`)."""
     if current_user.get("role") != "seller":
-        raise HTTPException(status_code=403, detail="Vendeur uniquement")
+        raise api_error(403, "not_allowed", "Réservé aux vendeurs")
     property = await db.properties.find_one({"id": property_id, "seller_id": current_user["id"]}, {"_id": 0})
     if not property:
-        raise HTTPException(status_code=404, detail="Entreprise non trouvée ou non autorisée")
+        raise HTTPException(status_code=404, detail="Annonce introuvable")
     if not is_email_verified(current_user):
         raise api_error(403, "email_not_verified", EMAIL_NOT_VERIFIED_DETAIL)
     if not is_user_verified(current_user):
@@ -6878,9 +6371,7 @@ async def generate_seller_mandat(property_id: str, current_user: dict = Depends(
         return {"already_signed": True, "contract": {k: v for k, v in existing.items() if k != "pdf_token"},
                 "summary": mandate_summary(property), "pdf_url": mandate_pdf_path(existing["id"])}
 
-    missing = [f for f, _ in MANDATE_REQUIRED_FIELDS.items() if not property.get(f)]
-    if property.get("mandant_address") and not fmt_address(property["mandant_address"]):
-        missing.append("mandant_address")
+    missing = mandate_missing_fields(property)
     if missing:
         labels = ", ".join(MANDATE_REQUIRED_FIELDS[f] for f in missing)
         raise api_error(400, "validation", f"Complétez votre annonce avant de générer le mandat : {labels}", missing=missing)
@@ -6920,14 +6411,10 @@ async def generate_seller_mandat(property_id: str, current_user: dict = Depends(
     return {"already_signed": False, "contract_id": contract_doc["id"], "contract_number": contract_number, "content": content,
             "summary": summary, "terms_version": MANDATE_TERMS_VERSION, "terms_date": CONTRACT_TERMS_DATE, "type": "mandat"}
 
-COMMISSION_PAYER_PLACEHOLDER = "[choix du Mandant lors de la signature]"
-COMMISSION_PAYER_TEXT = {
-    "cedant": "le Mandant (cédant)",
-    "repreneur": "l'acquéreur (repreneur)",
-}
+COMMISSION_PAYER_TEXT = {"vendeur": "le Mandant (vendeur)"}
 
 class MandatSignature(BaseModel):
-    otp_code: Optional[str] = None  # le débiteur n'est plus un choix : toujours le cédant (barème v2)
+    otp_code: Optional[str] = None  # le débiteur des honoraires n'est pas un choix : toujours le vendeur
 
 MANDATE_REGISTRY_TEST_COUNTER = "mandate_registry_test"
 
@@ -6949,6 +6436,7 @@ def mandate_view(contract: Optional[dict]) -> Optional[dict]:
     view["pdf_url"] = mandate_pdf_path(contract["id"])
     view.setdefault("ends_at", None)
     view.setdefault("tail_ends_at", None)
+    view.setdefault("withdrawal_ends_at", None)
     view.setdefault("effective_at", None)
     view.setdefault("registry_number", None)
     view.setdefault("terms_version", contract.get("commission_terms_version"))
@@ -6965,8 +6453,8 @@ async def _mandate_for_owner(contract_id: str, user: dict, allow_admin: bool = T
 @api_router.post("/seller/mandat/{contract_id}/sign")
 async def sign_seller_mandat(contract_id: str, signature: MandatSignature, request: Request,
                              current_user: dict = Depends(get_current_user)):
-    """Cédant : signe le mandat par code. Numéro de registre, dates (12 mois, clause de suite 18 mois), contre-signature
-    automatique d'AlterEgo SAS, dossier de preuve chaîné, e-mail avec lien PDF. Requis avant publication."""
+    """Vendeur : signe le mandat par code. Numéro de registre, dates (12 mois, clause de suite 12 mois, rétractation 14 jours),
+    contre-signature automatique d'AlterEgo SAS, dossier de preuve chaîné, e-mail avec lien PDF. Requis avant publication."""
     contract = await db.generated_contracts.find_one({"id": contract_id, "type": "mandat"}, {"_id": 0})
     if not contract:
         raise HTTPException(status_code=404, detail="Mandat non trouvé")
@@ -6983,10 +6471,9 @@ async def sign_seller_mandat(contract_id: str, signature: MandatSignature, reque
     evidence = await verify_signature_code(current_user, contract, signature.otp_code, request)
 
     now = datetime.now(timezone.utc)
-    payer = COMMISSION_PAYER  # toujours le cédant
+    payer = COMMISSION_PAYER  # toujours le vendeur
     content = contract.get("content") or ""
-    if COMMISSION_PAYER_PLACEHOLDER in content:  # anciens mandats générés avec un espace à compléter
-        content = content.replace(COMMISSION_PAYER_PLACEHOLDER, COMMISSION_PAYER_TEXT[payer])
+    withdrawal_ends_at = now + timedelta(days=MANDATE_WITHDRAWAL_DAYS)
     mandate_test = is_test_context(contract, property, current_user)
     if mandate_test:
         # Registre de test séparé (compteur `mandate_registry_test`, numéro TEST-0001) : le registre réel n'avance jamais
@@ -6996,7 +6483,8 @@ async def sign_seller_mandat(contract_id: str, signature: MandatSignature, reque
         registry_number = await next_sequence("mandate_registry")
     signer_name = f"{current_user.get('verified_first_name') or current_user.get('first_name') or ''} {current_user.get('verified_last_name') or current_user.get('last_name') or ''}".strip()
     # Le gabarit porte déjà « numéro » / « n° » devant {{REGISTRE}} : seul le nombre est inséré (jamais « n° n° 12 »)
-    content = content.replace(MANDATE_REGISTRY_PENDING, str(registry_number)).replace(SIGNATURE_DATE_PENDING, f"le {fmt_datetime_paris(now)}")
+    content = (content.replace(MANDATE_REGISTRY_PENDING, str(registry_number)).replace(SIGNATURE_DATE_PENDING, f"le {fmt_datetime_paris(now)}")
+               .replace(WITHDRAWAL_END_PENDING, f"le {fmt_datetime_paris(withdrawal_ends_at)}"))
     content += (f"\n\nSigné électroniquement par le Mandant, {signer_name}, le {fmt_datetime_paris(now)}, par code à usage unique envoyé à "
                 f"{mask_email(current_user.get('email', ''))}.\nSigné électroniquement par {LEGAL_ENTITY['denomination']} SAS, le {fmt_datetime_paris(now)} "
                 "(contre-signature automatique, dossier de preuve commun).")
@@ -7019,6 +6507,7 @@ async def sign_seller_mandat(contract_id: str, signature: MandatSignature, reque
         {"id": contract_id, "status": "pending_signature"},
         {"$set": {
             "status": "signed", "signed_at": now.isoformat(), "ends_at": ends_at.isoformat(), "tail_ends_at": tail_ends_at.isoformat(),
+            "withdrawal_ends_at": withdrawal_ends_at.isoformat(),
             "terms_version": MANDATE_TERMS_VERSION, "terms_date": contract.get("terms_date") or CONTRACT_TERMS_DATE,
             "seller_signature_hash": signature_hash, "commission_payer": payer, "commission_terms_version": COMMISSION_TERMS_VERSION,
             "registry_number": registry_number, "content": content, "signature_evidence": record["evidence"], "signature_record_id": record["id"],
@@ -7033,7 +6522,7 @@ async def sign_seller_mandat(contract_id: str, signature: MandatSignature, reque
     listing_update = {"mandat_signed": True, "mandat_signed_at": now.isoformat(), "mandate_id": contract_id, "commission_payer": payer,
                       "commission_terms_version": COMMISSION_TERMS_VERSION, "mandate_ends_at": ends_at.isoformat(),
                       "mandate_tail_ends_at": tail_ends_at.isoformat()}
-    # Mandat de test sur une annonce réelle (créée hors essai, cédant réel) : l'annonce n'est jamais repassée en donnée de
+    # Mandat de test sur une annonce réelle (créée hors essai, vendeur réel) : l'annonce n'est jamais repassée en donnée de
     # test (la purge l'effacerait avec son mandat réel du registre) ; elle porte `mandate_is_test` et reste masquée au
     # public hors mode test tant qu'un vrai mandat n'est pas signé
     listing_update["mandate_is_test"] = mandate_test
@@ -7061,7 +6550,7 @@ async def sign_seller_mandat(contract_id: str, signature: MandatSignature, reque
     return {
         "status": "signed", "message": "Mandat signé avec succès", "contract_number": contract.get("contract_number"),
         "registry_number": registry_number, "signed_at": now.isoformat(), "ends_at": ends_at.isoformat(), "tail_ends_at": tail_ends_at.isoformat(),
-        "terms_version": MANDATE_TERMS_VERSION, "commission_payer": payer, "signature_hash": signature_hash,
+        "withdrawal_ends_at": withdrawal_ends_at.isoformat(), "terms_version": MANDATE_TERMS_VERSION, "commission_payer": payer, "signature_hash": signature_hash,
         "listing_status": listing_status, "pdf_url": mandate_pdf_path(contract_id),
     }
 
@@ -7071,13 +6560,17 @@ class MandateDenounce(BaseModel):
 @api_router.post("/seller/mandat/{contract_id}/denounce")
 async def denounce_seller_mandat(contract_id: str, data: Optional[MandateDenounce] = None, current_user: dict = Depends(get_current_user)):
     """Dénonciation du mandat par le mandant (ou par AlterEgo via l'admin) : préavis de 15 jours, e-mail aux deux parties,
-    annonce dépubliée à la date d'effet par la tâche `mandate_denounce_effective`."""
+    annonce dépubliée à la date d'effet par la tâche `mandate_denounce_effective`. Par le mandant dans les 14 jours suivant
+    la signature : rétractation (`withdrawn_retractation`), effet immédiat, annonce retirée, aucune somme due."""
     contract = await _mandate_for_owner(contract_id, current_user)
     if contract.get("status") != "signed":
         raise api_error(400, "validation", "Seul un mandat en cours peut être dénoncé")
     now = datetime.now(timezone.utc)
+    withdrawal_end = _parse_dt(contract.get("withdrawal_ends_at"))
+    if current_user["id"] == contract.get("seller_id") and withdrawal_end and now <= withdrawal_end:
+        return await withdraw_mandate(contract, current_user, now, (data.reason.strip() if data and data.reason else None))
     effective_at = now + timedelta(days=MANDATE_NOTICE_DAYS)
-    # Clause de suite (art. 7) : 18 mois à compter de la fin du mandat, « quelle qu'en soit la cause » → date d'effet + 18 mois
+    # Clause de suite (art. 10) : 12 mois à compter de la fin du mandat, « quelle qu'en soit la cause » → date d'effet + 12 mois
     tail_ends_at = add_months(effective_at, MANDATE_TAIL_MONTHS)
     by_role = "seller" if current_user["id"] == contract.get("seller_id") else "platform"
     by_text = "le Mandant" if by_role == "seller" else f"{LEGAL_ENTITY['denomination']} SAS"
@@ -7094,6 +6587,36 @@ async def denounce_seller_mandat(contract_id: str, data: Optional[MandateDenounc
     await email_user(contract.get("seller_id"), "mandate_denounced", **values)
     await email_admin("mandate_denounced_admin", **values)
     return {"status": "denounced", "effective_at": effective_at.isoformat(), "denounced_at": now.isoformat(), "tail_ends_at": tail_ends_at.isoformat()}
+
+async def withdraw_mandate(contract: dict, user: dict, now: datetime, reason: Optional[str]) -> dict:
+    """Rétractation du mandant (art. 6 du mandat, L221-18 C. conso.) : effet immédiat, annonce retirée, demandes de dossier
+    en attente closes, pas de clause de suite, e-mails au vendeur et à l'admin"""
+    contract_id = contract["id"]
+    res = await db.generated_contracts.update_one({"id": contract_id, "status": "signed"}, {"$set": {
+        "status": "withdrawn_retractation", "denounced_at": now.isoformat(), "denounced_by": user["id"], "denounced_by_role": "seller",
+        "denounce_reason": reason, "effective_at": now.isoformat(), "effective_applied": True, "tail_ends_at": None,
+        "signers_pending": []}})
+    if res.modified_count == 0:
+        raise api_error(400, "validation", "Seul un mandat en cours peut être dénoncé")
+    property = await db.properties.find_one({"id": contract.get("property_id")}, {"_id": 0})
+    listing_status = (property or {}).get("status")
+    if property and property.get("mandate_id") in (contract_id, None):
+        update = {"mandat_signed": False, "mandate_withdrawn_at": now.isoformat(), "updated_at": now.isoformat(),
+                  "mandate_tail_ends_at": None}
+        if property.get("status") in ("published", "paused", "mandat_en_attente"):
+            update.update({"status": "withdrawn", "withdrawn_at": now.isoformat(), "withdrawn_reason": "retractation"})
+            listing_status = "withdrawn"
+        await db.properties.update_one({"id": property["id"]}, {"$set": update, "$unset": {"mandate_id": ""}})
+        await close_pending_dataroom_requests(property["id"], "withdrawn", now)
+    await create_audit_log(action="MANDAT_WITHDRAWN", property_id=contract.get("property_id"), actor_id=user["id"],
+                           actor_email=user["email"], details={"contract_id": contract_id, "reason": reason})
+    values = {"registry_number": contract.get("registry_number", ""), "contract_number": contract.get("contract_number", ""),
+              "withdrawn_at": fmt_datetime_paris(now), "property_id": contract.get("property_id", ""),
+              "property_title": (property or {}).get("title") or ""}
+    await email_user(contract.get("seller_id"), "mandate_withdrawn", **values)
+    await email_admin("mandate_withdrawn_admin", **values)
+    return {"status": "withdrawn_retractation", "effective_at": now.isoformat(), "denounced_at": now.isoformat(),
+            "tail_ends_at": None, "listing_status": listing_status, "label": "rétractation"}
 
 class MandateRenew(BaseModel):
     otp_code: Optional[str] = None
@@ -7139,20 +6662,22 @@ async def admin_mandate_registry(include_test: bool = False, current_user: dict 
     if current_user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
     rows = []
-    query = {"type": "mandat", "status": {"$in": ["signed", "denounced", "expired", "void"]}, "registry_number": {"$exists": True}}
+    query = {"type": "mandat", "status": {"$in": ["signed", "denounced", "expired", "void", "withdrawn_retractation"]},
+             "registry_number": {"$exists": True}}
     if not include_test:
         query["is_test"] = {"$ne": True}
     mandates = sorted(await db.generated_contracts.find(query, {"_id": 0}).to_list(None), key=_registry_sort_key)
     for m in mandates:
-        property = await db.properties.find_one({"id": m.get("property_id")}, {"_id": 0, "company_name": 1, "id": 1, "status": 1})
+        property = await db.properties.find_one({"id": m.get("property_id")}, {"_id": 0, "title": 1, "id": 1, "status": 1})
         seller = await db.users.find_one({"id": m.get("seller_id")}, {"_id": 0, "first_name": 1, "last_name": 1, "company_name": 1})
         rows.append({
             "id": m["id"], "registry_number": m.get("registry_number"), "contract_number": m.get("contract_number"),
             "property_id": m.get("property_id"),
-            "property_label": (property or {}).get("company_name") or f"PRJ-{(m.get('property_id') or '')[:8].upper()}",
+            "property_label": (property or {}).get("title") or f"VL-{(m.get('property_id') or '')[:8].upper()}",
             "listing_status": (property or {}).get("status"),
             "seller_name": display_name(seller), "commission_payer": m.get("commission_payer"),
             "signed_at": m.get("signed_at"), "ends_at": m.get("ends_at"), "tail_ends_at": m.get("tail_ends_at"), "effective_at": m.get("effective_at"),
+            "withdrawal_ends_at": m.get("withdrawal_ends_at"),
             "status": m.get("status"), "terms_version": m.get("terms_version") or m.get("commission_terms_version"),
             "signature_method": (m.get("signature_evidence") or {}).get("method"),
             "renewals": len(m.get("renewals") or []),
@@ -7166,7 +6691,7 @@ async def admin_mandate_registry_csv(include_test: bool = False, current_user: d
     data = (await admin_mandate_registry(include_test=include_test, current_user=current_user))["mandates"]
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter=";")
-    writer.writerow(["N° registre", "N° mandat", "Date de signature", "Échéance", "Clause de suite", "Statut", "Annonce", "Cédant",
+    writer.writerow(["N° registre", "N° mandat", "Date de signature", "Échéance", "Clause de suite", "Statut", "Annonce", "Vendeur",
                      "Débiteur de la commission", "Version", "Statut annonce", "Méthode de signature", "Test"])
     for r in data:
         writer.writerow([r["registry_number"], r["contract_number"], (r["signed_at"] or "")[:19], (r["ends_at"] or "")[:10], (r["tail_ends_at"] or "")[:10],
@@ -7177,7 +6702,7 @@ async def admin_mandate_registry_csv(include_test: bool = False, current_user: d
 
 @api_router.get("/seller/mandat/{contract_id}/pdf")
 async def download_mandat_pdf(contract_id: str, token: Optional[str] = None, current_user: Optional[dict] = Depends(get_current_user_optional)):
-    """PDF du mandat avec page de preuve. Connecté (cédant, admin) : JSON {filename, content base64} ;
+    """PDF du mandat avec page de preuve. Connecté (vendeur, admin) : JSON {filename, content base64} ;
     lien authentifié par jeton (e-mail) : le fichier PDF directement."""
     contract = await db.generated_contracts.find_one({"id": contract_id, "type": "mandat"}, {"_id": 0})
     if not contract:
@@ -7196,10 +6721,10 @@ async def download_mandat_pdf(contract_id: str, token: Optional[str] = None, cur
 
 @api_router.get("/seller/mandat/status/{property_id}")
 async def get_mandat_status(property_id: str, current_user: dict = Depends(get_current_user)):
-    """État du mandat de l'annonce (dernier mandat : signé, dénoncé, expiré, caduc ou en attente) et repreneurs présentés"""
+    """État du mandat de l'annonce (dernier mandat : signé, dénoncé, rétracté, expiré, caduc ou en attente) et acquéreurs présentés"""
     property = await db.properties.find_one({"id": property_id}, {"_id": 0})
     if not property:
-        raise HTTPException(status_code=404, detail="Entreprise non trouvée")
+        raise HTTPException(status_code=404, detail="Annonce introuvable")
     if current_user.get("role") != "admin" and not is_property_owner(property, current_user):
         raise HTTPException(status_code=403, detail="Non autorisé")
     mandat = None
@@ -7212,7 +6737,7 @@ async def get_mandat_status(property_id: str, current_user: dict = Depends(get_c
 
 # ---- Fin de mandat (expiration, dénonciation effective) ----
 async def end_mandate(contract: dict, reason: str, listing_status: str, now: datetime, ended_at: Optional[datetime] = None) -> None:
-    """Dépublie l'annonce et envoie au mandant la liste nominative des repreneurs présentés (clause de suite).
+    """Dépublie l'annonce et envoie au mandant la liste nominative des acquéreurs présentés (clause de suite).
     L'annonce n'est modifiée que si ce mandat est celui qui la couvre (`property.mandate_id`) : un nouveau mandat signé
     entre-temps la laisse en ligne, et aucun e-mail de fin de mandat n'est alors envoyé."""
     property = await db.properties.find_one({"id": contract.get("property_id")}, {"_id": 0})
@@ -7232,11 +6757,11 @@ async def end_mandate(contract: dict, reason: str, listing_status: str, now: dat
         property = await db.properties.find_one({"id": contract.get("property_id")}, {"_id": 0})
     buyers = await presented_buyers_view(property or {})
     if buyers:
-        lines = [f"{b.get('name') or b['label']}" + (f" ({b['company_name']})" if b.get("company_name") else "") + f", accord signé le {fmt_date_fr(b.get('at'))}"
+        lines = [f"{b.get('name') or b['label']}" + (f" ({b['company_name']})" if b.get("company_name") else "") + f", engagement signé le {fmt_date_fr(b.get('at'))}"
                  for b in buyers]
         buyers_list = " ; ".join(lines)
     else:
-        buyers_list = "aucun repreneur ne vous a été nommément présenté pendant ce mandat"
+        buyers_list = "aucun acquéreur ne vous a été nommément présenté pendant ce mandat"
     await email_user(contract.get("seller_id"), "mandate_ended", title="Fin de votre mandat", registry_number=contract.get("registry_number", ""),
                      ended_at=fmt_date_fr(ended_at or now), reason=reason, tail_ends_at=fmt_date_fr(contract.get("tail_ends_at")), buyers_list=buyers_list)
 
@@ -7271,159 +6796,6 @@ async def job_mandate_denounce_effective(now: datetime) -> int:
         await end_mandate(m, f"dénoncé le {fmt_date_fr(m.get('denounced_at'))} {who}, préavis de {MANDATE_NOTICE_DAYS} jours", "withdrawn", now, effective)
         count += 1
     return count
-@api_router.post("/buyer/request-commercial-info")
-async def request_commercial_info(property_id: str, current_user: dict = Depends(get_current_user)):
-    """
-    Acheteur: Demande les informations commerciales après signature NDA.
-    """
-    if current_user["role"] != "buyer":
-        raise HTTPException(status_code=403, detail="Acheteur uniquement")
-    
-    # Check NDA signed
-    nda_signed = await db.generated_contracts.find_one({
-        "property_id": property_id,
-        "buyer_id": current_user["id"],
-        "type": "nda",
-        "status": "signed"
-    })
-    
-    if not nda_signed:
-        raise HTTPException(status_code=400, detail="Vous devez d'abord signer le NDA")
-    
-    property = await db.properties.find_one({"id": property_id}, {"_id": 0})
-    if not property:
-        raise HTTPException(status_code=404, detail="Entreprise non trouvée")
-    
-    # Check if already requested
-    existing_request = await db.commercial_info_requests.find_one({
-        "property_id": property_id,
-        "buyer_id": current_user["id"]
-    })
-    
-    if existing_request:
-        return {"message": "Demande déjà envoyée", "status": existing_request.get("status")}
-    
-    # Create request
-    request_doc = {
-        "id": str(uuid.uuid4()),
-        "property_id": property_id,
-        "buyer_id": current_user["id"],
-        "buyer_email": current_user["email"],
-        "seller_id": property.get("seller_id"),
-        "status": "pending",
-        "requested_at": datetime.now(timezone.utc).isoformat()
-    }
-    await db.commercial_info_requests.insert_one(request_doc)
-    
-    # Notify seller
-    message_doc = {
-        "id": str(uuid.uuid4()),
-        "sender_id": current_user["id"],
-        "sender_email": current_user["email"],
-        "receiver_id": property.get("seller_id"),
-        "property_id": property_id,
-        "content": "Je souhaite obtenir les informations commerciales de votre entreprise (nom, SIREN, SIRET, adresse, site web). NDA signé.",
-        "message_type": "commercial_info_request",
-        "read": False,
-        "created_at": datetime.now(timezone.utc).isoformat()
-    }
-    await db.messages.insert_one(message_doc)
-    
-    return {"message": "Demande envoyée au vendeur", "request_id": request_doc["id"]}
-
-@api_router.put("/seller/share-commercial-info/{request_id}")
-async def share_commercial_info(request_id: str, current_user: dict = Depends(get_current_user)):
-    """
-    Vendeur: Partage les informations commerciales avec l'acheteur.
-    """
-    request = await db.commercial_info_requests.find_one({"id": request_id}, {"_id": 0})
-    if not request:
-        raise HTTPException(status_code=404, detail="Demande non trouvée")
-    
-    if request.get("seller_id") != current_user["id"]:
-        raise HTTPException(status_code=403, detail="Non autorisé")
-    
-    property = await db.properties.find_one({"id": request.get("property_id")}, {"_id": 0})
-    if not property:
-        raise HTTPException(status_code=404, detail="Entreprise non trouvée")
-    
-    now = datetime.now(timezone.utc)
-    
-    # Update request status
-    await db.commercial_info_requests.update_one(
-        {"id": request_id},
-        {"$set": {
-            "status": "shared",
-            "shared_at": now.isoformat()
-        }}
-    )
-    
-    # Store shared info
-    commercial_info = {
-        "company_name": property.get("company_name"),
-        "siren": property.get("siren") or (property.get("siret") or "")[:9],
-        "siret": property.get("siret"),
-        "address": property.get("address"),
-        "website": property.get("website", ""),
-        "shared_at": now.isoformat()
-    }
-    
-    await db.commercial_info_requests.update_one(
-        {"id": request_id},
-        {"$set": {"shared_info": commercial_info}}
-    )
-    
-    # Notify buyer
-    message_doc = {
-        "id": str(uuid.uuid4()),
-        "sender_id": current_user["id"],
-        "sender_email": current_user["email"],
-        "receiver_id": request.get("buyer_id"),
-        "property_id": request.get("property_id"),
-        "content": f"""Voici les informations commerciales de mon entreprise :
-
-**Nom** : {property.get('company_name')}
-**SIREN** : {property.get('siren', 'N/A')}
-**SIRET** : {property.get('siret', 'N/A')}
-**Adresse** : {property.get('address', 'N/A')}
-**Site web** : {property.get('website', 'N/A')}
-
-Vous pouvez maintenant me soumettre une offre indicative si vous êtes intéressé.""",
-        "message_type": "commercial_info_shared",
-        "commercial_info": commercial_info,
-        "read": False,
-        "created_at": now.isoformat()
-    }
-    await db.messages.insert_one(message_doc)
-    
-    await create_audit_log(
-        action="COMMERCIAL_INFO_SHARED",
-        property_id=request.get("property_id"),
-        actor_id=current_user["id"],
-        actor_email=current_user["email"],
-        target_id=request.get("buyer_id"),
-        details={"request_id": request_id}
-    )
-    
-    return {"message": "Informations partagées", "commercial_info": commercial_info}
-
-@api_router.get("/buyer/commercial-info/{property_id}")
-async def get_commercial_info(property_id: str, current_user: dict = Depends(get_current_user)):
-    """
-    Acheteur: Récupère les informations commerciales si partagées.
-    """
-    request = await db.commercial_info_requests.find_one({
-        "property_id": property_id,
-        "buyer_id": current_user["id"]
-    }, {"_id": 0})
-    
-    if not request:
-        return {"status": "not_requested", "info": None}
-    
-    return {
-        "status": request.get("status"),
-        "info": request.get("shared_info") if request.get("status") == "shared" else None
-    }
 
 # ============ CREATE ADMIN ACCOUNT ON STARTUP ============
 
@@ -7493,8 +6865,8 @@ async def claim_once(kind: str, key: str) -> bool:
     return res.upserted_id is not None
 
 async def job_seller_reminders(now: datetime) -> int:
-    """Cédant sans réponse depuis 3 jours au dernier message d'un repreneur (annonces en ligne ou en pause) : un seul
-    e-mail récapitulatif par cédant (« N conversations attendent votre réponse »), via send_reminder (une relance par
+    """Vendeur sans réponse depuis 3 jours au dernier message d'un acquéreur (annonces en ligne ou en pause) : un seul
+    e-mail récapitulatif par vendeur (« N conversations attendent votre réponse »), via send_reminder (une relance par
     jour et par personne, lien de désinscription, notifications_opt_out respecté). Chaque dernier message n'est rappelé
     qu'une fois (clé conversation:last_at)."""
     sent = 0
@@ -7539,10 +6911,9 @@ async def job_followups(now: datetime) -> int:
         created = _parse_dt(contact.get("created_at"))
         if not created or created > limit or await db.job_marks.find_one({"kind": "followup_30d", "key": contact["id"]}):
             continue
-        property = await db.properties.find_one({"id": contact.get("property_id")}, {"_id": 0, "trades": 1, "rge_types": 1, "region": 1})
+        property = await db.properties.find_one({"id": contact.get("property_id")}, {"_id": 0, "title": 1})
         token = secrets.token_urlsafe(24)
-        trades = [taxonomy.trade_label(t) for t in ((property or {}).get("trades") or []) if taxonomy.trade_by_id(t)]
-        label = ", ".join(trades or (property or {}).get("rge_types") or []) + (f" – {property.get('region')}" if property and property.get("region") else "")
+        label = (property or {}).get("title") or ""
         # Questionnaire non transactionnel : lien de désinscription, notifications_opt_out, une relance par jour
         if not await send_reminder(contact.get("buyer_id"), "followup_30d", contact["id"], now, "followup_30d",
                                    property_label=label or f"annonce {site_name()}", link_base=site_url(f"/suivi?token={token}")):
@@ -7562,14 +6933,12 @@ async def job_seller_relaunch(now: datetime) -> int:
         created = _parse_dt(seller.get("created_at"))
         if not created or created > limit:
             continue
-        listings = await db.properties.find({"$or": [{"seller_id": seller["id"]}, {"president_id": seller["id"]}]},
+        listings = await db.properties.find({"seller_id": seller["id"]},
                                            {"_id": 0, "id": 1, "status": 1, "created_at": 1, "updated_at": 1}).to_list(50)
         if not listings:
-            # Les présidents invités n'ont pas vocation à créer d'annonce
-            invited = await db.president_invitations.find_one({"accepted_by": seller["id"]})
-            # Prospection : lien de désinscription et notifications_opt_out (SPEC §6.1), une relance par jour
-            if not invited and await send_reminder(seller["id"], "seller_no_listing", seller["id"], now, "seller_no_listing",
-                                                   link=site_url("/seller/create")):
+            # Prospection : lien de désinscription et notifications_opt_out, une relance par jour
+            if await send_reminder(seller["id"], "seller_no_listing", seller["id"], now, "seller_no_listing",
+                                   link=site_url("/seller/create")):
                 sent += 1
         elif any(l.get("status") == "draft" and (_parse_dt(l.get("created_at")) or now) <= limit for l in listings) \
                 and not is_user_verified(seller) \
@@ -7594,14 +6963,18 @@ async def send_reminder(user_id: Optional[str], kind: str, key: str, now: dateti
     return True
 
 MANDATE_REMINDER_DAYS = (1, 4, 10)
-MANDATE_OBJECTIONS = {
-    1: ("« Je ne veux pas d'exclusivité. »", "Le mandat est simple, non exclusif : vous restez libre de vendre par vous-même ou avec d'autres "
-        "intermédiaires, sans pénalité. Rien n'est dû si l'acquéreur ne vous a pas été présenté par la plateforme."),
-    4: ("« Combien ça coûte ? »", "Rien avant la vente. La commission (6 % HT, 3 % HT au-delà d'un million, minimum 4 000 € HT) n'est due qu'à "
-        "la signature de l'acte, et seulement si le repreneur vous a été présenté par la plateforme."),
-    10: ("« Je peux résilier ? »", "À tout moment, depuis votre espace, avec un préavis de 15 jours. Le mandat dure 12 mois et ne se prolonge "
-         "qu'avec votre accord exprès."),
-}
+def mandate_objections() -> dict:
+    """Une objection traitée à chaque relance « mandat à signer » (J+1, J+4, J+10) ; chiffres issus de la configuration"""
+    return {
+        1: ("« Je ne veux pas d'exclusivité. »", "Le mandat est simple, non exclusif : vous restez libre de vendre vous-même ou avec "
+            "d'autres intermédiaires, sans pénalité. Rien n'est dû si l'acquéreur ne vous a pas été présenté par la plateforme."),
+        4: ("« Combien ça coûte ? »", "Rien avant la vente. Les honoraires (" + commission_scale_text().split(", à la charge")[0]
+            + ") ne sont dus qu'à la signature de l'acte authentique, réglés par le notaire sur le prix, et seulement si "
+            "l'acquéreur vous a été présenté par la plateforme."),
+        10: ("« Je peux résilier ? »", f"À tout moment, depuis votre espace, avec un préavis de {MANDATE_NOTICE_DAYS} jours, et sans "
+             f"délai pendant les {MANDATE_WITHDRAWAL_DAYS} jours qui suivent la signature (rétractation). Le mandat dure "
+             f"{MANDATE_DURATION_MONTHS} mois et ne se prolonge qu'avec votre accord exprès."),
+    }
 
 async def job_mandate_reminders(now: datetime) -> int:
     """Annonce prête, mandat non signé : relances J+1, J+4, J+10 (une objection traitée à chaque envoi)"""
@@ -7615,7 +6988,7 @@ async def job_mandate_reminders(now: datetime) -> int:
         if not due:
             continue
         day = due[-1]
-        title, text = MANDATE_OBJECTIONS[day]
+        title, text = mandate_objections()[day]
         # Signature en cours : relance transactionnelle (la page de désinscription promet que les signatures continuent)
         if await send_reminder(c.get("seller_id"), "mandate_reminder", f"{c['id']}:{day}", now, "mandate_reminder", transactional=True,
                                days=str(elapsed), plural="s" if elapsed > 1 else "", objection_title=title, objection_text=text,
@@ -7708,20 +7081,21 @@ SELLER_INACTIVITY_DAYS = 60
 SELLER_INACTIVITY_WARNING_DAYS = 53
 
 def price_range_for(property: dict) -> Optional[dict]:
-    """Fourchette indicative (estimator.compute_estimate) à partir des chiffres de l'annonce ; None si incalculable"""
+    """Fourchette indicative par le rendement (estimator.compute_estimate) à partir des chiffres de l'annonce ; None si
+    incalculable"""
     estimator = LOADED_MODULES.get("estimator")
     if not estimator:
         return None
     try:
-        return estimator.compute_estimate(property.get("ca_n"), property.get("ebitda"), property.get("staff_count"),
-                                          bool(property.get("has_maintenance_contracts")), bool(property.get("technical_referent_stays")),
-                                          bool(property.get("key_staff_stays")))
+        return estimator.compute_estimate(property.get("property_type"), property.get("lease_type"), property.get("department"),
+                                          property.get("rent_monthly"), property.get("property_tax"),
+                                          property.get("non_recoverable_charges"), property.get("dpe_class"))
     except (ValueError, TypeError):
         return None
 
 async def job_seller_lifecycle(now: datetime) -> int:
     """Annonces en ligne : 14 jours sans contact (leviers), 30 jours (prix face à la fourchette), 60 jours sans connexion
-    du cédant (avertissement à J-7 puis mise en pause)"""
+    du vendeur (avertissement à J-7 puis mise en pause)"""
     sent = 0
     sellers = {}
     async for c in db.properties.find({"status": "published"}, {"_id": 0}):
@@ -7742,17 +7116,17 @@ async def job_seller_lifecycle(now: datetime) -> int:
             if estimate:
                 asking = float(c.get("asking_price") or 0)
                 if asking > estimate["high"]:
-                    advice = ("Votre prix est au-dessus de la fourchette : les repreneurs comparent avant d'écrire. "
-                              "Un prix ramené dans la fourchette, ou un argument chiffré dans la description (contrats récurrents, carnet de commandes), relance les contacts.")
+                    advice = ("Votre prix est au-dessus de la fourchette : les acquéreurs comparent les rendements avant d'écrire. "
+                              "Un prix ramené dans la fourchette, ou un argument concret dans la description (bail récent, travaux faits, locataire stable), relance les contacts.")
                 elif asking < estimate["low"]:
-                    advice = "Votre prix est en dessous de la fourchette : vérifiez que vos chiffres sont bien à jour avant de le laisser ainsi."
+                    advice = "Votre prix est en dessous de la fourchette : vérifiez que le loyer et les charges saisis sont à jour avant de le laisser ainsi."
                 else:
                     advice = "Votre prix est dans la fourchette : les contacts dépendent maintenant de la qualité de la description et de votre réactivité."
                 activity = (f"Elle a reçu {contacts} contact{'s' if contacts > 1 else ''}." if contacts
                             else "Elle n'a pas encore reçu de contact.")
                 if await send_reminder(seller_id, "seller_price_30d", c["id"], now, "seller_price_30d", property_title=title,
                                        activity_line=activity, asking_price=fmt_eur_fr(asking), low=fmt_eur_fr(estimate["low"]),
-                                       high=fmt_eur_fr(estimate["high"]), method=estimate.get("method", "méthode par multiples"),
+                                       high=fmt_eur_fr(estimate["high"]), method="méthode du rendement",
                                        advice=advice, link=site_url("/seller/dashboard")):
                     sent += 1
                     continue
@@ -7781,14 +7155,14 @@ BUYER_IDENTITY_REMINDER_DAYS = (1, 3, 10)
 BUYER_NDA_REMINDER_DAYS = (2, 7)
 
 async def job_buyer_reminders(now: datetime) -> int:
-    """Demande acceptée : identité à vérifier J+1/J+3/J+10, NDA à signer J+2/J+7 ; accès ouvert sans consultation à J+3"""
+    """Demande acceptée : identité à vérifier J+1/J+3/J+10, engagement à signer J+2/J+7 ; accès ouvert sans consultation à J+3"""
     sent = 0
     async for a in db.dataroom_access.find({"status": {"$in": ["accepted", "validated", "loi_pending", "granted"]}}, {"_id": 0}):
         buyer = await db.users.find_one({"id": a.get("buyer_id")}, USER_SAFE_PROJECTION)
         property = await db.properties.find_one({"id": a.get("property_id")}, {"_id": 0, "id": 1, "title": 1, "status": 1})
         if not buyer or not property or property.get("status") not in ("published", "paused"):
             continue
-        title = property.get("title") or "l'entreprise"
+        title = property.get("title") or "le bien"
         link = site_url(f"/dataroom/{property['id']}")
         if a.get("status") == "granted":
             granted = _parse_dt(a.get("granted_at"))
@@ -7816,7 +7190,7 @@ async def job_buyer_reminders(now: datetime) -> int:
     return sent
 
 async def job_seller_weekly(now: datetime) -> int:
-    """Hebdo cédant : vues, favoris et contacts de la semaine sur ses annonces en ligne (jamais de compteur à zéro)"""
+    """Hebdo vendeur : vues, favoris et contacts de la semaine sur ses annonces en ligne (jamais de compteur à zéro)"""
     sent = 0
     week = _period_keys(now)["weekly"]
     since = (now - timedelta(days=7)).isoformat()
@@ -7843,7 +7217,7 @@ async def job_seller_weekly(now: datetime) -> int:
             await db.properties.update_one({"id": c["id"]}, {"$set": {"weekly_snapshot": {"views": int(c.get("views") or 0), "at": now.isoformat()}}})
         intro = "Voici l'activité de la semaine sur vos annonces."
         todo = (f"{pending} action{'s' if pending > 1 else ''} vous attend{'ent' if pending > 1 else ''} (messages non lus, demandes de dossier)."
-                if pending else "Pour attirer plus de repreneurs : une description complète, les cases « ce qui rassure » et un prix dans la fourchette d'estimation.")
+                if pending else "Pour attirer plus d'acquéreurs : une description complète, un dossier du bien déjà rempli (bail, quittances, diagnostics) et un prix cohérent avec le rendement du marché.")
         await email_user(seller_id, "seller_weekly", unsubscribe_url=unsubscribe_link_for_user(seller_id), intro=intro, lines="".join(lines),
                          todo_line=todo, link=site_url("/seller/dashboard"))
         sent += 1
@@ -7866,7 +7240,7 @@ async def job_nps(now: datetime) -> int:
             scores = " ".join(f'<a href="{site_url(f"/api/nps/{token}?score={n}")}" style="display:inline-block;margin:2px;padding:8px 10px;'
                               f'border:1px solid #e3e7ee;border-radius:6px;text-decoration:none;color:#0b1220">{n}</a>' for n in range(11))
             if await send_reminder(user_id, "nps_after_sale", f"{cl['id']}:{role}", now, "nps_after_sale",
-                                   property_label=cl.get("property_label") or "l'entreprise", scores=scores):
+                                   property_label=cl.get("property_label") or "votre bien", scores=scores):
                 sent += 1
     return sent
 
@@ -7948,13 +7322,13 @@ async def job_backup_to_s3(now: datetime) -> int:
 # backup_s3 est horaire (idempotent par nom d'archive) : l'archive de la nuit part dans l'heure qui suit sa création
 HOURLY_JOBS = (("followups", job_followups), ("seller_relaunch", job_seller_relaunch), ("backup_s3", job_backup_to_s3))
 DAILY_JOBS = [("admin_digest", job_admin_digest),
-              # Messages sans réponse du cédant depuis 3 jours : un récapitulatif par cédant et par jour au plus
+              # Messages sans réponse du vendeur depuis 3 jours : un récapitulatif par vendeur et par jour au plus
               ("seller_reminders", job_seller_reminders),
               # Contrats (SPEC §3.2, §3.4) : échéance des mandats (J-30 puis expiration), dénonciations effectives, offres expirées
               ("mandate_expiry", job_mandate_expiry), ("mandate_denounce_effective", job_mandate_denounce_effective),
               ("offers_expiry", job_offers_expiry),
-              # Parcours (SPEC §6.1, §6.4) : demandes de dossier (J+2/J+5, expiration J+10), mandat à signer (J+1/4/10),
-              # vie de l'annonce (14 j, 30 j, 60 j sans connexion), repreneur (identité, NDA, data room), NPS après vente
+              # Parcours : demandes de dossier (J+2/J+5, expiration J+10), mandat à signer (J+1/4/10),
+              # vie de l'annonce (14 j, 30 j, 60 j sans connexion), acquéreur (identité, engagement, dossier), NPS après vente
               ("dataroom_requests", job_dataroom_requests), ("mandate_reminders", job_mandate_reminders),
               ("seller_lifecycle", job_seller_lifecycle), ("buyer_reminders", job_buyer_reminders), ("nps", job_nps),
               # Durées de conservation de la politique de confidentialité (purge TTL, SPEC §6.4)
@@ -8036,7 +7410,7 @@ async def run_jobs_now(current_user: dict = Depends(require_admin)):
 # Chaque module expose `router = APIRouter()` (chemins relatifs à /api) et, facultatif, daily_job / weekly_job / monthly_job.
 # Un module absent est ignoré ; toute autre erreur d'import est propagée (un module cassé ne doit pas passer inaperçu).
 LOADED_MODULES = {}
-for _module_name in ("events", "estimator", "closing", "veille", "transmissibility", "testmode"):
+for _module_name in ("events", "estimator", "closing", "bail", "testmode"):
     try:
         _module = importlib.import_module(_module_name)
     except ModuleNotFoundError as e:
@@ -8088,11 +7462,13 @@ async def startup():
     await db.email_verifications.create_index("token_hash")
     await db.login_otps.create_index("user_id")
     await db.password_resets.create_index("token_hash")
-    # Modules : statistiques, estimateur, veille BODACC, étape de vente, factures, « À faire »
+    # Modules : statistiques, estimateur, étape de vente, factures, « À faire », justificatifs de propriété
     await db.events.create_index([("day", 1), ("name", 1)])
     await db.estimates.create_index("confirm_token_hash")
     await db.estimates.create_index("email")
-    await db.incidents.create_index([("siren", 1), ("event.id", 1)])
+    await db.ownership_proofs.create_index("property_id")
+    await db.properties.create_index("address_key")
+    await db.properties.create_index("ownership.status")
     await db.dataroom_access.create_index([("property_id", 1), ("buyer_id", 1)])
     await db.closings.create_index("offer_id", unique=True)
     await db.closings.create_index([("status", 1), ("updated_at", -1)])

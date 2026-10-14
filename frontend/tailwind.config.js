@@ -1,7 +1,7 @@
 /** @type {import('tailwindcss').Config} */
-// Direction design (docs/refonte-2026-10/SPEC.md §5.3) : fond clair, un seul bloc sombre, palette
-// navy / surface / bordures / action, vert réservé aux badges de vérification, ambre pour les alertes.
-// Les mêmes valeurs sont déclarées en variables CSS dans src/index.css (:root).
+// Direction design (docs/venteloc/SPEC.md §11) : fond clair, palette navy (texte) / surface / bordures / action teal
+// (#0f766e, survol #115e59), vert réservé aux badges de vérification, ambre pour les alertes (DPE, impayés), pastilles
+// DPE aux couleurs réglementaires. Les mêmes valeurs sont déclarées en variables CSS dans src/index.css (:root).
 module.exports = {
     darkMode: ["class"],
     content: [
@@ -26,21 +26,36 @@ module.exports = {
   			sm: 'calc(var(--radius) - 4px)'
   		},
   		colors: {
-  			// Identité (SPEC §5.3). `brand.navy` reste la couleur du texte et des boutons ;
-  			// `brand.green` est réservé aux badges de vérification et à la fin du nom de marque (logo).
+  			// Identité (SPEC §11). `brand.navy` : texte ; `brand.teal` : action (boutons, liens, focus) ;
+  			// `brand.green` : uniquement les badges de vérification. `brand.blue` est l'ancien nom de la couleur
+  			// d'action, conservé comme alias de teal (toutes les pages héritées passent ainsi à la nouvelle palette).
   			brand: {
   				navy: '#0b1220',
   				'navy-light': '#1a2436',
   				ink: '#070c16',
+  				teal: '#0f766e',
+  				'teal-dark': '#115e59',
+  				'teal-soft': '#f0fdfa',
+  				'teal-line': '#99f6e4',
   				green: '#15803d',
   				'green-dark': '#166534',
   				'green-soft': '#dcfce7',
-  				blue: '#1d4ed8',
-  				'blue-soft': '#eff6ff',
+  				blue: '#0f766e',
+  				'blue-soft': '#f0fdfa',
   				amber: '#b45309',
   				'amber-soft': '#fef3c7',
   				surface: '#f5f7fa',
   				line: '#e3e7ee'
+  			},
+  			// Étiquette énergie (arrêté du 31 mars 2021) : couleurs réglementaires des classes A à G
+  			dpe: {
+  				A: '#009c6d',
+  				B: '#52b153',
+  				C: '#a5cc74',
+  				D: '#f4e70f',
+  				E: '#f0b40f',
+  				F: '#eb8235',
+  				G: '#d7221f'
   			},
   			background: 'hsl(var(--background))',
   			foreground: 'hsl(var(--foreground))',

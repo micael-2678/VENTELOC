@@ -2,8 +2,8 @@
 Purge des données de test (MODE-TEST-ET-APP.md §B.2.11). Dry-run par défaut.
 
 Supprime tout ce qui porte `is_test: true` ou qui est rattaché à un utilisateur `is_test` (directement ou par une annonce,
-un contrat, une offre, une étape de vente, une conversation de test) : utilisateurs, annonces, photos et documents de la
-data room (fichiers stockés compris, via storage.py), conversations, messages, demandes de dossier, contrats et preuves de
+un contrat, une offre, une étape de vente, une conversation de test) : utilisateurs, annonces, photos, justificatifs de
+propriété et documents du dossier du bien (fichiers stockés compris, via storage.py), conversations, messages, demandes de dossier, contrats et preuves de
 signature, offres, étapes de vente, factures de test, alertes, événements, estimations, e-mails de la boîte de test et
 compteurs `*_test` (registre des mandats de test, factures de test), journaux d'identité révélée. Une donnée sans `is_test`
 et sans lien vers une donnée de test n'est jamais touchée.
@@ -29,7 +29,7 @@ from storage import delete_file  # noqa: E402
 
 TEST_COUNTER_SUFFIX = "_test"
 # Collections dont les documents portent un fichier stocké (base64 en base, ou objet S3 à supprimer)
-FILE_COLLECTIONS = ("property_photos", "dataroom")
+FILE_COLLECTIONS = ("property_photos", "dataroom", "ownership_proofs")
 
 
 def _any(*clauses) -> dict:
@@ -78,7 +78,7 @@ async def purge_plan(db) -> tuple:
     protected_properties = [c["property_id"] for c in protected["contracts"] if c.get("property_id")]
     protected_invoices = [i["id"] for i in protected["invoices"]]
     user_ids = await _ids(db.users, is_test)
-    property_ids = await _ids(db.properties, _except(_any(is_test, _in("seller_id", user_ids), _in("president_id", user_ids)),
+    property_ids = await _ids(db.properties, _except(_any(is_test, _in("seller_id", user_ids)),
                                                    "id", protected_properties))
     contract_ids = await _ids(db.generated_contracts, _except(_any(is_test, _in("seller_id", user_ids), _in("buyer_id", user_ids),
                                                                    _in("property_id", property_ids)), "id", protected_contracts))
@@ -101,13 +101,13 @@ async def purge_plan(db) -> tuple:
         ("favorites", _any(by_user(), by_property)),
         ("property_photos", _any(is_test, by_property)),
         ("dataroom", _any(is_test, by_property, by_user("uploaded_by"))),
+        ("ownership_proofs", _any(is_test, by_property, by_user("uploaded_by"))),
         ("dataroom_access_logs", _any(by_property, by_user(), by_user("buyer_id"))),
         ("dataroom_access", _any(is_test, by_property, by_user("buyer_id"))),
         ("messages", _any(_in("conversation_id", conversation_ids), by_property, by_user("sender_id"), by_user("receiver_id"))),
         ("conversations", _any(is_test, _in("id", conversation_ids))),
         ("contacts", _any(by_property, by_user("buyer_id"))),
         ("contact_attempts", _any(by_property, by_user("sender_id"), by_user("receiver_id"))),
-        ("commercial_info_requests", _any(by_property, by_user("buyer_id"), by_user("seller_id"))),
         ("followups", _any(by_property, by_user("buyer_id"))),
         ("documents", _except(_any(is_test, _in("contract_id", contract_ids), by_property, by_user("signer_id")),
                               "contract_id", protected_contracts)),
@@ -119,11 +119,8 @@ async def purge_plan(db) -> tuple:
         ("todos", _any(_in("ref.property_id", property_ids), _in("ref.closing_id", closing_ids), _in("ref.invoice_id", invoice_ids))),
         ("invoices", _except(_any(is_test, _in("id", invoice_ids)), "id", protected_invoices)),
         ("closings", _any(is_test, _in("id", closing_ids))),
-        ("incidents", by_property),
         # Journal d'audit chaîné : seules les chaînes des annonces de test sont supprimées (jamais un maillon d'une annonce réelle)
         ("audit_logs", by_property),
-        ("president_invitations", _any(by_property, by_user("invited_by"))),
-        ("dirigeant_verifications", by_user()),
         ("email_verifications", by_user()),
         ("login_otps", by_user()),
         ("password_resets", by_user()),
@@ -145,7 +142,7 @@ async def purge_test_data(db, dry_run: bool = True) -> dict:
     purged_invoice_ids = await _ids(db.invoices, invoices_query)
     unlinked = {"invoice_id": {"$in": purged_invoice_ids}, "is_test": {"$ne": True}}
     unlinked_count = await db.closings.count_documents(unlinked) if purged_invoice_ids else 0
-    # Une annonce réelle garde sa liste nominative de repreneurs présentés : seuls les repreneurs de test en sont retirés
+    # Une annonce réelle garde sa liste nominative d'acquéreurs présentés : seuls les acquéreurs de test en sont retirés
     presented = {"presented_buyers.buyer_id": {"$in": user_ids}, "id": {"$nin": property_ids}}
     presented_count = await db.properties.count_documents(presented) if user_ids else 0
     if unlinked_count and not dry_run:

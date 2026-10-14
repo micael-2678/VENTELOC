@@ -1,10 +1,20 @@
-// Score de complétude du profil repreneur (API.md §1) : même barème que buyer_profile_score() côté serveur.
-// project_type 15 · budget_max 15 · apport 10 · financing 10 · zones 10 · trades 10 · horizon 10 · phone 10 ·
-// SIREN vérifié 10 (posé par le serveur via l'open data : jamais compté localement sans `siren_verified`).
+// Score de complétude du profil acquéreur (SPEC §4, API.md §1) : même barème que buyer_profile_score() côté serveur.
+// project_type 15 · budget_max 15 · apport 10 · financing 10 · zones 10 · property_types 10 · min_yield 10 ·
+// horizon 10 · téléphone 10 = 100. `siren_verified` reste un badge (« société vérifiée »), sans points.
 // Contact possible dès 40 ; acceptation automatique des demandes de dossier dès 50.
 
 export const SCORE_CONTACT_MIN = 40;
 export const SCORE_AUTO_ACCEPT_MIN = 50;
+
+// Rendement brut minimum visé : 0 à 20 % (API.md §1)
+export const MIN_YIELD_MAX = 20;
+
+export const HORIZONS = [
+  { id: '0-6', label: 'Sous 6 mois' },
+  { id: '6-12', label: 'Dans 6 à 12 mois' },
+  { id: '12+', label: 'Dans plus de 12 mois' },
+];
+export const horizonLabel = (id) => (HORIZONS.find((h) => h.id === id) || {}).label || '';
 
 export const SCORE_WEIGHTS = [
   { key: 'project_type', points: 15, label: 'Type de projet' },
@@ -12,23 +22,29 @@ export const SCORE_WEIGHTS = [
   { key: 'apport', points: 10, label: 'Apport' },
   { key: 'financing', points: 10, label: 'Financement' },
   { key: 'zones', points: 10, label: 'Zones recherchées' },
-  { key: 'trades', points: 10, label: 'Métiers recherchés' },
-  { key: 'horizon', points: 10, label: 'Horizon' },
+  { key: 'property_types', points: 10, label: 'Types de biens recherchés' },
+  { key: 'min_yield', points: 10, label: 'Rendement minimum visé' },
+  { key: 'horizon', points: 10, label: 'Horizon d\'achat' },
   { key: 'phone', points: 10, label: 'Téléphone' },
-  { key: 'siren_verified', points: 10, label: 'Société vérifiée (SIREN)' },
 ];
+
+const toNumber = (v) => {
+  if (v === null || v === undefined) return NaN;
+  const s = String(v).replace(/\s/g, '').replace(',', '.');
+  if (!s) return NaN;
+  return Number(s);
+};
 
 const filled = (key, profile, phone) => {
   if (key === 'phone') return String(phone || '').replace(/\D/g, '').length >= 9;
-  if (key === 'siren_verified') return profile?.siren_verified === true;
   const v = profile ? profile[key] : undefined;
   if (Array.isArray(v)) return v.length > 0;
-  if (typeof v === 'number') return Number.isFinite(v) && v > 0;
+  if (key === 'budget_max' || key === 'apport' || key === 'min_yield') {
+    const n = toNumber(v);
+    return Number.isFinite(n) && n > 0;
+  }
   if (v === null || v === undefined) return false;
-  const s = String(v).trim();
-  if (!s) return false;
-  if (key === 'budget_max' || key === 'apport') return Number(s) > 0;
-  return true;
+  return String(v).trim() !== '';
 };
 
 // → { score, missing: [{key, points, label}], done: [...] }
@@ -53,7 +69,8 @@ export const EMPTY_BUYER_PROFILE = {
   apport: '',
   financing: '',
   zones: [],
-  trades: [],
+  property_types: [],
+  min_yield: '',
   horizon: '',
   siren: '',
   company_name: '',
@@ -64,16 +81,18 @@ export const EMPTY_BUYER_PROFILE = {
 export const buyerProfilePayload = (profile) => {
   const p = profile || {};
   const num = (v) => {
-    const n = Number(String(v == null ? '' : v).replace(/\s/g, '').replace(',', '.'));
-    return Number.isFinite(n) && String(v || '').trim() !== '' ? n : null;
+    const n = toNumber(v);
+    return Number.isFinite(n) ? n : null;
   };
+  const yieldValue = num(p.min_yield);
   const out = {
     project_type: p.project_type || null,
     budget_max: num(p.budget_max),
     apport: num(p.apport),
     financing: p.financing || null,
     zones: Array.isArray(p.zones) ? p.zones : [],
-    trades: Array.isArray(p.trades) ? p.trades : [],
+    property_types: Array.isArray(p.property_types) ? p.property_types : [],
+    min_yield: yieldValue === null ? null : Math.max(0, Math.min(MIN_YIELD_MAX, Math.round(yieldValue * 10) / 10)),
     horizon: p.horizon || null,
   };
   const siren = String(p.siren || '').replace(/\D/g, '');
@@ -86,14 +105,16 @@ export const buyerProfilePayload = (profile) => {
 // Profil renvoyé par l'API → valeurs du formulaire
 export const buyerProfileFromUser = (profile) => {
   const p = profile || {};
+  const str = (v) => (v === null || v === undefined ? '' : String(v));
   return {
     ...EMPTY_BUYER_PROFILE,
     project_type: p.project_type || '',
-    budget_max: p.budget_max == null ? '' : String(p.budget_max),
-    apport: p.apport == null ? '' : String(p.apport),
+    budget_max: str(p.budget_max),
+    apport: str(p.apport),
     financing: p.financing || '',
     zones: Array.isArray(p.zones) ? p.zones : [],
-    trades: Array.isArray(p.trades) ? p.trades : [],
+    property_types: Array.isArray(p.property_types) ? p.property_types : [],
+    min_yield: str(p.min_yield).replace('.', ','),
     horizon: p.horizon || '',
     siren: p.siren || '',
     company_name: p.company_name || '',

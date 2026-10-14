@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { ArrowRight, ChevronLeft, ChevronRight, RotateCcw, SlidersHorizontal, X } from 'lucide-react';
+import { ArrowRight, ChevronDown, ChevronLeft, ChevronRight, RotateCcw, SlidersHorizontal, X } from 'lucide-react';
 import { axiosInstance } from '@/App';
 import AppLayout from '@/components/layout/AppLayout';
 import { useSession } from '@/components/layout/session';
-import { canSell, sellPathFor } from '@/components/layout/AppHeader';
-import { ListingCard, AlertForm, listingTitle } from '@/components/shared';
-import { deActivity, readableSpaces } from '@/components/shared/formatters';
+import { canSell, SELL_PATH } from '@/components/layout/AppHeader';
+import { ListingCard, AlertForm, listingTitle, listingPath, PROPERTY_TYPE_PLURALS } from '@/components/shared';
+import { readableSpaces } from '@/components/shared/formatters';
 import ListingFilters from '@/components/shared/ListingFilters';
 import { BTN_PRIMARY, BTN_SECONDARY } from '@/components/shared/buttonStyles';
 import {
@@ -15,30 +15,64 @@ import {
   activeFilterCount, filterChips,
 } from '@/components/shared/listingFilters';
 import { useSeo, SITE_URL } from '@/lib/seo';
-import { TRADES, inRegion } from '@/lib/referentiels';
+import { inRegion } from '@/lib/referentiels';
 import { BRAND, LEGAL } from '@/lib/brand';
 import { trackEvent } from '@/lib/analytics';
 import { content, fillText } from '@/seo';
 import { itemListLd, organizationLd, websiteLd } from '@/seo/schema';
 
-// Page des annonces (/) — MODE-TEST-ET-APP.md §A.3. Vitrine de l'application : en-tête sobre, filtres (colonne
-// latérale sur grand écran, panneau plein écran sur mobile), grille de cartes, pagination de 24, alerte sans compte,
-// encart cédant. Les filtres vivent dans l'URL (listingFilters.js) : partageables et utilisables depuis WordPress.
-// Jamais de compteur à zéro : le nombre d'annonces n'apparaît qu'à partir de 3 (en-tête) ou d'1 (recherche filtrée).
+// Page des annonces (/) — docs/venteloc/SPEC.md §5.1. Vitrine de l'application : en-tête sobre (H1, phrase, compteur
+// seulement à partir de 3), « Comment ça marche » repliable, filtres (colonne latérale sur grand écran, panneau plein
+// écran sur mobile), tri, grille de cartes, pagination de 24, alerte sans compte, encart vendeur → /vendre.
+// Les filtres vivent dans l'URL (listingFilters.js) : partageables et utilisables depuis WordPress.
+// Jamais de compteur à zéro : le nombre de biens n'apparaît qu'à partir de 3 (en-tête) ou d'1 (recherche filtrée).
 
 const L = content.listings;
 const NUMBER = new Intl.NumberFormat('fr-FR');
-const annonces = (n) => `${readableSpaces(NUMBER.format(n))} annonce${n > 1 ? 's' : ''}`;
+const annonces = (n) => `${readableSpaces(NUMBER.format(n))} bien${n > 1 ? 's' : ''}`;
 
-// Titre d'une recherche ciblée (lien filtré depuis WordPress, au plus un métier et une région) : « Entreprises de PAC,
-// climatisation à vendre en Bretagne » ; null pour la page générale ou une combinaison de plusieurs métiers
+// Titre d'une recherche ciblée (lien filtré depuis WordPress : au plus un type de bien et une région) : « Appartements
+// loués à vendre en Bretagne » ; null pour la page générale ou une combinaison de plusieurs types
 export const searchHeading = (filters) => {
-  const trades = filters?.trades || [];
-  if (trades.length > 1 || (!trades.length && !filters?.region)) return null;
-  const trade = trades.length ? TRADES.find((t) => t.id === trades[0]) : null;
-  if (trades.length && !trade) return null;
-  const what = trade ? `Entreprises ${deActivity(trade.short)}` : 'Entreprises du bâtiment';
+  const types = filters?.types || [];
+  if (types.length > 1 || (!types.length && !filters?.region)) return null;
+  const what = types.length ? PROPERTY_TYPE_PLURALS[types[0]] : 'Biens loués';
+  if (!what) return null;
   return `${what} à vendre${filters.region ? ` ${inRegion(filters.region)}` : ''}`;
+};
+
+// « Comment ça marche » en 3 étapes, repliable (replié par défaut sur mobile, ouvert sur grand écran)
+const HowItWorks = () => {
+  const [open, setOpen] = useState(() => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(min-width: 1024px)').matches);
+  const panelId = useId();
+  return (
+    <div className="mt-5 rounded-2xl border border-brand-line bg-brand-surface min-w-0" data-testid="how-it-works">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-controls={panelId}
+        className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left font-semibold text-brand-navy rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-teal"
+        data-testid="how-it-works-toggle"
+      >
+        {L.howTitle}
+        <ChevronDown className={`w-5 h-5 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
+      </button>
+      {open && (
+        <ol id={panelId} className="grid gap-4 sm:grid-cols-3 px-4 pb-4">
+          {L.howSteps.map((step, i) => (
+            <li key={step.title} className="flex gap-3 min-w-0">
+              <span className="shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full bg-brand-teal text-white text-sm font-bold tabular" aria-hidden="true">{i + 1}</span>
+              <div className="min-w-0">
+                <p className="font-semibold text-brand-navy leading-snug">{step.title}</p>
+                <p className="text-sm text-gray-600 leading-relaxed mt-0.5">{step.text}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
 };
 
 // Pages affichées : 1 … p-1 p p+1 … n
@@ -54,18 +88,20 @@ export const pageItems = (current, count) => {
 };
 
 const CardSkeleton = () => (
-  <li className="card p-5 flex flex-col gap-3 animate-pulse" aria-hidden="true">
-    <span className="h-5 w-32 rounded-full bg-brand-surface" />
-    <span className="h-5 w-11/12 rounded bg-brand-surface" />
-    <span className="h-5 w-2/3 rounded bg-brand-surface" />
-    <span className="h-4 w-1/2 rounded bg-brand-surface" />
-    <span className="mt-4 h-10 rounded bg-brand-surface" />
-    <span className="h-7 w-28 rounded bg-brand-surface" />
+  <li className="card overflow-hidden flex flex-col animate-pulse" aria-hidden="true">
+    <span className="aspect-[16/10] bg-brand-surface" />
+    <span className="p-5 flex flex-col gap-3">
+      <span className="h-5 w-32 rounded-full bg-brand-surface" />
+      <span className="h-5 w-11/12 rounded bg-brand-surface" />
+      <span className="h-4 w-1/2 rounded bg-brand-surface" />
+      <span className="h-14 rounded-xl bg-brand-surface" />
+      <span className="h-7 w-28 rounded bg-brand-surface" />
+    </span>
   </li>
 );
 
 const SellerCallout = ({ to, onClick, className = '' }) => (
-  <aside className={`rounded-2xl border border-brand-line bg-brand-surface p-5 min-w-0 ${className}`} aria-label={L.sellerTitle} data-testid="seller-callout">
+  <aside className={`rounded-2xl border border-brand-teal-line bg-brand-teal-soft p-5 min-w-0 ${className}`} aria-label={L.sellerTitle} data-testid="seller-callout">
     <p className="font-display font-bold text-brand-navy">{L.sellerTitle}</p>
     <p className="text-sm text-gray-600 mt-1 leading-relaxed">{L.sellerText}</p>
     <Link to={to} onClick={onClick} className="btn-link text-sm mt-3">
@@ -77,7 +113,7 @@ const SellerCallout = ({ to, onClick, className = '' }) => (
 // Libellé du bouton du panneau mobile selon le nombre d'annonces du brouillon (null : pas encore connu)
 export const showResultsLabel = (total) => {
   if (total === null || total === undefined) return L.showResults;
-  if (total === 0) return 'Aucune annonce : créer une alerte';
+  if (total === 0) return 'Aucun bien : créer une alerte';
   return `Afficher ${annonces(total)}`;
 };
 
@@ -116,7 +152,7 @@ const MobileFilters = ({ open, initial, onClose, onApply }) => {
     <div className="fixed inset-0 z-50 bg-white flex flex-col lg:hidden" role="dialog" aria-modal="true" aria-labelledby={titleId} data-testid="mobile-filters">
       <div className="flex items-center justify-between gap-3 px-4 h-14 border-b border-brand-line shrink-0">
         <h2 id={titleId} className="font-display text-lg font-bold text-brand-navy">{L.filtersTitle}{count > 0 ? ` (${count})` : ''}</h2>
-        <button ref={closeRef} type="button" onClick={onClose} className="inline-flex items-center justify-center w-10 h-10 rounded-xl text-brand-navy hover:bg-brand-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue" aria-label="Fermer les filtres">
+        <button ref={closeRef} type="button" onClick={onClose} className="inline-flex items-center justify-center w-10 h-10 rounded-xl text-brand-navy hover:bg-brand-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-teal" aria-label="Fermer les filtres">
           <X className="w-6 h-6" aria-hidden="true" />
         </button>
       </div>
@@ -150,7 +186,7 @@ const Pagination = ({ page, pages, hrefFor }) => (
         to={hrefFor(p)}
         aria-current={p === page ? 'page' : undefined}
         aria-label={`Page ${p}`}
-        className={`inline-flex items-center justify-center min-w-10 h-10 px-2 rounded-xl font-semibold tabular ${p === page ? 'bg-brand-navy text-white' : 'border border-brand-line bg-white text-brand-navy hover:border-brand-navy/40'}`}
+        className={`inline-flex items-center justify-center min-w-10 h-10 px-2 rounded-xl font-semibold tabular ${p === page ? 'bg-brand-teal text-white' : 'border border-brand-line bg-white text-brand-navy hover:border-brand-navy/40'}`}
       >
         {p}
       </Link>
@@ -171,7 +207,7 @@ const ListingsPage = ({ user: userProp }) => {
   const sortId = useId();
   const resultsRef = useRef(null);
 
-  // Anciens paramètres (?metiers=, ?rge_type=, region en toutes lettres…) → URL canonique, sans entrée d'historique
+  // Région en toutes lettres, tri au format de l'API… → URL canonique, sans entrée d'historique
   const canonical = useMemo(() => canonicalSearch(location.search), [location.search]);
   useEffect(() => {
     if (canonical !== null) navigate({ pathname: LISTINGS_PATH, search: canonical ? `?${canonical}` : '', hash: location.hash }, { replace: true });
@@ -197,7 +233,7 @@ const ListingsPage = ({ user: userProp }) => {
     return () => { alive = false; if (controller) controller.abort(); };
   }, [filtersKey, attempt, canonical]);
 
-  // Favoris du repreneur connecté (sans redirection vers /login si la session a expiré)
+  // Favoris de l'acquéreur connecté (sans redirection vers /login si la session a expiré)
   const isBuyer = user?.role === 'buyer';
   useEffect(() => {
     if (!isBuyer) { setFavorites(new Set()); return undefined; }
@@ -259,7 +295,7 @@ const ListingsPage = ({ user: userProp }) => {
     try {
       if (wasFavorite) await axiosInstance.delete(`/favorites/${id}`);
       else await axiosInstance.post('/favorites', { property_id: id });
-      toast.success(wasFavorite ? 'Annonce retirée de vos favoris' : 'Annonce ajoutée à vos favoris');
+      toast.success(wasFavorite ? 'Bien retiré de vos favoris' : 'Bien ajouté à vos favoris');
     } catch (e) {
       nextSet(wasFavorite);
       toast.error('Le favori n\'a pas pu être enregistré. Réessayez dans quelques instants.');
@@ -281,28 +317,29 @@ const ListingsPage = ({ user: userProp }) => {
   const ready = result.status === 'ready';
   const items = ready ? result.items : [];
   const canFavorite = !user || isBuyer;
-  const sellTo = sellPathFor(user);
+  const sellTo = SELL_PATH;
   const onSellerCta = () => trackEvent('hero_cta_seller', { cta: 'listings_callout' });
 
-  // Recherche ciblée (un métier et/ou une région) : titre, H1 et adresse canonique propres ; sinon la page générale
+  // Recherche ciblée (un type de bien et/ou une région) : titre, H1 et adresse canonique propres ; sinon la page générale
   const heading = searchHeading(filters);
   // Données structurées : jamais d'annonce de test (mode test, MODE-TEST-ET-APP.md §B)
   const indexable = items.filter((c) => c.is_test !== true);
   useSeo(heading ? `${heading} | ${BRAND.name}` : fillText(L.title), fillText(L.description), {
-    path: heading ? listingsPath({ trades: filters.trades, region: filters.region }) : LISTINGS_PATH,
+    path: heading ? listingsPath({ types: filters.types, region: filters.region }) : LISTINGS_PATH,
     jsonLd: [
       organizationLd(SITE_URL, BRAND, LEGAL),
       websiteLd(SITE_URL, BRAND),
-      ...(indexable.length ? [itemListLd(SITE_URL, indexable.map((c) => ({ name: listingTitle(c), path: `/property/${c.id}` })))] : []),
+      ...(indexable.length ? [itemListLd(SITE_URL, indexable.map((c) => ({ name: listingTitle(c), path: listingPath(c.id) })))] : []),
     ],
   });
 
   // Alerte préremplie avec les critères de la recherche (réinitialisée quand ils changent)
-  const alertKey = `${filters.trades.join(',')}|${filters.region}|${filters.prixMax}`;
+  const alertKey = `${filters.types.join(',')}|${filters.region}|${filters.prixMax}|${filters.rendementMin}`;
   const alertProps = {
-    defaultTrades: filters.trades,
+    defaultTypes: filters.types,
     defaultRegions: filters.region ? [filters.region] : [],
     defaultMaxPrice: filters.prixMax,
+    defaultMinYield: filters.rendementMin,
     title: L.alertTitle,
     intro: L.alertIntro,
   };
@@ -319,6 +356,7 @@ const ListingsPage = ({ user: userProp }) => {
           {heading && ready && result.total > 0 && (
             <p className="mt-3 text-sm font-semibold text-brand-navy tabular" data-testid="listings-search-total">{annonces(result.total)}</p>
           )}
+          {!heading && <HowItWorks />}
         </div>
       </section>
 
@@ -362,7 +400,7 @@ const ListingsPage = ({ user: userProp }) => {
                   id={sortId}
                   value={filters.tri}
                   onChange={(e) => go({ ...filters, tri: e.target.value, page: 1 })}
-                  className="rounded-xl border border-brand-line bg-white px-3 py-2 text-sm text-brand-navy focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+                  className="rounded-xl border border-brand-line bg-white px-3 py-2 text-sm text-brand-navy focus:border-brand-teal focus:outline-none focus:ring-2 focus:ring-brand-teal/30"
                   data-testid="sort-select"
                 >
                   {SORTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
@@ -377,7 +415,7 @@ const ListingsPage = ({ user: userProp }) => {
                     <button
                       type="button"
                       onClick={() => go({ ...c.remove(filters), page: 1 })}
-                      className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-brand-line bg-white pl-3 pr-2 py-1 text-sm text-brand-navy hover:border-brand-navy/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue"
+                      className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-brand-line bg-white pl-3 pr-2 py-1 text-sm text-brand-navy hover:border-brand-navy/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-teal"
                       aria-label={`Retirer le filtre ${c.label}`}
                     >
                       <span className="truncate">{c.label}</span>

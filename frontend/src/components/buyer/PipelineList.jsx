@@ -1,13 +1,22 @@
 import { Link } from 'react-router-dom';
 import { ChevronRight, FolderLock, MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { listingTitle } from '@/components/shared/ListingCard';
+import { propertyTitle } from '@/lib/referentiels';
 import { formatPrice, formatDateFr } from '@/components/shared/formatters';
 import { PIPELINE_STAGES } from './api';
 
-// « Mes dossiers » (SPEC §4.3 point 7) : une ligne par annonce, étape atteinte (contacté → dossier demandé → accord
-// de confidentialité → dossier ouvert → offre → vente), lien direct vers la page utile. Liste (pas de tableau) : lisible
-// au doigt sous 640 px.
+// « Mes dossiers » (SPEC §5.3) : une ligne par bien, étape atteinte (contacté → dossier demandé → engagement de
+// confidentialité → dossier → offre → vente), lien direct vers la page utile. Liste (pas de tableau) : lisible au doigt
+// sous 640 px.
+
+export const titleOf = (property) => {
+  if (!property) return '';
+  if (property.title) return property.title;
+  return propertyTitle({
+    propertyType: property.property_type, city: property.city, department: property.department,
+    surface: property.surface, rooms: property.rooms, unitsCount: property.units_count,
+  });
+};
 
 const STAGE_INDEX = PIPELINE_STAGES.reduce((acc, s, i) => { acc[s.key] = i; return acc; }, {});
 
@@ -40,7 +49,7 @@ const PipelineList = ({ rows }) => {
       <div className="rounded-xl border border-dashed border-brand-line bg-white p-6 text-center" data-testid="pipeline-empty">
         <FolderLock className="w-8 h-8 text-gray-400 mx-auto mb-2" aria-hidden="true" />
         <p className="font-semibold text-brand-navy">Aucun dossier en cours</p>
-        <p className="text-sm text-gray-600 mt-1">Chaque entreprise à laquelle vous présentez votre projet apparaît ici, avec l&apos;étape atteinte : contact, dossier, accord de confidentialité, offre, vente.</p>
+        <p className="text-sm text-gray-600 mt-1">Chaque bien pour lequel vous contactez le vendeur apparaît ici, avec l&apos;étape atteinte : contact, dossier demandé, engagement de confidentialité, dossier, offre d&apos;achat, vente.</p>
       </div>
     );
   }
@@ -48,7 +57,7 @@ const PipelineList = ({ rows }) => {
     <ul className="space-y-2" data-testid="pipeline-list">
       {list.map((row) => {
         const stage = PIPELINE_STAGES[STAGE_INDEX[row.stage] ?? 0];
-        const title = row.title || (row.property ? listingTitle(row.property) : 'Annonce');
+        const title = row.title || titleOf(row.property) || 'Bien';
         const price = row.property?.asking_price;
         return (
           <li key={row.propertyId} className="min-w-0">

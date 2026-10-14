@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { AlertCircle, FileSignature, FolderOpen, Loader2, MessageSquare, PenTool, Plus } from 'lucide-react';
+import { AlertCircle, FileSignature, FolderOpen, KeyRound, Loader2, MapPin, MessageSquare, PenTool, Plus } from 'lucide-react';
 import { axiosInstance } from '@/App';
 import { usePrivateSeo } from '@/lib/seo';
 import { trackEvent } from '@/lib/analytics';
-import { Checklist, listingTitle } from '@/components/shared';
-import { formatPrice } from '@/components/shared/formatters';
+import { Checklist } from '@/components/shared';
+import { formatPrice, formatYield } from '@/components/shared/formatters';
 import OtpSignatureDialog from '@/components/OtpSignatureDialog';
 import { KYCVerificationButton } from '@/components/KYCVerification';
 import NotFound from '@/pages/NotFound';
@@ -14,29 +14,31 @@ import { apiErrorMessage, isEmailNotVerifiedError } from '@/components/account/e
 import ConnectedShell from '@/components/buyer/ConnectedShell';
 import FundsDeclarationForm from '@/components/buyer/FundsDeclarationForm';
 import DataroomDocuments from '@/components/buyer/DataroomDocuments';
-import TransmissibilityPanel from '@/components/buyer/TransmissibilityPanel';
+import LeaseTransferPanel from '@/components/buyer/LeaseTransferPanel';
+import { titleOf } from '@/components/buyer/PipelineList';
 import OfferForm from '@/components/buyer/OfferForm';
 import { OfferRow } from '@/components/buyer/OffersList';
 import {
-  fetchProperty, fetchAccessStatus, fetchKyc, fetchMyOffers, fetchDataroomDocuments, fetchTransmissibility, asList,
-  isIdentityRequired, isNotAllowed, isProfileIncomplete, badgeClass,
+  fetchProperty, fetchAccessStatus, fetchKyc, fetchMyOffers, fetchDataroomDocuments, fetchLeaseTransfer, asList,
+  isIdentityRequired, isNotAllowed, isProfileIncomplete, badgeClass, propertyPath,
 } from '@/components/buyer/api';
 
-// Dossier d'une entreprise (SPEC §4.3 points 5 et 6, API.md §4) : parcours en checklist
-// demande → acceptation du cédant → identité (Stripe) → accord de confidentialité (code) → origine des fonds → accès,
-// puis documents (visionneuse embarquée), diagnostic de transmissibilité et offre indicative.
+// Dossier du bien (SPEC §5.3, API.md §4) : parcours en checklist
+// demande → acceptation du vendeur → identité (Stripe) → engagement de confidentialité et de non-contournement (code)
+// → origine des fonds → accès (adresse et identité révélées), puis documents (visionneuse embarquée), fiche de reprise
+// du bail (GET /properties/{id}/lease-transfer) et offre d'achat.
 
 const OPEN_OFFER_STATUSES = ['pending_signature', 'pending', 'countered', 'accepted'];
 
 const DataroomPage = ({ user, setUser }) => {
   const { propertyId } = useParams();
-  usePrivateSeo('Dossier de l\'entreprise');
+  usePrivateSeo('Dossier du bien');
   const [property, setProperty] = useState(null);
   const [access, setAccess] = useState(null);
   const [kyc, setKyc] = useState(null);
   const [offers, setOffers] = useState([]);
   const [documents, setDocuments] = useState([]);
-  const [diagnostic, setDiagnostic] = useState(null);
+  const [leaseTransfer, setLeaseTransfer] = useState(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [requesting, setRequesting] = useState(false);
@@ -60,9 +62,9 @@ const DataroomPage = ({ user, setUser }) => {
     setKyc(k);
     setOffers(asList(o, 'offers').filter((x) => x.property_id === propertyId));
     if (a?.accessGranted) {
-      const [docs, diag] = await Promise.all([fetchDataroomDocuments(propertyId), fetchTransmissibility(propertyId)]);
+      const [docs, lease] = await Promise.all([fetchDataroomDocuments(propertyId), fetchLeaseTransfer(propertyId)]);
       setDocuments(asList(docs, 'documents'));
-      setDiagnostic(diag);
+      setLeaseTransfer(lease);
     }
     setLoading(false);
   }, [propertyId, user]);
@@ -76,7 +78,7 @@ const DataroomPage = ({ user, setUser }) => {
     try {
       const res = await axiosInstance.post(`/dataroom/${propertyId}/request-access`, requestMessage.trim() ? { message: requestMessage.trim() } : {});
       const status = res.data?.status;
-      toast.success(status === 'accepted' ? 'Dossier accepté automatiquement par le cédant.' : 'Demande envoyée au cédant. Nous le relançons à J+2 et J+5 s\'il ne répond pas.', { duration: 7000 });
+      toast.success(status === 'accepted' ? 'Demande acceptée automatiquement par le vendeur.' : 'Demande envoyée au vendeur. Nous le relançons à J+2 et J+5 s\'il ne répond pas.', { duration: 7000 });
       await load();
     } catch (error) {
       if (isEmailNotVerifiedError(error)) setStepError('Confirmez d\'abord votre adresse e-mail (bandeau en haut de page).');
@@ -95,7 +97,7 @@ const DataroomPage = ({ user, setUser }) => {
       const res = await axiosInstance.post('/contracts/generate-for-signature', { property_id: propertyId, doc_type: 'nda' });
       const data = res.data || {};
       if (data.already_signed) {
-        toast.info('Accord de confidentialité déjà signé.');
+        toast.info('Engagement de confidentialité déjà signé.');
         await load();
         return;
       }
@@ -103,8 +105,8 @@ const DataroomPage = ({ user, setUser }) => {
     } catch (error) {
       if (isEmailNotVerifiedError(error)) setStepError('Confirmez d\'abord votre adresse e-mail (bandeau en haut de page).');
       else if (isIdentityRequired(error)) setStepError('identity');
-      else if (isNotAllowed(error)) setStepError(apiErrorMessage(error, 'Le cédant doit d\'abord accepter votre demande de dossier.'));
-      else setStepError(apiErrorMessage(error, 'L\'accord n\'a pas pu être préparé. Réessayez dans quelques instants.'));
+      else if (isNotAllowed(error)) setStepError(apiErrorMessage(error, 'Le vendeur doit d\'abord accepter votre demande de dossier.'));
+      else setStepError(apiErrorMessage(error, 'L\'engagement n\'a pas pu être préparé. Réessayez dans quelques instants.'));
     } finally {
       setNdaLoading(false);
     }
@@ -114,7 +116,7 @@ const DataroomPage = ({ user, setUser }) => {
     await axiosInstance.post(`/contracts/${nda.contract_id}/sign`, { otp_code: otpCode });
     trackEvent('nda_signed', { listing: String(propertyId) });
     setNda(null);
-    toast.success('Accord de confidentialité signé. Le nom de l\'entreprise vous est révélé ; un exemplaire PDF vous est envoyé par e-mail.', { duration: 8000 });
+    toast.success('Engagement de confidentialité signé. Un exemplaire PDF vous est envoyé par e-mail ; déclarez maintenant l\'origine des fonds pour ouvrir le dossier.', { duration: 8000 });
     await load();
   };
 
@@ -133,14 +135,14 @@ const DataroomPage = ({ user, setUser }) => {
   }
   if (notFound || !property) return <NotFound user={user} />;
 
-  const title = listingTitle(property);
+  const title = titleOf(property) || 'Bien loué';
   const isSeller = access?.isSeller || user?.role === 'seller';
 
   if (isSeller) {
     return (
-      <ConnectedShell user={user} setUser={setUser} title={title} eyebrow="Dossier de l'entreprise" backTo="/seller/dashboard" backLabel="Mon espace">
+      <ConnectedShell user={user} setUser={setUser} title={title} eyebrow="Dossier du bien" backTo="/seller/dashboard" backLabel="Mon espace">
         <div className="card p-5 sm:p-6">
-          <p className="text-gray-700 leading-relaxed">Vous êtes le cédant de cette annonce : les documents, les demandes de dossier et les offres se gèrent depuis votre espace.</p>
+          <p className="text-gray-700 leading-relaxed">Vous êtes le vendeur de ce bien : les documents du dossier, les demandes d&apos;accès et les offres d&apos;achat se gèrent depuis votre espace.</p>
           <Link to="/seller/dashboard" className="btn-primary mt-4 px-5 py-3 text-sm">Ouvrir mon espace</Link>
         </div>
       </ConnectedShell>
@@ -156,7 +158,7 @@ const DataroomPage = ({ user, setUser }) => {
   const closedRequest = a.status === 'closed';
   const identityStepAction = (
     <div className="space-y-2">
-      <KYCVerificationButton user={user} className="bg-brand-navy hover:bg-brand-navy-light rounded-xl" />
+      <KYCVerificationButton user={user} className="bg-brand-teal hover:bg-brand-teal-dark rounded-xl" />
       <p className="text-xs text-gray-500">Vérification par Stripe Identity, dans cet onglet. Seul le résultat est conservé, jamais les images.</p>
     </div>
   );
@@ -164,19 +166,19 @@ const DataroomPage = ({ user, setUser }) => {
   const items = [
     {
       id: 'request',
-      label: 'Dossier demandé au cédant',
+      label: 'Dossier demandé au vendeur',
       state: a.status ? 'done' : 'current',
-      description: a.status ? 'Votre demande est enregistrée.' : 'Le cédant reçoit votre carte repreneur (projet, budget, financement, zones) et décide d\'ouvrir son dossier.',
+      description: a.status ? 'Votre demande est enregistrée.' : 'Le vendeur reçoit votre carte acquéreur (projet, budget, financement, rendement visé) et décide de vous ouvrir le dossier du bien.',
       action: !a.status && (
         <div className="space-y-2 max-w-xl">
-          <label htmlFor="request-message" className="block text-sm font-medium text-brand-navy">Un mot pour le cédant (facultatif)</label>
+          <label htmlFor="request-message" className="block text-sm font-medium text-brand-navy">Un mot pour le vendeur (facultatif)</label>
           <textarea
             id="request-message"
             value={requestMessage}
             onChange={(e) => setRequestMessage(e.target.value)}
             rows={3}
             maxLength={1000}
-            placeholder="Pourquoi cette entreprise vous intéresse, votre calendrier."
+            placeholder="Pourquoi ce bien vous intéresse, votre calendrier, votre financement."
             className="w-full rounded-xl border border-brand-line px-4 py-2.5 text-sm text-brand-navy focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
           />
           <button type="button" onClick={requestAccess} disabled={requesting} className="btn-primary px-4 py-2.5 text-sm" data-testid="request-access-btn">
@@ -188,36 +190,36 @@ const DataroomPage = ({ user, setUser }) => {
     },
     {
       id: 'accepted',
-      label: 'Accepté par le cédant',
+      label: 'Accepté par le vendeur',
       state: a.accepted || granted ? 'done' : a.status === 'pending' ? 'current' : 'todo',
       description: granted || a.accepted
-        ? 'Le cédant a accepté d\'ouvrir son dossier.'
+        ? 'Le vendeur a accepté de vous ouvrir le dossier.'
         : rejected
-          ? 'Le cédant n\'a pas donné suite à votre demande.'
+          ? 'Le vendeur n\'a pas donné suite à votre demande.'
           : closedRequest
             ? 'Cette annonce n\'est plus en ligne : votre demande de dossier est close.'
           : expired
-            ? 'Le cédant n\'a pas répondu sous 10 jours : nous l\'avons relancé et vous préviendrons dès sa réponse.'
-            : 'Le cédant répond en un geste. Sans réponse, nous le relançons à J+2 et J+5 ; sans réponse sous 10 jours, vous êtes prévenu.',
+            ? 'Le vendeur n\'a pas répondu sous 10 jours : nous l\'avons relancé et vous préviendrons dès sa réponse.'
+            : 'Le vendeur répond en un geste. Sans réponse, nous le relançons à J+2 et J+5 ; sans réponse sous 10 jours, vous êtes prévenu.',
     },
     {
       id: 'identity',
       label: 'Identité vérifiée',
       state: steps.identity ? 'done' : a.accepted && !granted ? 'current' : 'todo',
-      description: steps.identity ? 'Votre identité est vérifiée.' : 'Demandée une seule fois, avant la signature de l\'accord de confidentialité. Le cédant ne la voit qu\'après votre signature.',
+      description: steps.identity ? 'Votre identité est vérifiée.' : 'Demandée une seule fois, avant la signature de l\'engagement de confidentialité. Le vendeur ne la voit qu\'après votre signature.',
       action: !steps.identity && a.accepted && identityStepAction,
     },
     {
       id: 'nda',
-      label: 'Accord de confidentialité signé',
+      label: 'Engagement de confidentialité et de non-contournement',
       state: steps.nda ? 'done' : a.accepted && steps.identity && !granted ? 'current' : 'todo',
       description: steps.nda
-        ? 'Accord signé par code : le nom de l\'entreprise vous est révélé dans la messagerie, et vous figurez sur la liste des repreneurs présentés au cédant.'
-        : 'Lecture du texte intégral puis signature par code reçu par e-mail (24 mois, usage exclusif de l\'étude de la reprise). Le nom de l\'entreprise est révélé après la signature.',
+        ? 'Engagement signé par code : vous figurez sur la liste des acquéreurs présentés au vendeur.'
+        : 'Lecture du texte intégral puis signature par code reçu par e-mail. Pendant 24 mois : informations réservées à l\'étude de l\'achat, aucun contact avec le locataire, le syndic ou l\'exploitant sans l\'accord du vendeur, pas d\'achat en dehors de la plateforme.',
       action: !steps.nda && a.accepted && steps.identity && (
         <button type="button" onClick={prepareNda} disabled={ndaLoading} className="btn-primary px-4 py-2.5 text-sm" data-testid="nda-btn">
           {ndaLoading ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <FileSignature className="w-4 h-4" aria-hidden="true" />}
-          Lire et signer l&apos;accord
+          Lire et signer l&apos;engagement
         </button>
       ),
     },
@@ -225,7 +227,7 @@ const DataroomPage = ({ user, setUser }) => {
       id: 'funds',
       label: 'Origine des fonds déclarée',
       state: steps.funds || granted ? 'done' : steps.nda && a.accepted && !granted ? 'current' : 'todo',
-      description: steps.funds || granted ? 'Déclaration transmise au cédant.' : 'Origine et montant des fonds mobilisables, partenaire financier éventuel. Transmise au cédant avec votre identité.',
+      description: steps.funds || granted ? 'Déclaration enregistrée.' : 'Origine et montant des fonds mobilisables, partenaire financier éventuel (obligation de lutte contre le blanchiment). Transmise au vendeur avec votre identité.',
       action: !steps.funds && !granted && steps.nda && a.accepted && (
         <div className="max-w-2xl rounded-xl border border-brand-line bg-white p-4">
           <FundsDeclarationForm propertyId={propertyId} defaultAmount={user?.buyer_profile?.budget_max || ''} onDone={async () => { toast.success('Accès au dossier accordé.'); await load(); }} />
@@ -234,9 +236,9 @@ const DataroomPage = ({ user, setUser }) => {
     },
     {
       id: 'access',
-      label: 'Accès au dossier',
+      label: 'Accès au dossier du bien',
       state: granted ? 'done' : 'todo',
-      description: granted ? 'Documents, diagnostic de transmissibilité et offre indicative sont disponibles ci-dessous.' : 'Ouvert automatiquement dès que les trois étapes précédentes sont faites.',
+      description: granted ? 'Adresse, identité du vendeur, documents, fiche de reprise du bail et offre d\'achat sont disponibles ci-dessous.' : 'Ouvert automatiquement dès que les trois étapes précédentes sont faites : l\'adresse exacte et l\'identité du vendeur vous sont alors révélées.',
     },
   ];
 
@@ -248,13 +250,13 @@ const DataroomPage = ({ user, setUser }) => {
       user={user}
       setUser={setUser}
       title={title}
-      eyebrow="Dossier de l'entreprise"
+      eyebrow="Dossier du bien"
       backTo="/buyer/dashboard"
       backLabel="Mes dossiers"
       wide={granted}
       actions={(
         <>
-          <Link to={`/property/${propertyId}`} className="btn-secondary px-4 py-2 text-sm">Voir l&apos;annonce</Link>
+          <Link to={propertyPath(propertyId)} className="btn-secondary px-4 py-2 text-sm">Voir l&apos;annonce</Link>
           <Link to={`/messages?conversation=${encodeURIComponent(propertyId)}`} className="btn-secondary px-4 py-2 text-sm">
             <MessageSquare className="w-4 h-4" aria-hidden="true" />
             Messagerie
@@ -262,21 +264,51 @@ const DataroomPage = ({ user, setUser }) => {
         </>
       )}
     >
-      {property.company_name && (
-        <p className="mb-4 badge badge-verified" data-testid="revealed-name">Nom révélé après accord de confidentialité : {property.company_name}</p>
+      {granted && (property.address || property.company_name) && (
+        <section className="mb-6 rounded-2xl border border-brand-line bg-white p-4 sm:p-5 min-w-0" aria-labelledby="revealed-title" data-testid="revealed-info">
+          <h2 id="revealed-title" className="flex items-center gap-2 text-sm font-semibold text-brand-navy">
+            <KeyRound className="w-4 h-4 shrink-0 text-gray-500" aria-hidden="true" />
+            Révélé après l&apos;engagement de confidentialité
+          </h2>
+          <dl className="mt-2 grid sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
+            {property.address && (
+              <div className="min-w-0">
+                <dt className="text-xs text-gray-500">Adresse du bien</dt>
+                <dd className="text-brand-navy font-medium break-words flex items-start gap-1.5" data-testid="revealed-address">
+                  <MapPin className="w-4 h-4 mt-0.5 shrink-0 text-gray-400" aria-hidden="true" />
+                  {[property.address, [property.postal_code, property.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')}
+                </dd>
+              </div>
+            )}
+            {property.company_name && (
+              <div className="min-w-0">
+                <dt className="text-xs text-gray-500">Société propriétaire</dt>
+                <dd className="text-brand-navy font-medium break-words" data-testid="revealed-name">
+                  {property.company_name}{property.siret ? ` · SIRET ${property.siret}` : ''}
+                </dd>
+              </div>
+            )}
+          </dl>
+          <p className="text-[13px] text-gray-600 mt-2 leading-relaxed">
+            Visites organisées par le vendeur avec l&apos;accord du locataire. Ne contactez ni le locataire, ni le syndic, ni l&apos;exploitant sans l&apos;accord du vendeur.
+          </p>
+        </section>
       )}
       {property.asking_price != null && (
-        <p className="text-sm text-gray-600 mb-6">Prix demandé : <span className="font-semibold text-brand-navy tabular">{formatPrice(property.asking_price)}</span></p>
+        <p className="text-sm text-gray-600 mb-6">
+          Prix demandé : <span className="font-semibold text-brand-navy tabular">{formatPrice(property.asking_price)}</span>
+          {formatYield(property.gross_yield) ? <> · rendement brut <span className="font-semibold text-brand-navy tabular">{formatYield(property.gross_yield)}</span></> : null}
+        </p>
       )}
 
       {stepError === 'profile' && (
         <p role="alert" className="notice-amber mb-4" data-testid="profile-incomplete">
-          Votre profil de projet est incomplet (40 % requis pour contacter et demander un dossier). <Link to="/profile" className="font-semibold underline underline-offset-2">Compléter mon profil</Link>
+          Votre profil d&apos;investisseur est incomplet (40 % requis pour contacter un vendeur et demander un dossier). <Link to="/profile" className="font-semibold underline underline-offset-2">Compléter mon profil</Link>
         </p>
       )}
       {stepError === 'identity' && (
         <div className="notice-amber mb-4 flex flex-col sm:flex-row sm:items-center gap-3" role="alert">
-          <span className="flex-1">Votre identité doit être vérifiée avant de signer l&apos;accord de confidentialité.</span>
+          <span className="flex-1">Votre identité doit être vérifiée avant de signer l&apos;engagement de confidentialité.</span>
           {identityStepAction}
         </div>
       )}
@@ -289,24 +321,24 @@ const DataroomPage = ({ user, setUser }) => {
 
       <div className={granted ? 'grid lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-6 min-w-0' : 'min-w-0'}>
         <section className="card p-5 sm:p-6 min-w-0 self-start" aria-labelledby="dataroom-steps-title">
-          <h2 id="dataroom-steps-title" className="sr-only">Étapes d&apos;accès au dossier</h2>
-          <Checklist title="Accès au dossier" items={items} />
+          <h2 id="dataroom-steps-title" className="sr-only">Étapes d&apos;accès au dossier du bien</h2>
+          <Checklist title="Accès au dossier du bien" items={items} />
         </section>
 
         {granted && (
           <div className="space-y-6 min-w-0">
             <section className="card p-5 sm:p-6 min-w-0" aria-labelledby="documents-title">
-              <h2 id="documents-title" className="font-display text-lg font-bold text-brand-navy mb-3">Documents du cédant</h2>
+              <h2 id="documents-title" className="font-display text-lg font-bold text-brand-navy mb-3">Documents du dossier</h2>
               <DataroomDocuments propertyId={propertyId} documents={documents} />
             </section>
 
             <section className="card p-5 sm:p-6 min-w-0" aria-labelledby="offer-title">
               <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-                <h2 id="offer-title" className="font-display text-lg font-bold text-brand-navy">Offre indicative</h2>
+                <h2 id="offer-title" className="font-display text-lg font-bold text-brand-navy">Offre d&apos;achat</h2>
                 {canOffer && !showOfferForm && (
                   <button type="button" onClick={() => setShowOfferForm(true)} className="btn-primary px-4 py-2 text-sm" data-testid="open-offer-form">
                     <Plus className="w-4 h-4" aria-hidden="true" />
-                    Faire une offre indicative
+                    Faire une offre d&apos;achat
                   </button>
                 )}
               </div>
@@ -320,18 +352,18 @@ const DataroomPage = ({ user, setUser }) => {
               ) : (
                 !offers.length && (
                   <p className="text-sm text-gray-600">
-                    Prix, objet (titres ou fonds), plan de financement, conditions et calendrier : l&apos;offre est signée par code et contresignée par le cédant s&apos;il l&apos;accepte. {property.status !== 'published' && 'Cette annonce n\'est plus en ligne : aucune nouvelle offre n\'est possible.'}
+                    Prix, financement, condition suspensive de prêt, conditions et calendrier : l&apos;offre est signée par code et contresignée par le vendeur s&apos;il l&apos;accepte. Elle n&apos;emporte pas vente : l&apos;avant-contrat et l&apos;acte authentique sont rédigés par le notaire. {property.status !== 'published' && 'Cette annonce n\'est plus en ligne : aucune nouvelle offre n\'est possible.'}
                   </p>
                 )
               )}
               {openOffers.length > 0 && !showOfferForm && (
-                <p className="text-sm text-gray-600 flex items-center gap-2"><PenTool className="w-4 h-4 shrink-0 text-gray-400" aria-hidden="true" />Une offre est en cours sur ce dossier : attendez la réponse du cédant avant d&apos;en déposer une autre.</p>
+                <p className="text-sm text-gray-600 flex items-center gap-2"><PenTool className="w-4 h-4 shrink-0 text-gray-400" aria-hidden="true" />Une offre d&apos;achat est en cours sur ce bien : attendez la réponse du vendeur avant d&apos;en déposer une autre.</p>
               )}
             </section>
 
-            {diagnostic?.diagnostic && (
-              <section className="card p-5 sm:p-6 min-w-0" aria-label="Diagnostic de transmissibilité">
-                <TransmissibilityPanel diagnostic={diagnostic.diagnostic} ademe={diagnostic.ademe} />
+            {leaseTransfer && (
+              <section className="card p-5 sm:p-6 min-w-0" aria-label="Fiche de reprise du bail">
+                <LeaseTransferPanel data={leaseTransfer} />
               </section>
             )}
           </div>
@@ -340,7 +372,7 @@ const DataroomPage = ({ user, setUser }) => {
 
       {!granted && a.status && (
         <p className="mt-6 text-sm text-gray-600">
-          Statut : <span className={badgeClass(granted ? 'success' : a.status === 'pending' ? 'warning' : rejected ? 'danger' : 'info')}>{granted ? 'Accès accordé' : a.status === 'pending' ? 'En attente du cédant' : rejected ? 'Refusée' : expired ? 'Expirée' : 'Acceptée'}</span>
+          Statut : <span className={badgeClass(granted ? 'success' : a.status === 'pending' ? 'warning' : rejected ? 'danger' : 'info')}>{granted ? 'Accès accordé' : a.status === 'pending' ? 'En attente du vendeur' : rejected ? 'Refusée' : expired ? 'Expirée' : closedRequest ? 'Close' : 'Acceptée'}</span>
         </p>
       )}
 
@@ -348,13 +380,13 @@ const DataroomPage = ({ user, setUser }) => {
         <OtpSignatureDialog
           open
           onClose={() => setNda(null)}
-          title="Accord de confidentialité"
+          title="Engagement de confidentialité et de non-contournement"
           subtitle={nda.contract_number ? `N° ${nda.contract_number}` : undefined}
           termsDate={nda.terms_date}
           contractId={nda.contract_id}
           documentText={nda.content}
-          acceptLabel="J'ai lu l'accord de confidentialité et je l'accepte. Je comprends que cette signature électronique a valeur juridique."
-          signLabel="Signer l'accord"
+          acceptLabel="J'ai lu l'engagement de confidentialité et de non-contournement et je l'accepte. Je comprends que cette signature électronique a valeur juridique."
+          signLabel="Signer l'engagement"
           onSign={signNda}
         />
       )}

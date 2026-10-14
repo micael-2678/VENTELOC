@@ -1,4 +1,4 @@
-// Non-régression (SPEC §6.2) : les signatures d'accord de confidentialité et d'offre indicative émettent
+// Non-régression : les signatures de l'engagement de confidentialité et de non-contournement et de l'offre d'achat émettent
 // les événements `nda_signed` et `offer_signed` de la liste fermée (lib/analytics.js ↔ backend/events.py).
 // Exécution : cd frontend && CI=true npx craco test --watchAll=false src/components/buyer/__tests__/signatureEvents.test.jsx
 import '@/components/shared/jestEnv';
@@ -6,7 +6,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 
-jest.mock('@/App', () => ({ axiosInstance: { get: jest.fn(), post: jest.fn(), put: jest.fn(), delete: jest.fn() }, API: '/api', EMAIL_NOT_VERIFIED_EVENT: 'cession:email-not-verified' }));
+jest.mock('@/App', () => ({ axiosInstance: { get: jest.fn(), post: jest.fn(), put: jest.fn(), delete: jest.fn() }, API: '/api', EMAIL_NOT_VERIFIED_EVENT: 'venteloc:email-not-verified' }));
 jest.mock('@radix-ui/primitive/is-development', () => jest.requireActual('@radix-ui/primitive/dist/internal/is-development.false.js'), { virtual: true });
 jest.mock('@/lib/analytics', () => ({ trackEvent: jest.fn(), trackPageView: jest.fn(), initAnalytics: jest.fn() }));
 jest.mock('@/components/SecurePdfViewer', () => () => null);
@@ -46,14 +46,14 @@ afterEach(() => {
 });
 
 const buyer = { id: 'b1', role: 'buyer', first_name: 'Claire', last_name: 'Martin', email: 'claire@exemple.fr', email_verified: true, identity_verified: true };
-const property = { id: 'c1', status: 'published', title: 'Entreprise de plomberie-chauffage · Bretagne', trades: ['plomberie-chauffage'], region: 'Bretagne', asking_price: 290000 };
+const property = { id: 'c1', status: 'published', title: 'Appartement T2 loué · 42 m² · Lyon (69)', property_type: 'appartement', city: 'Lyon', department: '69', asking_price: 145000 };
 
 test('les deux événements font partie de la liste fermée', () => {
   const { EVENT_NAMES } = jest.requireActual('@/lib/analytics');
   expect(EVENT_NAMES).toEqual(expect.arrayContaining(['nda_signed', 'offer_signed']));
 });
 
-test('signature de l\'accord de confidentialité → trackEvent(nda_signed)', async () => {
+test('signature de l\'engagement de confidentialité → trackEvent(nda_signed)', async () => {
   const routes = {
     '/properties/c1': property,
     '/kyc/status': { verified: true },
@@ -65,7 +65,7 @@ test('signature de l\'accord de confidentialité → trackEvent(nda_signed)', as
     return key ? Promise.resolve({ data: routes[key] }) : Promise.resolve({ data: {} });
   });
   api.post.mockImplementation((url) => Promise.resolve({ data: url === '/contracts/generate-for-signature'
-    ? { contract_id: 'nda1', contract_number: 'NDA-1', content: 'ACCORD', terms_date: '10/10/2026' }
+    ? { contract_id: 'nda1', contract_number: 'ENG-1', content: 'ENGAGEMENT', terms_date: '14/10/2026' }
     : { signed: true } }));
   const c = await render(<DataroomPage user={buyer} />, '/dataroom/c1', '/dataroom/:propertyId');
   await click(c.querySelector('[data-testid="nda-btn"]'));
@@ -75,10 +75,10 @@ test('signature de l\'accord de confidentialité → trackEvent(nda_signed)', as
   expect(trackEvent).toHaveBeenCalledWith('nda_signed', { listing: 'c1' });
 });
 
-test('signature de l\'offre indicative → trackEvent(offer_signed), pas d\'événement si la signature échoue', async () => {
+test('signature de l\'offre d\'achat → trackEvent(offer_signed), pas d\'événement si la signature échoue', async () => {
   api.post.mockResolvedValueOnce({ data: { status: 'pending' } });
   const onSigned = jest.fn();
-  await render(<OfferSignatureDialog open offer={{ id: 'o1', property_id: 'c1', amount: 290000 }} contractId="ctr1" documentText="OFFRE" onSigned={onSigned} onClose={() => {}} />);
+  await render(<OfferSignatureDialog open offer={{ id: 'o1', property_id: 'c1', amount: 140000 }} contractId="ctr1" documentText="OFFRE" onSigned={onSigned} onClose={() => {}} />);
   await click(document.querySelector('[data-testid="stub-sign"]'));
   expect(api.post).toHaveBeenCalledWith('/contracts/ctr1/sign', { otp_code: '123456' });
   expect(trackEvent).toHaveBeenCalledWith('offer_signed', { listing: 'c1' });

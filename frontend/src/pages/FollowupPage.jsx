@@ -1,23 +1,25 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
+import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import { axiosInstance } from '@/App';
-import { Building2, CheckCircle, Loader2, AlertCircle } from 'lucide-react';
 import { useSeo, NOINDEX } from '@/lib/seo';
 import { BRAND } from '@/lib/brand';
+import { cn } from '@/lib/utils';
+import AuthShell from '@/components/account/AuthShell';
 import { apiErrorMessage } from '@/components/account/errors';
 
-const ANSWERS = [
+// Page publique ouverte depuis l'e-mail de suivi d'une mise en relation : /suivi?token=XXX&r=<réponse>
+// POST /followup/{token} {answer, comment?} → {label}. Les valeurs de réponse sont des identifiants techniques
+// inchangés ; seuls les libellés sont propres à la vente d'un bien loué.
+
+export const FOLLOWUP_ANSWERS = [
   { value: 'en_discussion', label: 'Toujours en discussion' },
-  { value: 'rencontre', label: 'Nous nous sommes rencontrés' },
+  { value: 'rencontre', label: 'Visite faite ou prévue' },
   { value: 'accord', label: 'Nous avons trouvé un accord' },
-  { value: 'pas_de_suite', label: "Pas de suite donnée" },
+  { value: 'pas_de_suite', label: 'Pas de suite donnée' },
 ];
 
-// Page publique ouverte depuis l'email de suivi à 30 jours : /suivi?token=XXX&r=<answer>
 const FollowupPage = () => {
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token');
@@ -30,7 +32,7 @@ const FollowupPage = () => {
   const [invalid, setInvalid] = useState(!token);
   const sentInitial = useRef(false);
 
-  useSeo(`Suivi de votre mise en relation – ${BRAND.name}`, 'Dites-nous où en est votre projet de reprise.', { robots: NOINDEX });
+  useSeo(`Suivi de votre mise en relation – ${BRAND.name}`, 'Dites-nous où en est votre échange au sujet de ce bien.', { robots: NOINDEX });
 
   const submit = async (value, withComment = false) => {
     if (!token) return;
@@ -40,17 +42,17 @@ const FollowupPage = () => {
       if (withComment && comment.trim()) body.comment = comment.trim();
       const res = await axiosInstance.post(`/followup/${encodeURIComponent(token)}`, body);
       setAnswer(value);
-      setLabel(res.data?.label || ANSWERS.find((a) => a.value === value)?.label || '');
+      setLabel(res.data?.label || FOLLOWUP_ANSWERS.find((a) => a.value === value)?.label || '');
       if (withComment) {
         setCommentSent(true);
-        toast.success('Merci pour votre commentaire !');
+        toast.success('Merci pour votre commentaire.');
       }
     } catch (error) {
       const status = error.response?.status;
       if (status === 400 || status === 404) {
         setInvalid(true);
       } else {
-        toast.error(apiErrorMessage(error, "Votre réponse n'a pas pu être enregistrée. Réessayez dans quelques instants."));
+        toast.error(apiErrorMessage(error, 'Votre réponse n\'a pas pu être enregistrée. Réessayez dans quelques instants.'));
       }
     } finally {
       setLoading(false);
@@ -60,91 +62,85 @@ const FollowupPage = () => {
   useEffect(() => {
     if (sentInitial.current) return;
     sentInitial.current = true;
-    if (token && ANSWERS.some((a) => a.value === initialAnswer)) {
+    if (token && FOLLOWUP_ANSWERS.some((a) => a.value === initialAnswer)) {
       submit(initialAnswer);
     }
-  }, []);
+  }, []); // réponse du lien de l'e-mail enregistrée une seule fois, à l'ouverture
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center px-4 py-12">
-      <div className="card max-w-lg w-full p-8" data-testid="followup-page">
-        <div className="text-center mb-6">
-          <div className="flex justify-center mb-4">
-            <Building2 className="w-12 h-12 text-[#090e1c]" />
-          </div>
-          <h1 className="text-2xl font-bold text-[#090e1c] mb-2">Suivi de votre mise en relation</h1>
+    <AuthShell
+      title="Suivi de votre mise en relation"
+      subtitle={invalid ? undefined : 'Votre réponse nous aide à vous accompagner jusqu\'à la signature chez le notaire.'}
+      testId="followup-page"
+      footer={<Link to="/" className="font-semibold text-brand-navy hover:underline" aria-label={`${BRAND.name} – accueil`}>Retour à l&apos;accueil</Link>}
+    >
+      {invalid ? (
+        <div className="text-center space-y-3" role="alert" data-testid="followup-invalid">
+          <AlertCircle className="w-10 h-10 text-red-700 mx-auto" aria-hidden="true" />
+          <p className="text-gray-700">Ce lien de suivi est invalide ou a expiré.</p>
         </div>
-
-        {invalid ? (
-          <div className="text-center space-y-3">
-            <AlertCircle className="w-10 h-10 text-red-500 mx-auto" />
-            <p className="text-gray-700">Ce lien de suivi est invalide ou a expiré.</p>
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {answer ? (
-              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center">
-                <CheckCircle className="w-8 h-8 text-emerald-600 mx-auto mb-2" />
-                <p className="font-semibold text-emerald-800">Merci pour votre réponse !</p>
-                <p className="text-sm text-emerald-700 mt-1">Réponse enregistrée : « {label} »</p>
-              </div>
-            ) : loading ? (
-              <div className="flex items-center justify-center text-gray-500 py-4">
-                <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                Enregistrement de votre réponse...
-              </div>
-            ) : (
-              <p className="text-gray-700 text-center">Où en est votre échange avec le cédant ?</p>
-            )}
-
-            <div>
-              {answer && <p className="text-sm text-gray-600 mb-3">Vous pouvez modifier votre réponse :</p>}
-              <div className="grid sm:grid-cols-2 gap-3">
-                {ANSWERS.map((a) => (
-                  <Button
-                    key={a.value}
-                    type="button"
-                    variant={answer === a.value ? 'default' : 'outline'}
-                    className={`rounded-xl h-auto py-3 whitespace-normal ${answer === a.value ? 'bg-[#090e1c] hover:bg-[#1a1e3e]' : ''}`}
-                    disabled={loading}
-                    onClick={() => submit(a.value)}
-                    data-testid={`followup-answer-${a.value}`}
-                  >
-                    {a.label}
-                  </Button>
-                ))}
-              </div>
+      ) : (
+        <div className="space-y-6">
+          {answer ? (
+            <div className="rounded-xl border border-brand-line bg-brand-surface p-4 text-center" role="status" data-testid="followup-done">
+              <CheckCircle2 className="w-8 h-8 text-brand-navy mx-auto mb-2" aria-hidden="true" />
+              <p className="font-semibold text-brand-navy">Merci pour votre réponse.</p>
+              <p className="text-sm text-gray-700 mt-1">Réponse enregistrée : « {label} »</p>
             </div>
+          ) : loading ? (
+            <div className="flex items-center justify-center text-gray-600 py-4" role="status">
+              <Loader2 className="w-5 h-5 animate-spin mr-2" aria-hidden="true" />
+              Enregistrement de votre réponse…
+            </div>
+          ) : (
+            <p className="text-gray-700 text-center">Où en est votre échange au sujet de ce bien ?</p>
+          )}
 
-            {answer && (
-              <div className="space-y-2">
-                <Label htmlFor="followup-comment">Un commentaire ? (optionnel)</Label>
-                <Textarea
-                  id="followup-comment"
-                  value={comment}
-                  onChange={(e) => { setComment(e.target.value); setCommentSent(false); }}
-                  placeholder="Dites-nous en plus : difficultés rencontrées, suggestions..."
-                  className="rounded-xl"
-                  rows={4}
-                />
-                <Button
+          <fieldset>
+            <legend className={cn('text-sm text-gray-600 mb-3', !answer && 'sr-only')}>{answer ? 'Vous pouvez modifier votre réponse :' : 'Votre réponse'}</legend>
+            <div className="grid sm:grid-cols-2 gap-3">
+              {FOLLOWUP_ANSWERS.map((a) => (
+                <button
+                  key={a.value}
                   type="button"
-                  onClick={() => submit(answer, true)}
-                  disabled={loading || !comment.trim() || commentSent}
-                  className="w-full bg-[#090e1c] hover:bg-[#1a1e3e] rounded-xl"
+                  aria-pressed={answer === a.value}
+                  className={cn(answer === a.value ? 'btn-primary' : 'btn-secondary', 'w-full py-3 whitespace-normal')}
+                  disabled={loading}
+                  onClick={() => submit(a.value)}
+                  data-testid={`followup-answer-${a.value}`}
                 >
-                  {commentSent ? 'Commentaire envoyé' : loading ? 'Envoi...' : 'Envoyer mon commentaire'}
-                </Button>
-              </div>
-            )}
-          </div>
-        )}
+                  {a.label}
+                </button>
+              ))}
+            </div>
+          </fieldset>
 
-        <div className="mt-6 text-center">
-          <Link to="/" className="text-[#090e1c] font-semibold hover:underline" aria-label={`${BRAND.name} – accueil`}>Retour à l'accueil</Link>
+          {answer && (
+            <div className="space-y-2">
+              <label htmlFor="followup-comment" className="block text-sm font-semibold text-brand-navy">Un commentaire ? <span className="font-normal text-gray-500">(facultatif)</span></label>
+              <textarea
+                id="followup-comment"
+                value={comment}
+                onChange={(e) => { setComment(e.target.value); setCommentSent(false); }}
+                placeholder="Visite, avant-contrat, difficultés rencontrées, suggestions…"
+                className="w-full rounded-xl border border-brand-line bg-white px-4 py-3 text-brand-navy focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+                rows={4}
+                maxLength={2000}
+              />
+              <button
+                type="button"
+                onClick={() => submit(answer, true)}
+                disabled={loading || !comment.trim() || commentSent}
+                className="btn-primary w-full py-3"
+                data-testid="followup-comment-send"
+              >
+                {commentSent ? 'Commentaire envoyé' : loading ? 'Envoi…' : 'Envoyer mon commentaire'}
+              </button>
+            </div>
+          )}
         </div>
-      </div>
-    </div>
+      )}
+    </AuthShell>
   );
 };
 

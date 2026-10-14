@@ -1,11 +1,11 @@
 {
-  "name": "CessionRGE – Cession et reprise d'entreprises RGE",
-  "short_name": "CessionRGE",
+  "name": "VenteLoc – Biens loués à vendre, de propriétaire à investisseur",
+  "short_name": "VenteLoc",
   "lang": "fr",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
-  "theme_color": "#090e1c",
+  "theme_color": "#0b1220",
   "icons": [
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },

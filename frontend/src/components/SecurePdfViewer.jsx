@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import * as pdfjsLib from 'pdfjs-dist';
 
 // Worker pdf.js embarqué (SPEC §7.6) : le fichier est copié par webpack dans build/static/media et servi par
-// l'application elle-même. Aucun CDN : la data room fonctionne sans requête vers un tiers.
+// l'application elle-même. Aucun CDN : le dossier du bien fonctionne sans requête vers un tiers.
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.js', import.meta.url).toString();
 
 // Props : base64Content (PDF encodé), watermark (texte du filigrane) ; `filename` passé par les pages est ignoré ici.

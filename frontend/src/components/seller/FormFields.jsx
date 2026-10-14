@@ -67,7 +67,7 @@ export const NumberInput = ({ value, onChange, min, max, step = 1, suffix = '€
       placeholder={placeholder}
       disabled={disabled}
       onChange={(e) => onChange(e.target.value)}
-      className={cn(inputClass(aria['aria-invalid']), suffix && 'pr-12', 'tabular')}
+      className={cn(inputClass(aria['aria-invalid']), suffix && (String(suffix).length > 3 ? 'pr-20' : 'pr-12'), 'tabular')}
       data-testid={testId}
       {...aria}
     />
@@ -105,7 +105,7 @@ export const SelectInput = ({ value, onChange, options, placeholder = 'Choisir',
   </select>
 );
 
-// Case à cocher très visible (carte) : utilisée pour les métiers, les qualifications et « ce qui rassure »
+// Case à cocher très visible (carte) : options du formulaire d'annonce (acceptation automatique des demandes…)
 export const CheckCard = ({ checked, onChange, label, hint, disabled = false, testId, compact = false }) => {
   const id = useId();
   return (
@@ -113,9 +113,9 @@ export const CheckCard = ({ checked, onChange, label, hint, disabled = false, te
       htmlFor={id}
       className={cn(
         'flex items-start rounded-xl border-2 cursor-pointer transition-colors min-w-0 focus-within:ring-2 focus-within:ring-brand-blue focus-within:ring-offset-1',
-        // Compact (grilles à deux colonnes dès 390 px) : marges réduites pour que « Photovoltaïque » ou « Terrassement, VRD » tiennent sans coupure
+        // Compact (grilles à deux colonnes dès 390 px) : marges réduites pour que les libellés longs tiennent sans coupure
         compact ? 'gap-2 px-2.5 py-2.5 sm:gap-3 sm:px-3' : 'gap-3 px-4 py-3',
-        checked ? 'border-brand-navy bg-brand-blue-soft' : 'border-brand-line bg-white hover:border-gray-400',
+        checked ? 'border-brand-teal bg-brand-teal-soft' : 'border-brand-line bg-white hover:border-gray-400',
         disabled && 'opacity-60 cursor-not-allowed',
       )}
       data-testid={testId}
@@ -129,7 +129,7 @@ export const CheckCard = ({ checked, onChange, label, hint, disabled = false, te
         className="sr-only"
       />
       <span
-        className={cn('mt-0.5 inline-flex items-center justify-center w-6 h-6 rounded-md border-2 shrink-0', checked ? 'bg-brand-navy border-brand-navy text-white' : 'border-gray-400 bg-white')}
+        className={cn('mt-0.5 inline-flex items-center justify-center w-6 h-6 rounded-md border-2 shrink-0', checked ? 'bg-brand-teal border-brand-teal text-white' : 'border-gray-400 bg-white')}
         aria-hidden="true"
       >
         {checked && <Check className="w-4 h-4" strokeWidth={3} />}

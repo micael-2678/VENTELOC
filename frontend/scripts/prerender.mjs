@@ -2,7 +2,8 @@
 // Pré-rendu statique des pages publiques, exécuté après `craco build` (voir package.json).
 //
 // L'application est une SPA : sans ce script, robots et aperçus de partage ne voient qu'un index.html vide.
-// Pages pré-rendues (MODE-TEST-ET-APP.md §A) : la page des annonces (/), l'estimateur (/estimer) et les pages légales.
+// Pages pré-rendues (docs/venteloc/SPEC.md §5.1) : la page des annonces (/), la page vendeur (/vendre), l'estimateur
+// (/estimer) et les pages légales.
 // Pour chacune, build/<route>/index.html est écrit à partir de build/index.html avec :
 //   - <title>, meta description, canonical, Open Graph, Twitter card, robots, JSON-LD ;
 //   - dans <div id="root">, un HTML statique reprenant la coque de la page React (en-tête AppHeader, titre, pied de
@@ -57,7 +58,7 @@ const schema = loadShared('seo/schema.js');
 const legal = loadShared('seo/legal.js');
 const { logoMarkSvg } = loadShared('seo/brand.js');
 const content = readJson('seo/content.json');
-const { TRADES, REGIONS, slugify } = loadShared('lib/referentiels.js');
+const { PROPERTY_TYPES, REGIONS, slugify } = loadShared('lib/referentiels.js');
 // Classes des boutons partagées avec AppHeader (utilitaires Tailwind seulement)
 const buttons = loadShared('components/shared/buttonStyles.js');
 
@@ -83,7 +84,7 @@ const rich = (text) => parseInline(fill(text)).map((seg) => {
 
 const BTN_SECONDARY = 'inline-flex items-center justify-center gap-2 bg-white hover:bg-brand-surface text-brand-navy font-semibold border border-brand-navy rounded-xl px-5 py-3 transition-colors';
 const HOME_CRUMB = { name: 'Accueil', path: '/' };
-const INFO_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 mt-0.5 shrink-0 text-brand-blue" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>';
+const INFO_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 mt-0.5 shrink-0 text-brand-teal" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>';
 const MENU_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-6 h-6" aria-hidden="true"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>';
 const SPINNER = '<div class="flex justify-center py-12" role="status" aria-label="Chargement"><div class="spinner"></div></div>';
 
@@ -91,7 +92,7 @@ const SPINNER = '<div class="flex justify-center py-12" role="status" aria-label
 // Coque commune : en-tête et pied de page (mêmes balisages que AppHeader, état déconnecté, et AppFooter)
 const logoHtml = () => {
   const { head, tail } = splitBrandName(BRAND.name);
-  const tailHtml = tail ? `<span class="text-brand-green">${esc(tail)}</span>` : '';
+  const tailHtml = tail ? `<span class="text-brand-teal">${esc(tail)}</span>` : '';
   return `<a href="/" class="inline-flex items-center gap-2 min-w-0" aria-label="${esc(BRAND.name)} – accueil">`
     + `<span class="inline-flex shrink-0" style="width:32px;height:32px">${logoMarkSvg(32)}</span>`
     + `<span class="font-display font-extrabold tracking-tight leading-none text-xl sm:text-2xl text-brand-navy">${esc(head)}${tailHtml}</span></a>`;
@@ -106,7 +107,7 @@ const headerHtml = (current) => {
   };
   return `<header class="bg-white border-b border-brand-line"><a href="#contenu" class="sr-only">${esc(h.skip)}</a>`
     + `<div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-3 min-w-0">`
-    + `<div class="flex items-center gap-6 min-w-0">${logoHtml()}<nav aria-label="Navigation principale" class="hidden md:flex items-center gap-1">${link('/', h.listings)}${link('/register?role=seller', h.sell)}</nav></div>`
+    + `<div class="flex items-center gap-6 min-w-0">${logoHtml()}<nav aria-label="Navigation principale" class="hidden md:flex items-center gap-1">${link('/', h.listings)}${link('/vendre', h.sell)}</nav></div>`
     + `<div class="flex items-center gap-1 sm:gap-2 shrink-0">`
     + `<a href="/login" class="hidden sm:inline-flex items-center px-3 py-2 rounded-lg text-sm font-medium text-brand-navy hover:bg-brand-surface">${esc(h.login)}</a>`
     + `<a href="/register" class="${buttons.BTN_PRIMARY} hidden md:inline-flex px-4 py-2 text-sm">${esc(h.register)}</a>`
@@ -142,8 +143,8 @@ const breadcrumbsHtml = (items, tone = 'dark') => `<nav aria-label="Fil d'Ariane
   + `</ol></nav>`;
 
 const tocHtml = (sections) => `<nav aria-label="Sommaire" class="rounded-2xl border border-brand-line bg-brand-surface p-5 mb-8"><p class="font-display font-bold text-brand-navy mb-2">Sommaire</p>`
-  + `<ol class="list-decimal pl-5 space-y-1 text-sm text-gray-700 marker:text-brand-blue">`
-  + sections.map((s) => `<li><a href="#${esc(s.id)}" class="hover:text-brand-blue hover:underline">${esc(fill(s.title))}</a></li>`).join('')
+  + `<ol class="list-decimal pl-5 space-y-1 text-sm text-gray-700 marker:text-brand-teal">`
+  + sections.map((s) => `<li><a href="#${esc(s.id)}" class="hover:text-brand-teal hover:underline">${esc(fill(s.title))}</a></li>`).join('')
   + `</ol></nav>`;
 
 // Marque et e-mail : l'API prime, sinon lib/brand.js
@@ -169,15 +170,15 @@ const sectionsHtml = (sections, rawLegal) => sections.map((s) => `<section aria-
     if (b.h3) return `<h3>${esc(fill(b.h3))}</h3>`;
     if (b.ul) return `<ul>${b.ul.map((li) => `<li>${rich(li)}</li>`).join('')}</ul>`;
     if (b.ol) return `<ol>${b.ol.map((li) => `<li>${rich(li)}</li>`).join('')}</ol>`;
-    if (b.note) return `<p class="not-prose flex gap-3 rounded-xl border border-blue-100 bg-brand-blue-soft p-4 text-[0.95rem] text-gray-700">${INFO_ICON}<span>${rich(b.note)}</span></p>`;
+    if (b.note) return `<p class="not-prose flex gap-3 rounded-xl border border-brand-teal-line bg-brand-teal-soft p-4 text-[0.95rem] text-gray-700">${INFO_ICON}<span>${rich(b.note)}</span></p>`;
     if (b.legal) return legalBlockHtml(b.legal, rawLegal);
     return '';
   }).join('') + `</section>`).join('');
 
 // ------------------------------------------------------------------------------------------------
 // Espaces privés, module intégrable et panneau de test exclus de l'exploration ; sitemap servi par le backend
-const ROBOTS_DISALLOW = ['/admin', '/seller', '/buyer', '/messages', '/profile', '/kyc', '/suivi', '/reset-password', '/president',
-  '/dataroom', '/vente', '/embed/', '/test'];
+const ROBOTS_DISALLOW = ['/admin', '/seller', '/buyer', '/messages', '/profile', '/kyc', '/suivi', '/reset-password',
+  '/dataroom', '/vente/', '/embed/', '/test'];
 const robotsTxt = (site) => ['User-agent: *', 'Allow: /', ...ROBOTS_DISALLOW.map((p) => `Disallow: ${p}`), '', `Sitemap: ${site}/api/sitemap.xml`, ''].join('\n');
 
 // ------------------------------------------------------------------------------------------------
@@ -187,14 +188,14 @@ const addPage = (p) => pages.push({ type: 'website', robots: 'index, follow', js
 
 const buildPages = () => {
   // Page des annonces (/) : en-tête, titre et phrase d'accroche ; les annonces et les filtres se chargent côté client.
-  // Sans JavaScript (robots qui n'exécutent pas les scripts) : liens vers la liste filtrée par métier et par région.
+  // Sans JavaScript (robots qui n'exécutent pas les scripts) : liens vers la liste filtrée par type de bien et par région.
   {
     const L = content.listings;
     const browseList = (label, items) => `<h2 class="font-display text-lg font-bold text-brand-navy mt-4 mb-2">${esc(label)}</h2>`
       + `<ul class="flex flex-wrap gap-x-4 gap-y-1 text-sm">${items.map(([href, text]) => `<li><a href="${esc(href)}" class="text-brand-navy underline underline-offset-2">${esc(text)}</a></li>`).join('')}</ul>`;
     const browse = `<noscript><nav aria-label="Parcourir les annonces" class="max-w-7xl mx-auto px-4 sm:px-6 pb-8 min-w-0">`
-      + browseList('Annonces par métier', TRADES.map((t) => [`/?metier=${t.id}`, t.label]))
-      + browseList('Annonces par région', REGIONS.map((r) => [`/?region=${slugify(r)}`, r]))
+      + browseList('Biens loués par type', PROPERTY_TYPES.map((t) => [`/?type=${t.id}`, t.label]))
+      + browseList('Biens loués par région', REGIONS.map((r) => [`/?region=${slugify(r)}`, r]))
       + `</nav></noscript>`;
     const body = `<section class="bg-white border-b border-brand-line" aria-labelledby="titre-annonces"><div class="max-w-7xl mx-auto px-4 sm:px-6 py-8 sm:py-10 min-w-0">`
       + `<h1 id="titre-annonces" class="font-display text-3xl sm:text-4xl font-extrabold text-brand-navy tracking-tight">${esc(L.h1)}</h1>`
@@ -210,11 +211,35 @@ const buildPages = () => {
     });
   }
 
-  // Estimation (page React du parcours cédant : coquille statique titre + intro) ------------------------
+  // Page vendeur (/vendre) : titre, accroche, raisons, honoraires et FAQ (FAQPage JSON-LD) -----------------
+  {
+    const page = content.sell;
+    const p = page.path;
+    const crumbs = [HOME_CRUMB, { name: 'Vendre un bien loué', path: p }];
+    const faqLd = {
+      '@context': 'https://schema.org',
+      '@type': 'FAQPage',
+      mainEntity: page.faq.map((f) => ({ '@type': 'Question', name: f.q, acceptedAnswer: { '@type': 'Answer', text: fill(f.a) } })),
+    };
+    const card = (title, text) => `<li class="card p-5 min-w-0"><h3 class="font-display text-lg font-bold text-brand-navy">${esc(title)}</h3><p class="text-sm text-gray-700 mt-1 leading-relaxed">${esc(text)}</p></li>`;
+    const body = `<section class="bg-white border-b border-brand-line px-4 sm:px-6 pt-8 pb-10"><div class="max-w-5xl mx-auto min-w-0">${breadcrumbsHtml(crumbs)}`
+      + `<p class="eyebrow mb-2">Propriétaires bailleurs</p><h1 class="font-display text-3xl sm:text-4xl font-extrabold text-brand-navy leading-tight tracking-tight">${esc(page.h1)}</h1>`
+      + `<p class="text-lg text-gray-700 mt-3 leading-relaxed max-w-3xl">${esc(fill(page.intro))}</p>`
+      + `<p class="mt-6 flex flex-col sm:flex-row gap-3"><a href="/estimer" class="${BTN_SECONDARY}">${esc(page.ctaEstimate)}</a><a href="/register?role=seller" class="${buttons.BTN_PRIMARY} px-5 py-3">${esc(page.ctaDeposit)}</a></p></div></section>`
+      + `<div class="max-w-5xl mx-auto px-4 sm:px-6 py-10 space-y-12 min-w-0">`
+      + `<section><h2 class="section-title mb-5">${esc(page.whyTitle)}</h2><ul class="grid gap-4 sm:grid-cols-3">${page.why.map((w) => card(w.title, w.text)).join('')}</ul></section>`
+      + `<section><h2 class="section-title mb-5">${esc(fill(page.doTitle))}</h2><ul class="grid gap-3 sm:grid-cols-2">${page.do.map((d) => `<li class="rounded-2xl border border-brand-line bg-white p-4 text-gray-800">${rich(d)}</li>`).join('')}</ul></section>`
+      + `<section><h2 class="section-title mb-3">${esc(page.costTitle)}</h2><p class="text-gray-700 leading-relaxed">${esc(page.costIntro)}</p><p class="text-sm text-gray-600 mt-3">${esc(fill('{{commissionSentence}}'))}</p></section>`
+      + `<section><h2 class="section-title mb-3">${esc(page.faqTitle)}</h2><ul class="rounded-2xl border border-brand-line bg-white px-4 sm:px-6">${page.faq.map((f) => `<li class="border-b border-brand-line py-4"><h3 class="font-semibold text-brand-navy">${esc(f.q)}</h3><p class="mt-2 text-gray-700 leading-relaxed">${rich(f.a)}</p></li>`).join('')}</ul></section>`
+      + `</div>`;
+    addPage({ path: p, title: fill(page.title), description: fill(page.description), body: layout(p, body, 'bg-brand-surface'), jsonLd: [schema.breadcrumbLd(SITE_URL, crumbs), faqLd], changefreq: 'monthly' });
+  }
+
+  // Estimation (page React du parcours vendeur : coquille statique titre + intro) ------------------------
   {
     const page = content.estimate;
     const p = '/estimer';
-    const crumbs = [HOME_CRUMB, { name: 'Estimer mon entreprise', path: p }];
+    const crumbs = [HOME_CRUMB, { name: 'Estimer mon bien', path: p }];
     const body = `<section class="px-4 sm:px-6 pt-8 pb-6 bg-white border-b border-brand-line"><div class="max-w-5xl mx-auto min-w-0">${breadcrumbsHtml(crumbs)}`
       + `<h1 class="font-display text-3xl sm:text-4xl font-extrabold text-brand-navy leading-tight">${esc(page.h1)}</h1>`
       + `<p class="text-gray-700 mt-3 leading-relaxed max-w-3xl">${esc(fill(page.intro))}</p></div></section>${SPINNER}`;

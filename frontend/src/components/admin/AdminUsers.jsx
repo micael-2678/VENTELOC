@@ -3,24 +3,22 @@ import { toast } from 'sonner';
 import { Search, Users } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { axiosInstance } from '@/App';
-import { PROJECT_TYPES, FINANCING, HORIZONS } from '@/components/shared';
-import { tradeLabel } from '@/lib/referentiels';
+import { buyerProjectTypeLabel, financingTypeLabel, propertyTypeLabel } from '@/lib/referentiels';
+import { horizonLabel } from '@/components/account/profileScore';
 import { apiErrorMessage, isEmailNotVerifiedError } from '@/components/account/errors';
 import { ActionButton, ActionDialog, EmptyState, FilterSelect, Loading, Pill, displayName, fmtDate, fmtEur, identityInfo, roleLabel } from './shared';
 
-// Onglet « Utilisateurs » : GET /admin/users (rôle, e-mail confirmé, identité, score repreneur),
+// Onglet « Utilisateurs » : GET /admin/users (rôle, e-mail confirmé, identité, score du profil acquéreur),
 // PUT /admin/kyc/{id}/validate (identité marquée vérifiée par l'administrateur, repli du parcours Stripe).
 
 const ROLE_FILTERS = [
   { value: 'all', label: 'Tous les comptes' },
-  { value: 'seller', label: 'Cédants' },
-  { value: 'buyer', label: 'Repreneurs' },
+  { value: 'seller', label: 'Vendeurs' },
+  { value: 'buyer', label: 'Acquéreurs' },
   { value: 'unverified_email', label: 'E-mail non confirmé' },
   { value: 'identity_pending', label: 'Identité à vérifier' },
   { value: 'admin', label: 'Administrateurs' },
 ];
-
-const labelOf = (table, value) => table[String(value || '')] || '';
 
 const inFilter = (u, filter) => {
   switch (filter) {
@@ -37,17 +35,18 @@ const matches = (u, q) => {
   return hay.includes(q.toLowerCase());
 };
 
-// Profil de projet du repreneur en une phrase (jamais de valeur brute)
-const buyerSummary = (u) => {
+// Profil d'investisseur de l'acquéreur en une phrase (jamais de valeur brute)
+export const buyerSummary = (u) => {
   const p = u.buyer_profile || {};
   const parts = [];
-  if (labelOf(PROJECT_TYPES, p.project_type)) parts.push(labelOf(PROJECT_TYPES, p.project_type));
+  if (buyerProjectTypeLabel(p.project_type)) parts.push(buyerProjectTypeLabel(p.project_type));
   if (p.budget_max > 0) parts.push(`budget ${fmtEur(p.budget_max)}`);
   if (p.apport > 0) parts.push(`apport ${fmtEur(p.apport)}`);
-  if (labelOf(FINANCING, p.financing)) parts.push(labelOf(FINANCING, p.financing).toLowerCase());
+  if (financingTypeLabel(p.financing)) parts.push(financingTypeLabel(p.financing).toLowerCase());
+  if (Array.isArray(p.property_types) && p.property_types.length) parts.push(p.property_types.map((t) => propertyTypeLabel(t, true) || t).join(', '));
   if (Array.isArray(p.zones) && p.zones.length) parts.push(p.zones.join(', '));
-  if (Array.isArray(p.trades) && p.trades.length) parts.push(p.trades.map((t) => tradeLabel(t, true)).join(', '));
-  if (labelOf(HORIZONS, p.horizon)) parts.push(labelOf(HORIZONS, p.horizon).toLowerCase());
+  if (Number(p.min_yield) > 0) parts.push(`rendement ≥ ${String(p.min_yield).replace('.', ',')} %`);
+  if (horizonLabel(p.horizon)) parts.push(horizonLabel(p.horizon).toLowerCase());
   if (p.siren_verified) parts.push('société vérifiée');
   return parts.join(' · ');
 };
@@ -112,7 +111,7 @@ const AdminUsers = ({ users, loading, onReload, focusId, onEmailBlocked }) => {
                     </p>
                     {u.role === 'buyer' && (
                       <p className="text-sm text-gray-700 mt-1 break-words">
-                        {u.profile_score > 0 ? `Profil repreneur complet à ${Math.round(u.profile_score)} %` : 'Profil repreneur non renseigné'}
+                        {u.profile_score > 0 ? `Profil acquéreur complet à ${Math.round(u.profile_score)} %` : 'Profil acquéreur non renseigné'}
                         {summary ? ` · ${summary}` : ''}
                       </p>
                     )}

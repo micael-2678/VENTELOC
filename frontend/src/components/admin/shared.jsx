@@ -75,7 +75,7 @@ export const displayName = (u) => {
   return name || String(u.company_name || u.email || '').trim() || '—';
 };
 
-export const ROLE_LABELS = { seller: 'Cédant', buyer: 'Repreneur', admin: 'Administrateur' };
+export const ROLE_LABELS = { seller: 'Vendeur', buyer: 'Acquéreur', admin: 'Administrateur' };
 export const roleLabel = (role) => ROLE_LABELS[role] || 'Compte';
 
 // Identité (Stripe Identity ou validation admin) → libellé et ton
@@ -88,16 +88,16 @@ export const identityInfo = (u) => {
   return { label: 'Identité non vérifiée', tone: 'info' };
 };
 
-export const SALE_OBJECT_LABELS = { titres: 'Cession de titres', fonds: 'Cession de fonds', indifferent: 'Titres ou fonds' };
+export const SALE_OBJECT_LABELS = { bien: 'Vente du bien', parts: 'Cession des parts', indifferent: 'Bien ou parts' };
 export const saleObjectLabel = (v) => SALE_OBJECT_LABELS[v] || 'À définir dans l\'acte';
 
-// Motifs de retrait d'une annonce (identiques à REMOVAL_REASONS côté serveur)
+// Motifs de retrait d'une annonce (SPEC §5.4, identiques à REMOVAL_REASONS côté serveur)
 export const REMOVAL_REASONS = [
-  { value: 'coordonnees', label: 'Coordonnées ou éléments identifiants dans l\'annonce' },
-  { value: 'hors_perimetre', label: 'Activité hors périmètre (entreprises du bâtiment)' },
-  { value: 'informations_inexactes', label: 'Informations inexactes ou invérifiables' },
-  { value: 'dirigeant', label: 'Qualité de dirigeant ou de mandataire non établie' },
+  { value: 'justificatif', label: 'Justificatif de propriété absent, illisible ou non concordant' },
+  { value: 'informations-inexactes', label: 'Informations inexactes ou invérifiables' },
   { value: 'doublon', label: 'Annonce en doublon' },
+  { value: 'bien-non-loue', label: 'Bien non loué' },
+  { value: 'contenu-interdit', label: 'Contenu interdit (coordonnées, données du locataire, propos illicites)' },
   { value: 'autre', label: 'Autre motif (à préciser ci-dessous)' },
 ];
 export const removalReasonLabel = (value) => (REMOVAL_REASONS.find((r) => r.value === value) || {}).label || String(value || '');
@@ -126,7 +126,6 @@ export const tabForUrl = (url) => {
   if (u.includes('/admin/closings')) return 'closings';
   if (u.includes('/admin/mandates')) return 'mandates';
   if (u.includes('/admin/invoices')) return 'invoices';
-  if (u.includes('/admin/incidents')) return 'incidents';
   if (u.includes('/admin/users') || u.includes('/admin/kyc')) return 'users';
   if (u.includes('/admin/properties') || u.includes('/properties/')) return 'properties';
   return null;
@@ -197,7 +196,7 @@ export const ActionButton = ({ onClick, children, tone = 'outline', disabled, bu
     onClick={onClick}
     disabled={disabled || busy}
     title={title}
-    className={cn('rounded-xl', tone === 'primary' && 'bg-brand-navy hover:bg-brand-navy-light text-white', tone === 'danger' && 'bg-red-700 hover:bg-red-800 text-white')}
+    className={cn('rounded-xl', tone === 'primary' && 'bg-brand-teal hover:bg-brand-teal-dark text-white', tone === 'danger' && 'bg-red-700 hover:bg-red-800 text-white')}
     data-testid={testId}
   >
     {busy && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
@@ -205,7 +204,7 @@ export const ActionButton = ({ onClick, children, tone = 'outline', disabled, bu
   </Button>
 );
 
-// Lien externe (fiche publique, annonce BODACC) avec focus visible
+// Lien externe (fiche publique, justificatif) avec focus visible
 export const ExtLink = ({ href, children, testId }) => (
   <a href={href} target="_blank" rel="noreferrer" className="text-sm font-medium text-brand-blue underline underline-offset-2 hover:text-brand-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue rounded" data-testid={testId}>
     {children}
@@ -304,7 +303,7 @@ export const ActionDialog = ({ open, onClose, title, description, confirmLabel =
             type="button"
             onClick={confirm}
             disabled={busy || disabled}
-            className={cn('rounded-xl text-white', tone === 'danger' ? 'bg-red-700 hover:bg-red-800' : 'bg-brand-navy hover:bg-brand-navy-light')}
+            className={cn('rounded-xl text-white', tone === 'danger' ? 'bg-red-700 hover:bg-red-800' : 'bg-brand-teal hover:bg-brand-teal-dark')}
             data-testid={testId ? `${testId}-confirm` : undefined}
           >
             {busy && <Loader2 className="w-4 h-4 mr-2 animate-spin" aria-hidden="true" />}
@@ -324,18 +323,18 @@ export const Field = ({ id, label, hint, children }) => (
   </div>
 );
 
-// Retrait motivé (SPEC §4.4) : liste fermée + texte libre (obligatoire pour « autre »)
+// Retrait motivé (SPEC §5.4) : liste fermée + texte libre (obligatoire pour « autre »)
 export const RemovalDialog = ({ open, onClose, listingLabel, onConfirm }) => {
-  const [reason, setReason] = useState('coordonnees');
+  const [reason, setReason] = useState(REMOVAL_REASONS[0].value);
   const [text, setText] = useState('');
-  useEffect(() => { if (open) { setReason('coordonnees'); setText(''); } }, [open]);
+  useEffect(() => { if (open) { setReason(REMOVAL_REASONS[0].value); setText(''); } }, [open]);
   const needText = reason === 'autre' && !text.trim();
   return (
     <ActionDialog
       open={open}
       onClose={onClose}
       title="Retirer l'annonce avec motif"
-      description={`${listingLabel ? `${listingLabel} : ` : ''}l'annonce passe hors ligne, le cédant reçoit le motif par e-mail et son mandat devient caduc. Il pourra corriger puis signer un nouveau mandat.`}
+      description={`${listingLabel ? `${listingLabel} : ` : ''}l'annonce passe hors ligne, le vendeur reçoit le motif par e-mail et son mandat devient caduc. Il pourra corriger puis signer un nouveau mandat.`}
       confirmLabel="Retirer l'annonce"
       tone="danger"
       disabled={needText}
@@ -347,7 +346,7 @@ export const RemovalDialog = ({ open, onClose, listingLabel, onConfirm }) => {
           {REMOVAL_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
         </select>
       </Field>
-      <Field id="removal-text" label="Précision pour le cédant" hint="Transmise telle quelle dans l'e-mail de retrait.">
+      <Field id="removal-text" label="Précision pour le vendeur" hint="Transmise telle quelle dans l'e-mail de retrait.">
         <Textarea id="removal-text" value={text} onChange={(e) => setText(e.target.value)} rows={3} maxLength={1000} className="rounded-xl" data-testid="removal-text" />
       </Field>
     </ActionDialog>
@@ -383,7 +382,7 @@ export const PaidDialog = ({ open, onClose, invoice, onConfirm }) => {
       open={open}
       onClose={onClose}
       title={`Enregistrer un encaissement sur la facture ${invoice?.number || ''}`}
-      description="Payée en totalité : le cédant reçoit une confirmation et les relances s'arrêtent. Acompte : la facture reste due pour le solde (relances sur le solde)."
+      description="Payée en totalité : le vendeur reçoit une confirmation et les relances s'arrêtent. Acompte : la facture reste due pour le solde (relances sur le solde)."
       confirmLabel="Enregistrer l'encaissement"
       disabled={!valid}
       onConfirm={() => onConfirm({ paid_on: paidOn, amount: Number(amount) })}
@@ -429,3 +428,65 @@ export const NoteDialog = ({ open, onClose, title, description, confirmLabel, no
     </ActionDialog>
   );
 };
+
+// ---- Justificatif de propriété (SPEC §5.2 point 3, API.md §2) --------------------------------------
+
+export const OWNERSHIP_STATUS = {
+  missing: { label: 'Justificatif non déposé', tone: 'info' },
+  pending: { label: 'Justificatif à contrôler', tone: 'warning' },
+  verified: { label: 'Propriétaire vérifié', tone: 'success' },
+  rejected: { label: 'Justificatif refusé', tone: 'danger' },
+};
+export const ownershipInfo = (ownership) => OWNERSHIP_STATUS[ownership?.status] || OWNERSHIP_STATUS.missing;
+
+export const OWNERSHIP_DOC_TYPES = {
+  'titre-propriete': 'Titre de propriété',
+  'attestation-notariee': 'Attestation notariée',
+  'taxe-fonciere': 'Avis de taxe foncière',
+  'statuts-kbis': 'Statuts et extrait Kbis de la société',
+};
+export const ownershipDocLabel = (docType) => OWNERSHIP_DOC_TYPES[docType] || 'Justificatif';
+
+export const ownershipFileUrl = (propertyId) => `/properties/${propertyId}/ownership-proof/file`;
+
+// Aperçu du justificatif : GET /properties/{id}/ownership-proof/file avec l'en-tête d'authentification (blob), ouvert
+// dans un nouvel onglet ; le fichier n'est jamais public
+export const openOwnershipProof = async (propertyId) => {
+  const res = await axiosInstance.get(ownershipFileUrl(propertyId), { responseType: 'blob' });
+  const type = res.headers?.['content-type'] || res.data?.type || 'application/octet-stream';
+  const blob = res.data instanceof Blob ? res.data : new Blob([res.data], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.target = '_blank';
+  link.rel = 'noopener';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return url;
+};
+
+// Décision de l'admin : PUT /admin/properties/{id}/ownership {status: 'verified'|'rejected', note?} (note obligatoire pour un refus)
+export const reviewOwnership = async (propertyId, status, note) => {
+  const body = { status };
+  if (note) body.note = note;
+  const res = await axiosInstance.put(`/admin/properties/${propertyId}/ownership`, body);
+  return res.data;
+};
+
+// Refus motivé d'un justificatif : le motif est envoyé tel quel au vendeur par e-mail
+export const OwnershipRejectDialog = ({ open, onClose, listingLabel, onConfirm }) => (
+  <NoteDialog
+    open={open}
+    onClose={onClose}
+    title="Refuser le justificatif de propriété"
+    description={`${listingLabel ? `${listingLabel} : ` : ''}le vendeur reçoit le motif par e-mail et peut déposer un nouveau justificatif, qui repassera en contrôle.`}
+    confirmLabel="Refuser le justificatif"
+    noteLabel="Motif du refus (transmis au vendeur)"
+    required
+    tone="danger"
+    onConfirm={onConfirm}
+    testId="ownership-reject-dialog"
+  />
+);

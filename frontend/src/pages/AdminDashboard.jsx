@@ -16,12 +16,11 @@ import AdminProperties from '@/components/admin/AdminProperties';
 import AdminUsers from '@/components/admin/AdminUsers';
 import AdminInvoices from '@/components/admin/AdminInvoices';
 import AdminClosings from '@/components/admin/AdminClosings';
-import AdminIncidents from '@/components/admin/AdminIncidents';
 import { fmtEurCents, fmtNumber, jobsRunSummary } from '@/components/admin/shared';
 
-// Administration (SPEC §6.3, API.md §9) : onglet par défaut « À faire », puis Annonces, Utilisateurs, Mandats,
-// Factures, Ventes, Incidents, Métriques (écran du lundi). Bouton « Lancer les tâches » (POST /admin/jobs/run).
-// Plus aucun appel aux routes retirées (messages, transactions, data room, contrats, reset-password, crédits).
+// Administration (SPEC §9, API.md §9) : onglet par défaut « À faire » (dont les justificatifs de propriété à
+// contrôler), puis Annonces, Utilisateurs, Mandats, Factures, Ventes, Métriques (écran du lundi). Bouton « Lancer les
+// tâches » (POST /admin/jobs/run). La veille des registres et l'onglet Incidents sont retirés (SPEC §6.4).
 
 export const ADMIN_TABS = [
   { value: 'todo', label: 'À faire' },
@@ -30,7 +29,6 @@ export const ADMIN_TABS = [
   { value: 'mandates', label: 'Mandats' },
   { value: 'invoices', label: 'Factures' },
   { value: 'closings', label: 'Ventes' },
-  { value: 'incidents', label: 'Incidents' },
   { value: 'metrics', label: 'Métriques' },
 ];
 
@@ -121,6 +119,7 @@ const AdminDashboard = ({ user, setUser }) => {
     const out = [];
     if (s.published_properties > 0) out.push({ key: 'published', label: 'Annonces en ligne', value: fmtNumber(s.published_properties) });
     if (s.total_properties > 0) out.push({ key: 'properties', label: 'Annonces au total', value: fmtNumber(s.total_properties) });
+    if (s.ownership_pending > 0) out.push({ key: 'ownership', label: 'Justificatifs à contrôler', value: fmtNumber(s.ownership_pending) });
     if (s.total_users > 0) out.push({ key: 'users', label: 'Comptes', value: fmtNumber(s.total_users) });
     if (s.total_revenue > 0) out.push({ key: 'invoiced', label: 'Facturé (HT)', value: fmtEurCents(s.total_revenue) });
     if (s.paid_revenue > 0) out.push({ key: 'paid', label: 'Encaissé (HT)', value: fmtEurCents(s.paid_revenue) });
@@ -149,7 +148,7 @@ const AdminDashboard = ({ user, setUser }) => {
               <RefreshCw className={`w-4 h-4 ${loading || loadingTodo ? 'animate-spin' : ''}`} aria-hidden="true" />
               <span>Actualiser</span>
             </Button>
-            <Button type="button" size="sm" className="rounded-xl bg-brand-navy hover:bg-brand-navy-light text-white" onClick={runJobs} disabled={runningJobs} data-testid="admin-run-jobs">
+            <Button type="button" size="sm" className="rounded-xl bg-brand-teal hover:bg-brand-teal-dark text-white" onClick={runJobs} disabled={runningJobs} data-testid="admin-run-jobs">
               {runningJobs ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Play className="w-4 h-4" aria-hidden="true" />}
               <span>Lancer les tâches</span>
             </Button>
@@ -157,7 +156,7 @@ const AdminDashboard = ({ user, setUser }) => {
         </header>
 
         {tiles.length > 0 && (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-6" data-testid="admin-stats">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6" data-testid="admin-stats">
             {tiles.map((t) => <StatTile key={t.key} label={t.label} value={t.value} testId={`stat-${t.key}`} />)}
           </div>
         )}
@@ -191,9 +190,6 @@ const AdminDashboard = ({ user, setUser }) => {
           </TabsContent>
           <TabsContent value="closings" className="mt-0">
             {tab === 'closings' && <AdminClosings focusId={focus.closings} onNavigate={navigateTo} onEmailBlocked={() => setEmailBlocked(true)} />}
-          </TabsContent>
-          <TabsContent value="incidents" className="mt-0">
-            {tab === 'incidents' && <AdminIncidents focusId={focus.incidents} onEmailBlocked={() => setEmailBlocked(true)} />}
           </TabsContent>
           <TabsContent value="metrics" className="mt-0">
             {tab === 'metrics' && <AdminMetrics stats={stats} />}

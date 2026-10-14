@@ -1,13 +1,13 @@
-// Intégration de la vague 3 : étape de vente (déclaration du repreneur jamais confirmée automatiquement, vente
-// contestée, rédacteur après confirmation), encaissement partiel, correction de déclaration, diagnostic RGE
-// « déclaré », liste à choix multiples sans « filtre », téléphone international, pied de page légal.
+// Intégration : étape de vente (déclaration de l'acquéreur jamais confirmée automatiquement, vente contestée, notaire
+// après confirmation), encaissement partiel, correction de déclaration (bien / parts), fiche de reprise du bail
+// (décence énergétique), liste à choix multiples sans « filtre », téléphone international, pied de page légal.
 // Exécution : cd frontend && CI=true npx craco test --watchAll=false src/components/__tests__/vague3.test.jsx
 import '@/components/shared/jestEnv';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 
-jest.mock('@/App', () => ({ axiosInstance: { get: jest.fn(), post: jest.fn(), put: jest.fn(), delete: jest.fn() }, API: '/api', EMAIL_NOT_VERIFIED_EVENT: 'cession:email-not-verified' }));
+jest.mock('@/App', () => ({ axiosInstance: { get: jest.fn(), post: jest.fn(), put: jest.fn(), delete: jest.fn() }, API: '/api', EMAIL_NOT_VERIFIED_EVENT: 'venteloc:email-not-verified' }));
 jest.mock('@radix-ui/primitive/is-development', () => jest.requireActual('@radix-ui/primitive/dist/internal/is-development.false.js'), { virtual: true });
 jest.mock('@/lib/analytics', () => ({ trackEvent: jest.fn(), trackPageView: jest.fn(), initAnalytics: jest.fn() }));
 
@@ -15,7 +15,7 @@ import { axiosInstance as api } from '@/App';
 import ClosingPanel, { closingSentence, autoConfirms } from '@/components/closing/ClosingPanel';
 import { PaidDialog, invoiceBalance } from '@/components/admin/shared';
 import { CorrectDeclarationDialog } from '@/components/admin/AdminClosings';
-import TransmissibilityPanel, { qualificationStatus, levelTone } from '@/components/buyer/TransmissibilityPanel';
+import LeaseTransferPanel, { dpeTone } from '@/components/buyer/LeaseTransferPanel';
 import MultiSelectList from '@/components/MultiSelectList';
 import { PHONE_RE } from '@/pages/RegisterPage';
 import { footerLegalLines as legalFooterLines } from '@/seo/legal';
@@ -58,22 +58,22 @@ afterEach(() => {
 const seller = { id: 's1', role: 'seller' };
 const buyer = { id: 'b1', role: 'buyer' };
 const base = {
-  id: 'cl1', property_id: 'c1', property_title: 'Plomberie · Bretagne', seller_id: 's1', buyer_id: 'b1', offer_id: 'o1', offer_amount: 280000,
-  sale_object: 'titres', redacteur: null, status: 'in_progress', declaration: null, invoice: null,
+  id: 'cl1', property_id: 'c1', property_title: 'Maison T4 louée · 95 m² · Nantes (44)', seller_id: 's1', buyer_id: 'b1', offer_id: 'o1', offer_amount: 300000,
+  sale_object: 'bien', redacteur: null, status: 'in_progress', declaration: null, invoice: null,
 };
-const buyerDeclaration = { declared_by: 'buyer', signed_on: '2026-10-09', final_price: 275000, sale_object: 'titres', confirm_deadline: '2026-10-16T10:00:00Z' };
+const buyerDeclaration = { declared_by: 'buyer', signed_on: '2026-10-09', final_price: 298000, sale_object: 'bien', confirm_deadline: '2026-10-16T10:00:00Z' };
 
 describe('Étape de vente', () => {
-  test('déclaration du repreneur : jamais « confirmée automatiquement »', async () => {
+  test('déclaration de l\'acquéreur : jamais « confirmée automatiquement »', async () => {
     const declared = { ...base, status: 'declared', declaration: buyerDeclaration };
     expect(autoConfirms(buyerDeclaration)).toBe(false);
     expect(closingSentence(declared, 'buyer')).not.toMatch(/automatiquement/);
-    expect(closingSentence(declared, 'buyer')).toMatch(/accord du cédant/);
+    expect(closingSentence(declared, 'buyer')).toMatch(/accord du vendeur/);
     expect(closingSentence(declared, 'seller')).not.toMatch(/automatiquement/);
     const c = await render(<ClosingPanel closing={{ ...declared, role: 'seller' }} user={seller} onChange={jest.fn()} />);
     expect(c.querySelector('[data-testid="confirm-deadline"]').textContent).toMatch(/qu'avec votre accord/);
     expect(c.textContent).not.toMatch(/confirmée automatiquement/);
-    // Déclaration du cédant : la confirmation automatique reste annoncée
+    // Déclaration du vendeur : la confirmation automatique reste annoncée
     expect(closingSentence({ ...declared, declaration: { ...buyerDeclaration, declared_by: 'seller' } }, 'buyer')).toMatch(/automatiquement/);
   });
 
@@ -85,7 +85,7 @@ describe('Étape de vente', () => {
     expect(b.querySelector('[data-testid="declare-form"]')).toBeNull();
   });
 
-  test('vente confirmée : le cédant peut encore renseigner le rédacteur tant que l\'ordre de paiement n\'est pas parti', async () => {
+  test('vente confirmée : le vendeur peut encore renseigner le notaire tant que l\'ordre de paiement n\'est pas parti', async () => {
     const confirmed = { ...base, status: 'confirmed', declaration: { ...buyerDeclaration, declared_by: 'seller' }, redacteur: { type: 'notaire', name: 'Étude Le Gall', email: 'etude@notaires.fr', set_by: 'buyer' } };
     const s = await render(<ClosingPanel closing={{ ...confirmed, role: 'seller' }} user={seller} onChange={jest.fn()} />);
     expect(s.querySelector('[data-testid="redacteur-edit"]')).not.toBeNull();
@@ -112,33 +112,38 @@ describe('Administration : factures et ventes', () => {
     expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({ amount: 3800 }));
   });
 
-  test('correction de la déclaration après avoir : date, prix, objet envoyés', async () => {
+  test('correction de la déclaration après avoir : date, prix, objet (bien ou parts) envoyés', async () => {
     const onConfirm = jest.fn().mockResolvedValue();
-    const closing = { id: 'cl1', status: 'confirmed', declaration: { signed_on: '2026-10-01', final_price: 200000, sale_object: 'titres' } };
+    const closing = { id: 'cl1', status: 'confirmed', declaration: { signed_on: '2026-10-01', final_price: 200000, sale_object: 'bien' } };
     await render(<CorrectDeclarationDialog open closing={closing} onClose={() => {}} onConfirm={onConfirm} />);
     const dialog = document.body.querySelector('[data-testid="correct-declaration-dialog"]');
+    expect(Array.from(dialog.querySelector('[data-testid="correct-object"]').options).map((o) => o.value)).toEqual(['', 'bien', 'parts']);
     setValue(dialog.querySelector('[data-testid="correct-price"]'), '210000');
+    setValue(dialog.querySelector('[data-testid="correct-object"]'), 'parts');
     await flush();
     await click(dialog.querySelector('[data-testid="correct-declaration-dialog-confirm"]'));
-    expect(onConfirm).toHaveBeenCalledWith({ signed_on: '2026-10-01', final_price: 210000, sale_object: 'titres', note: null });
+    expect(onConfirm).toHaveBeenCalledWith({ signed_on: '2026-10-01', final_price: 210000, sale_object: 'parts', note: null });
     expect(api.put).not.toHaveBeenCalled();
   });
 });
 
-describe('Diagnostic de transmissibilité', () => {
-  test('qualification seulement déclarée : pas de vert, diagnostic en ambre', async () => {
-    expect(qualificationStatus({ status: 'valide' }, false)).toEqual({ label: 'Déclarée, en cours de validité', tone: 'declared' });
-    expect(qualificationStatus({ status: 'valide' }, true).tone).toBe('verified');
-    expect(levelTone('elevee', false)).toMatch(/amber/);
-    expect(levelTone('elevee', true)).toMatch(/green/);
-    const diag = { source: 'declared', level: { value: 'elevee', label: 'Transmissibilité élevée' }, qualifications: [{ name: 'QualiPAC', status: 'valide', date_fin: '2028-01-01' }],
-      transfer: { titres: { label: 'Cession de titres', summary: 'Les qualifications restent attachées à la société.' } }, referent: { label: 'Référent technique RGE', text: 'À confirmer.' } };
-    const c = await render(<TransmissibilityPanel diagnostic={diag} ademe={{ found: false, message: 'SIRET non trouvé' }} />);
-    expect(c.querySelector('[data-testid="qualification-badge"]').className).toContain('badge-declared');
-    const details = c.querySelector('[data-testid="transfer-details"]');
-    expect(details.tagName).toBe('DETAILS');
-    expect(details.open).toBe(false);
-    expect(details.textContent).toContain('Référent technique RGE');
+describe('Fiche de reprise du bail', () => {
+  test('décence énergétique : ambre si interdit ou à échéance, neutre sinon ; aucun vert', async () => {
+    expect(dpeTone('interdit')).toBe('attention');
+    expect(dpeTone('echeance')).toBe('attention');
+    expect(dpeTone('ok')).toBe('info');
+    const data = {
+      lease_type: 'commercial', regime: 'commercial',
+      points: [{ key: 'preference', title: 'Droit de préférence du locataire', text: 'Art. L145-46-1 du Code de commerce, purgé par le notaire.', level: 'attention' }],
+      dpe: { status: 'interdit', date: '2025-01-01', text: 'Logement classé G : il ne peut plus faire l\'objet d\'un nouveau bail.' },
+      summary: [], disclaimer: 'Information générale.',
+    };
+    const c = await render(<LeaseTransferPanel data={data} />);
+    expect(c.textContent).toContain('Bail commercial (3-6-9)');
+    expect(c.querySelector('[data-testid="lease-summary"]')).toBeNull();
+    expect(c.querySelector('[data-testid="lease-dpe"]').getAttribute('role')).toBe('note');
+    expect(c.querySelector('[data-testid="lease-point-preference"]').className).toContain('amber');
+    expect(c.innerHTML).not.toMatch(/green/);
   });
 });
 

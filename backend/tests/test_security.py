@@ -33,13 +33,18 @@ def test_login_case_insensitive_and_no_hash(api, client):
 
 
 def test_listing_anonymous_until_nda(api, client):
-    seller, c = published_listing(api, client)
+    seller = api.register(uid("vendeur"), "seller")
+    api.verify_kyc(seller)
+    c = client.post("/api/properties", headers=api.h(seller), json=listing(siret="12345678900011", name="SCI SECRÈTE")).json()
+    api.publish(seller, c["id"])
     public = client.get("/api/properties").json()
-    assert all("siret" not in x and "company_name" not in x and "seller_email" not in x for x in public)
+    assert all(k not in x for x in public for k in ("siret", "company_name", "seller_email", "address", "seller_id", "mandant_address"))
     buyer = api.register(uid("acheteur"), "buyer")
     detail = client.get(f"/api/properties/{c['id']}", headers=api.h(buyer)).json()
-    assert "company_name" not in detail and "siret" not in detail
-    assert client.get(f"/api/properties/{c['id']}", headers=api.h(seller)).json()["company_name"] == "SECRET ENERGIE SAS"
+    assert "company_name" not in detail and "siret" not in detail and "address" not in detail
+    assert detail["ownership"] == {"status": "pending"}
+    own = client.get(f"/api/properties/{c['id']}", headers=api.h(seller)).json()
+    assert own["company_name"] == "SCI SECRÈTE" and own["address"].endswith("rue des Lilas")
 
 
 def test_unpublished_listing_hidden(api, client):
@@ -47,6 +52,7 @@ def test_unpublished_listing_hidden(api, client):
     api.verify_kyc(seller)
     c = client.post("/api/properties", headers=api.h(seller), json=listing()).json()
     assert c["status"] == "mandat_en_attente"
+    assert {b["code"] for b in c["blocking"]} == {"mandate", "ownership_proof"}
     assert client.get(f"/api/properties/{c['id']}").status_code == 404
 
 

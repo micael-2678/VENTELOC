@@ -6,30 +6,41 @@ import SecurePdfViewer from '@/components/SecurePdfViewer';
 import { apiErrorMessage } from '@/components/account/errors';
 import { formatDateFr } from '@/components/shared/formatters';
 
-// Documents du dossier (data room) côté repreneur : liste par catégorie, consultation avec filigrane dans la
+// Documents du dossier du bien côté acquéreur : liste par catégorie (SPEC §6.3), consultation avec filigrane dans la
 // visionneuse pdf.js embarquée (POST /dataroom/{id}/documents/{doc_id}/view → {document:{content base64}, watermark}).
 // Aucun téléchargement : le filigrane porte l'e-mail et l'horodatage du lecteur.
 
-const CATEGORY_LABELS = {
-  financier: 'Documents financiers',
-  juridique: 'Documents juridiques',
-  social: 'Social et équipe',
-  commercial: 'Commercial et chantiers',
-  technique: 'Technique et qualifications',
-  assurance: 'Assurances',
-  autre: 'Autres documents',
+// Catégories du dossier du bien (DATAROOM_CATEGORIES côté serveur, GET /dataroom/categories), dans l'ordre d'affichage
+export const DATAROOM_CATEGORIES = [
+  { id: 'bail', label: 'Bail et avenants' },
+  { id: 'etats-des-lieux', label: 'États des lieux' },
+  { id: 'loyers', label: 'Loyers et quittances' },
+  { id: 'diagnostics', label: 'Diagnostics (DPE, dossier de diagnostic technique)' },
+  { id: 'taxe-fonciere', label: 'Taxe foncière' },
+  { id: 'copropriete', label: 'Copropriété (règlement, procès-verbaux d\'AG, charges)' },
+  { id: 'titre-propriete', label: 'Titre de propriété' },
+  { id: 'assurances', label: 'Assurances (PNO, loyers impayés)' },
+  { id: 'travaux', label: 'Travaux (factures, garanties)' },
+  { id: 'societe', label: 'Société (statuts, bilans)' },
+  { id: 'autres', label: 'Autres documents' },
+];
+const ORDER = DATAROOM_CATEGORIES.reduce((acc, c, i) => { acc[c.id] = i; return acc; }, {});
+
+export const categoryLabel = (c, fallbackLabel) => {
+  const id = String(c || '').toLowerCase();
+  const known = DATAROOM_CATEGORIES.find((x) => x.id === id);
+  if (known) return known.label;
+  return fallbackLabel || DATAROOM_CATEGORIES[DATAROOM_CATEGORIES.length - 1].label;
 };
 
-const categoryLabel = (c) => CATEGORY_LABELS[String(c || '').toLowerCase()] || (c ? String(c) : CATEGORY_LABELS.autre);
-
-const groupByCategory = (docs) => {
+export const groupByCategory = (docs) => {
   const groups = {};
   docs.forEach((d) => {
-    const key = categoryLabel(d.category);
-    if (!groups[key]) groups[key] = [];
-    groups[key].push(d);
+    const id = ORDER[String(d.category || '').toLowerCase()] !== undefined ? String(d.category).toLowerCase() : 'autres';
+    if (!groups[id]) groups[id] = { id, label: categoryLabel(id, d.category_label), docs: [] };
+    groups[id].docs.push(d);
   });
-  return Object.keys(groups).sort().map((label) => ({ label, docs: groups[label] }));
+  return Object.values(groups).sort((a, b) => ORDER[a.id] - ORDER[b.id]);
 };
 
 const DataroomDocuments = ({ propertyId, documents }) => {
@@ -64,8 +75,8 @@ const DataroomDocuments = ({ propertyId, documents }) => {
     return (
       <div className="rounded-xl border border-dashed border-brand-line bg-white p-6 text-center" data-testid="dataroom-empty">
         <FolderOpen className="w-8 h-8 text-gray-400 mx-auto mb-2" aria-hidden="true" />
-        <p className="font-semibold text-brand-navy">Le cédant n&apos;a pas encore déposé de document.</p>
-        <p className="text-sm text-gray-600 mt-1">Il est prévenu de votre accès. Vous recevrez un e-mail dès qu&apos;un document sera disponible ; vous pouvez aussi lui demander les pièces qui vous manquent par la messagerie.</p>
+        <p className="font-semibold text-brand-navy">Le vendeur n&apos;a pas encore déposé de document.</p>
+        <p className="text-sm text-gray-600 mt-1">Il est prévenu de votre accès. Vous recevrez un e-mail dès qu&apos;un document sera disponible ; vous pouvez aussi lui demander les pièces qui vous manquent (bail, quittances, diagnostics…) par la messagerie.</p>
       </div>
     );
   }
@@ -73,10 +84,11 @@ const DataroomDocuments = ({ propertyId, documents }) => {
   return (
     <div className="space-y-5 min-w-0" data-testid="dataroom-documents">
       <p className="text-sm text-gray-600">
-        Consultation en ligne uniquement, avec un filigrane à votre nom et la date : chaque ouverture est journalisée et visible du cédant.
+        Consultation en ligne uniquement, avec un filigrane à votre nom et la date : chaque ouverture est journalisée et visible du vendeur.
+        Les données personnelles du locataire éventuellement présentes ne servent qu&apos;à l&apos;étude de l&apos;achat (engagement de confidentialité).
       </p>
       {groupByCategory(docs).map((group) => (
-        <section key={group.label} aria-label={group.label} className="min-w-0">
+        <section key={group.id} aria-label={group.label} className="min-w-0" data-testid={`dataroom-category-${group.id}`}>
           <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500 mb-2">{group.label}</h3>
           <ul className="divide-y divide-brand-line rounded-xl border border-brand-line bg-white">
             {group.docs.map((doc) => (

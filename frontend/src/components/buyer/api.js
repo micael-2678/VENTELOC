@@ -1,4 +1,4 @@
-// Accès API de l'espace repreneur (API.md §2 à §8). Les réponses sont lues de façon tolérante : la forme du
+// Accès API de l'espace acquéreur (API.md §2 à §8). Les réponses sont lues de façon tolérante : la forme du
 // contrat (tableau nu, `steps`/`next_step`) ou l'enveloppe historique ({offers}, {closings}, {favorites},
 // {alerts}, conversations groupées par annonce). Aucun texte d'offre n'est écrit ici : voir lib/offer.js.
 import { axiosInstance } from '@/App';
@@ -19,7 +19,8 @@ export const fetchMyOffers = () => settled(axiosInstance.get('/offers/my')).then
 export const fetchClosings = () => settled(axiosInstance.get('/closing/my')).then((d) => asList(d, 'closings'));
 export const fetchKyc = () => settled(axiosInstance.get('/kyc/status'));
 export const fetchProfile = () => settled(axiosInstance.get('/auth/profile')).then((d) => (d && d.user ? d.user : d));
-export const fetchTransmissibility = (propertyId) => settled(axiosInstance.get(`/properties/${propertyId}/transmissibility`));
+// Fiche de reprise du bail (SPEC §6.2) : {lease_type, regime, points, dpe?, summary, disclaimer}
+export const fetchLeaseTransfer = (propertyId) => settled(axiosInstance.get(`/properties/${propertyId}/lease-transfer`));
 export const fetchDataroomDocuments = (propertyId) => settled(axiosInstance.get(`/dataroom/${propertyId}/documents`));
 
 // ------------------------------------------------------------------------------------------------
@@ -84,7 +85,7 @@ export const fetchConversations = (userId) => settled(axiosInstance.get('/messag
 // Libellés
 export const OFFER_STATUS = {
   pending_signature: { label: 'À signer', tone: 'warning' },
-  pending: { label: 'Transmise au cédant', tone: 'info' },
+  pending: { label: 'Transmise au vendeur', tone: 'info' },
   accepted: { label: 'Acceptée', tone: 'success' },
   rejected: { label: 'Refusée', tone: 'danger' },
   countered: { label: 'Contre-proposition reçue', tone: 'warning' },
@@ -92,31 +93,31 @@ export const OFFER_STATUS = {
 };
 export const offerStatus = (offer) => OFFER_STATUS[offer?.status] || { label: String(offer?.status || ''), tone: 'info' };
 const OFFER_PIPELINE_DETAIL = {
-  pending_signature: 'Offre à signer',
-  pending: 'Offre transmise au cédant',
-  accepted: 'Offre acceptée',
-  rejected: 'Offre refusée',
-  countered: 'Contre-proposition du cédant à étudier',
+  pending_signature: 'Offre d\'achat à signer',
+  pending: 'Offre d\'achat transmise au vendeur',
+  accepted: 'Offre d\'achat acceptée',
+  rejected: 'Offre d\'achat refusée',
+  countered: 'Contre-proposition du vendeur à étudier',
   expired: 'Offre expirée',
 };
 
 export const CLOSING_STATUS = {
   in_progress: { label: 'Vente en cours', tone: 'info' },
-  declared: { label: 'Vente déclarée, à confirmer', tone: 'warning' },
+  declared: { label: 'Acte authentique déclaré, à confirmer', tone: 'warning' },
   confirmed: { label: 'Vente confirmée', tone: 'success' },
   disputed: { label: 'Déclaration contestée', tone: 'danger' },
   abandoned: { label: 'Vente abandonnée', tone: 'info' },
 };
 export const closingStatus = (closing) => CLOSING_STATUS[closing?.status] || { label: String(closing?.status || ''), tone: 'info' };
 
-export const SALE_OBJECT_LABELS = { titres: 'Cession de titres', fonds: 'Cession du fonds de commerce', indifferent: 'Titres ou fonds, au choix' };
-export const SALE_REASON_LABELS = { retraite: 'Départ à la retraite', reconversion: 'Reconversion ou nouveau projet', sante: 'Raison de santé', autre: 'Autre raison' };
-export const FINANCING_LABELS = { equity: 'Apport', loan: 'Emprunt bancaire', vendor_loan: 'Crédit vendeur', earn_out: 'Complément de prix' };
+// Objet d'une offre d'achat ou d'une vente (API.md §5 et §7) : le bien ou les parts de la société propriétaire
+export const SALE_OBJECT_LABELS = { bien: 'Vente du bien', parts: 'Cession des parts de la société', indifferent: 'Bien ou parts' };
+export const FINANCING_LABELS = { equity: 'Apport personnel', loan: 'Emprunt bancaire' };
 export const FUNDS_SOURCES = [
-  { value: 'fonds-propres', label: 'Fonds propres' },
+  { value: 'fonds-propres', label: 'Fonds propres (épargne, vente d\'un autre bien)' },
   { value: 'emprunt', label: 'Emprunt bancaire' },
   { value: 'mixte', label: 'Apport et emprunt' },
-  { value: 'investisseurs', label: 'Investisseurs ou société du groupe' },
+  { value: 'investisseurs', label: 'Associés ou investisseurs (SCI, société)' },
 ];
 
 export const badgeClass = (tone) => {
@@ -130,12 +131,12 @@ export const badgeClass = (tone) => {
 };
 
 // ------------------------------------------------------------------------------------------------
-// Pipeline « Mes dossiers » (SPEC §4.3 point 7) : une ligne par annonce, étape la plus avancée.
+// Pipeline « Mes dossiers » (SPEC §5.3) : une ligne par bien, étape la plus avancée.
 export const PIPELINE_STAGES = [
   { key: 'contacted', label: 'Contacté' },
   { key: 'requested', label: 'Dossier demandé' },
-  { key: 'nda', label: 'Accord de confidentialité' },
-  { key: 'dataroom', label: 'Dossier ouvert' },
+  { key: 'nda', label: 'Engagement' },
+  { key: 'dataroom', label: 'Dossier' },
   { key: 'offer', label: 'Offre' },
   { key: 'closing', label: 'Vente' },
 ];
@@ -146,7 +147,7 @@ export const buildPipeline = ({ conversations = [], accessByProperty = {}, offer
   const rows = {};
   const ensure = (propertyId) => {
     if (!rows[propertyId]) {
-      rows[propertyId] = { propertyId, stage: 'contacted', detail: 'Projet présenté au cédant', lastAt: null, unread: 0, conversationId: null, offer: null, closing: null, access: null };
+      rows[propertyId] = { propertyId, stage: 'contacted', detail: 'Projet présenté au vendeur', lastAt: null, unread: 0, conversationId: null, offer: null, closing: null, access: null };
     }
     return rows[propertyId];
   };
@@ -175,12 +176,12 @@ export const buildPipeline = ({ conversations = [], accessByProperty = {}, offer
     const row = ensure(propertyId);
     row.access = a;
     later(row, a.request?.createdAt);
-    if (a.accessGranted) bump(row, 'dataroom', 'Accès au dossier accordé');
-    else if (a.steps.nda && a.accepted) bump(row, 'nda', 'Accord signé : déclaration d\'origine des fonds à faire');
-    else if (a.accepted) bump(row, 'nda', a.nextStep === 'identity' ? 'Dossier accepté : identité à vérifier' : 'Dossier accepté : accord de confidentialité à signer');
-    else if (a.status === 'pending') bump(row, 'requested', 'En attente de la réponse du cédant');
-    else if (a.status === 'expired') bump(row, 'requested', 'Sans réponse du cédant sous 10 jours : nous l\'avons relancé');
-    else if (a.status === 'rejected') bump(row, 'requested', 'Demande refusée par le cédant');
+    if (a.accessGranted) bump(row, 'dataroom', 'Dossier du bien ouvert, adresse révélée');
+    else if (a.steps.nda && a.accepted) bump(row, 'nda', 'Engagement signé : déclaration d\'origine des fonds à faire');
+    else if (a.accepted) bump(row, 'nda', a.nextStep === 'identity' ? 'Dossier accepté : identité à vérifier' : 'Dossier accepté : engagement de confidentialité à signer');
+    else if (a.status === 'pending') bump(row, 'requested', 'En attente de la réponse du vendeur');
+    else if (a.status === 'expired') bump(row, 'requested', 'Sans réponse du vendeur sous 10 jours : nous l\'avons relancé');
+    else if (a.status === 'rejected') bump(row, 'requested', 'Demande refusée par le vendeur');
     else if (a.status === 'closed') bump(row, 'requested', 'Annonce plus en ligne : demande de dossier close');
   });
 
@@ -189,7 +190,7 @@ export const buildPipeline = ({ conversations = [], accessByProperty = {}, offer
     const row = ensure(o.property_id);
     row.offer = o;
     later(row, o.updated_at || o.created_at);
-    bump(row, 'offer', OFFER_PIPELINE_DETAIL[o.status] || 'Offre déposée');
+    bump(row, 'offer', OFFER_PIPELINE_DETAIL[o.status] || 'Offre d\'achat déposée');
   });
 
   closings.forEach((cl) => {
@@ -206,37 +207,43 @@ export const buildPipeline = ({ conversations = [], accessByProperty = {}, offer
 };
 
 // ------------------------------------------------------------------------------------------------
-// Alertes avec compte (API.md §8 : trades, regions, max_price, rge). Forme historique tolérée (rge_types, region).
+// Alertes avec compte (API.md §8 : property_types, regions, max_price, min_yield)
 export const normalizeAlert = (a) => {
   const alert = a || {};
+  const num = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
   return {
     id: alert.id,
     name: alert.name || '',
-    trades: Array.isArray(alert.trades) ? alert.trades : [],
+    propertyTypes: Array.isArray(alert.property_types) ? alert.property_types : [],
     regions: Array.isArray(alert.regions) ? alert.regions : (alert.region ? [alert.region] : []),
-    maxPrice: alert.max_price != null ? Number(alert.max_price) : null,
-    rge: alert.rge === true ? true : alert.rge === false ? false : null,
+    maxPrice: num(alert.max_price),
+    minYield: num(alert.min_yield),
     active: alert.active !== false,
     createdAt: alert.created_at || null,
   };
 };
 
-// Le nom sert d'intitulé lisible ; le serveur l'accepte en plus des critères
-export const alertPayload = ({ trades, regions, maxPrice, rge, name }) => ({
-  name: name || alertName({ trades, regions, maxPrice, rge }),
-  trades,
-  regions,
-  max_price: maxPrice ? Number(maxPrice) : null,
-  rge: rge === true || rge === false ? rge : null,
-});
+const fmtYield = (v) => `${String(v).replace('.', ',')} %`;
 
-export const alertName = ({ trades = [], regions = [], maxPrice, rge, tradeLabel = (t) => t }) => {
+export const alertName = ({ propertyTypes = [], regions = [], maxPrice, minYield, typeLabel = (t) => t }) => {
   const parts = [];
-  parts.push(trades.length ? trades.map(tradeLabel).join(', ') : 'Tous les métiers');
+  parts.push(propertyTypes.length ? propertyTypes.map(typeLabel).join(', ') : 'Tous les biens');
   parts.push(regions.length ? regions.join(', ') : 'Toute la France');
-  if (rge === true) parts.push('RGE');
   if (maxPrice) parts.push(`≤ ${Number(maxPrice).toLocaleString('fr-FR')} €`);
+  if (minYield) parts.push(`rendement ≥ ${fmtYield(minYield)}`);
   return parts.join(' · ');
+};
+
+// Le nom sert d'intitulé lisible ; le serveur l'accepte en plus des critères
+export const alertPayload = ({ propertyTypes = [], regions = [], maxPrice, minYield, name, typeLabel }) => {
+  const yieldNum = Number(String(minYield ?? '').replace(',', '.'));
+  return {
+    name: name || alertName({ propertyTypes, regions, maxPrice, minYield, typeLabel }),
+    property_types: propertyTypes,
+    regions,
+    max_price: maxPrice ? Number(maxPrice) : null,
+    min_yield: minYield !== '' && minYield !== null && minYield !== undefined && Number.isFinite(yieldNum) && yieldNum > 0 ? yieldNum : null,
+  };
 };
 
 // ------------------------------------------------------------------------------------------------
@@ -247,6 +254,9 @@ export const isNotAllowed = (error) => error?.response?.status === 403 && apiErr
 
 // Texte du contrat d'une offre en attente de signature, conservé le temps de la signature (sessionStorage)
 const OFFER_TEXT_KEY = 'offer_text:';
+
+// Page publique d'une annonce (API.md §10 : /annonce/:id)
+export const propertyPath = (id) => `/annonce/${encodeURIComponent(String(id || ''))}`;
 export const rememberOfferText = (contractId, text) => {
   try { if (contractId && text) sessionStorage.setItem(OFFER_TEXT_KEY + contractId, text); } catch (e) { /* stockage indisponible */ }
 };

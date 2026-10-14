@@ -4,7 +4,8 @@
 const FOCUS = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2';
 const BASE = `inline-flex items-center justify-center gap-2 rounded-xl font-semibold transition-colors disabled:opacity-60 disabled:pointer-events-none ${FOCUS}`;
 
-export const BTN_PRIMARY = `${BASE} bg-brand-navy text-white hover:bg-brand-navy-light`;
+// Action principale : teal #0f766e, survol #115e59 (docs/venteloc/SPEC.md §11)
+export const BTN_PRIMARY = `${BASE} bg-brand-teal text-white hover:bg-brand-teal-dark`;
 export const BTN_SECONDARY = `${BASE} border border-brand-navy bg-white text-brand-navy hover:bg-brand-surface`;
 export const BTN_QUIET = `${BASE} border border-brand-line bg-white text-brand-navy hover:border-brand-navy/40`;
 // Pastille (badge) : mêmes proportions que .badge de index.css

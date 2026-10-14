@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Bell, Download, KeyRound, Loader2, Mail, MailCheck, MailWarning, ShieldCheck, Trash2, UserRound, Briefcase } from 'lucide-react';
+import { Bell, Download, KeyRound, Loader2, Mail, MailCheck, MailWarning, ShieldCheck, Trash2, UserRound, TrendingUp } from 'lucide-react';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { axiosInstance } from '@/App';
@@ -11,21 +11,18 @@ import AppHeader from '@/components/layout/AppHeader';
 import PageBar from '@/components/layout/PageBar';
 import { KYCStatus, KYCVerificationButton, identityPurpose } from '@/components/KYCVerification';
 import EmailVerificationBanner from '@/components/EmailVerificationBanner';
-import SiretField from '@/components/account/SiretField';
-import CompanyPrefillCard from '@/components/account/CompanyPrefillCard';
 import BuyerProfileFields from '@/components/account/BuyerProfileFields';
 import ScoreMeter from '@/components/account/ScoreMeter';
 import { apiErrorMessage } from '@/components/account/errors';
-import { useCompanyLookup, cleanSiret } from '@/components/account/siret';
 import { computeProfileScore, buyerProfilePayload, buyerProfileFromUser } from '@/components/account/profileScore';
 
-// Mon profil (SPEC §4.1, API.md §1) : coordonnées et profil repreneur (PUT /auth/profile), e-mail confirmé,
-// identité via Stripe Identity (demandée au NDA pour un repreneur, au mandat pour un cédant), préférence
-// notifications, mot de passe, export (GET /auth/export) et suppression (DELETE /auth/account {password}).
-// Plus aucun envoi de pièces (KYC manuel supprimé).
+// Mon profil (SPEC §4, API.md §1) : coordonnées et profil d'investisseur de l'acquéreur (PUT /auth/profile), e-mail
+// confirmé, identité via Stripe Identity (demandée avant l'engagement de confidentialité pour un acquéreur, avant le
+// mandat pour un vendeur), préférence notifications, mot de passe, export (GET /auth/export) et suppression
+// (DELETE /auth/account {password}). Aucun envoi de pièces d'identité.
 
 const inputClass = 'w-full rounded-xl border border-brand-line bg-white px-4 py-3 text-brand-navy focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30';
-const ROLE_LABEL = { seller: 'Cédant', buyer: 'Repreneur', admin: 'Administration' };
+const ROLE_LABEL = { seller: 'Vendeur', buyer: 'Acquéreur', admin: 'Administration' };
 
 const Card = ({ title, icon: Icon, children, intro, id, testId }) => (
   <section className="card p-5 sm:p-6 min-w-0" aria-labelledby={id} data-testid={testId}>
@@ -47,14 +44,13 @@ const ProfilePage = ({ user, setUser }) => {
   usePrivateSeo('Mon profil');
   const navigate = useNavigate();
   const [profile, setProfile] = useState(user);
-  const [identity, setIdentity] = useState({ first_name: '', last_name: '', phone: '', company_name: '', siret: '' });
+  const [identity, setIdentity] = useState({ first_name: '', last_name: '', phone: '' });
   const [buyerProfile, setBuyerProfile] = useState(buyerProfileFromUser(user?.buyer_profile));
   const [optOut, setOptOut] = useState(!!user?.notifications_opt_out);
   const [saving, setSaving] = useState('');
   const [passwords, setPasswords] = useState({ current_password: '', new_password: '', confirm: '' });
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deletePassword, setDeletePassword] = useState('');
-  const lookup = useCompanyLookup();
 
   const applyUser = (fresh) => {
     setProfile(fresh);
@@ -62,8 +58,6 @@ const ProfilePage = ({ user, setUser }) => {
       first_name: fresh.first_name || '',
       last_name: fresh.last_name || '',
       phone: fresh.phone || '',
-      company_name: fresh.company_name || '',
-      siret: cleanSiret(fresh.siret || ''),
     });
     setBuyerProfile(buyerProfileFromUser(fresh.buyer_profile));
     setOptOut(!!fresh.notifications_opt_out);
@@ -109,14 +103,6 @@ const ProfilePage = ({ user, setUser }) => {
       last_name: identity.last_name.trim(),
       phone: identity.phone.trim(),
     };
-    if (isSeller) {
-      body.company_name = identity.company_name.trim();
-      body.siret = identity.siret ? cleanSiret(identity.siret) : '';
-      if (body.siret && body.siret.length !== 14) {
-        toast.error('Un SIRET compte 14 chiffres (ou laissez le champ vide).');
-        return;
-      }
-    }
     await save('identity', body, 'Coordonnées enregistrées');
   };
 
@@ -124,7 +110,7 @@ const ProfilePage = ({ user, setUser }) => {
     e.preventDefault();
     const body = { buyer_profile: buyerProfilePayload(buyerProfile), phone: identity.phone.trim() };
     if (body.buyer_profile.company_name) body.company_name = body.buyer_profile.company_name;
-    await save('buyer', body, 'Profil de projet enregistré');
+    await save('buyer', body, 'Profil d\'investisseur enregistré');
   };
 
   const toggleNotifications = async (checked) => {
@@ -230,7 +216,7 @@ const ProfilePage = ({ user, setUser }) => {
 
         <div className="grid md:grid-cols-2 gap-6">
           {/* Coordonnées */}
-          <Card id="profile-identity" title="Mes coordonnées" icon={UserRound} intro="Jamais publiées : votre nom n'apparaît qu'après un accord de confidentialité signé.">
+          <Card id="profile-identity" title="Mes coordonnées" icon={UserRound} intro="Jamais publiées : votre nom n'est communiqué qu'après un engagement de confidentialité signé.">
             <form onSubmit={saveIdentity} className="space-y-4">
               <div className="grid sm:grid-cols-2 gap-4">
                 <div>
@@ -246,17 +232,6 @@ const ProfilePage = ({ user, setUser }) => {
                 <label htmlFor="profile-phone" className="block text-sm font-semibold text-brand-navy mb-1">Téléphone</label>
                 <input id="profile-phone" type="tel" autoComplete="tel" value={identity.phone} onChange={(e) => setIdentity({ ...identity, phone: e.target.value })} className={inputClass} placeholder="06 12 34 56 78" />
               </div>
-              {isSeller && (
-                <>
-                  <SiretField value={identity.siret} onChange={(v) => setIdentity({ ...identity, siret: v })} lookup={lookup}
-                    hint="Obligatoire à la publication d'une annonce ; charge vos qualifications RGE." testId="profile-siret-input" />
-                  {lookup.result && ['found', 'not_found', 'unavailable'].includes(lookup.status) && <CompanyPrefillCard result={lookup.result} />}
-                  <div>
-                    <label htmlFor="profile-property" className="block text-sm font-semibold text-brand-navy mb-1">Nom de l'entreprise</label>
-                    <input id="profile-property" autoComplete="organization" value={identity.company_name} onChange={(e) => setIdentity({ ...identity, company_name: e.target.value })} className={inputClass} />
-                  </div>
-                </>
-              )}
               <button type="submit" disabled={saving === 'identity'} className="btn-primary w-full sm:w-auto" data-testid="profile-save-identity">
                 {saving === 'identity' && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
                 Enregistrer
@@ -273,10 +248,10 @@ const ProfilePage = ({ user, setUser }) => {
                 {isVerified && <span className="badge badge-verified mt-2" data-testid="kyc-status-badge"><ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />Identité vérifiée</span>}
               </div>
               {!isVerified && profile?.role === 'buyer' && (
-                // Repreneur : la vérification (payante à l'usage) n'est ouverte qu'à la signature de l'accord de
-                // confidentialité, depuis le dossier de l'entreprise, après acceptation de la demande par le cédant
+                // Acquéreur : la vérification (payante à l'usage) n'est ouverte qu'avant l'engagement de confidentialité,
+                // depuis le dossier du bien, après acceptation de la demande par le vendeur
                 <p className="text-sm text-gray-700 leading-relaxed" data-testid="kyc-buyer-later">
-                  Elle vous sera demandée à la signature de l'accord de confidentialité, une fois votre demande de dossier acceptée par le cédant : pièce d'identité et selfie, en 3 minutes, via Stripe Identity. Seul le résultat est conservé, jamais les images.
+                  Elle vous sera demandée avant de signer l'engagement de confidentialité, une fois votre demande de dossier acceptée par le vendeur : pièce d'identité et selfie, en 3 minutes, via Stripe Identity. Seul le résultat est conservé, jamais les images.
                 </p>
               )}
               {!isVerified && isSeller && (
@@ -287,14 +262,13 @@ const ProfilePage = ({ user, setUser }) => {
                   <KYCVerificationButton user={profile} className="w-full rounded-xl" />
                 </>
               )}
-              {isSeller && profile.siret && <p className="text-xs text-gray-500 leading-relaxed">Le contrôle « dirigeant » sur les bases publiques donne un badge ; il ne bloque ni l'annonce ni le mandat.</p>}
             </div>
           </Card>
         </div>
 
-        {/* Profil repreneur */}
+        {/* Profil acquéreur */}
         {isBuyer && (
-          <Card id="profile-buyer" title="Mon projet de reprise" icon={Briefcase} intro="C'est la carte que les cédants lisent avant de vous répondre, sans votre nom tant que l'accord de confidentialité n'est pas signé." testId="buyer-profile-section">
+          <Card id="profile-buyer" title="Mon projet d'investissement" icon={TrendingUp} intro="C'est la carte que les vendeurs lisent avant de vous répondre, sans votre nom tant que l'engagement de confidentialité n'est pas signé." testId="buyer-profile-section">
             <form onSubmit={saveBuyerProfile} className="space-y-6">
               <ScoreMeter score={serverScore ?? localScore.score} missing={localScore.missing} />
               <BuyerProfileFields value={buyerProfile} onChange={setBuyerProfile} />

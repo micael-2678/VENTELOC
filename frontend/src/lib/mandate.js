@@ -1,19 +1,22 @@
 import { toast } from 'sonner';
 import { axiosInstance } from '@/App';
 
-// Mandat de vente simple (loi Hoguet, SPEC §3.2) : aucune annonce n'est publiée sans mandat signé.
-// Barème v2 : la commission est toujours à la charge du cédant ; le choix du débiteur n'existe plus.
-// Seules les anciennes annonces (mandat v1 avec `commission_payer == 'repreneur'`) gardent leur mention.
+// Mandat de vente simple (loi Hoguet, docs/venteloc/SPEC.md §0.3 et §7.2) : aucune annonce n'est publiée sans mandat
+// signé. 12 mois renouvelables, résiliable à tout moment avec un préavis de 15 jours ; droit de rétractation de 14 jours
+// pour un mandant consommateur (une dénonciation dans ce délai est une rétractation, effective immédiatement) ; clause
+// de suite de 12 mois après la fin du mandat. Honoraires toujours à la charge du vendeur.
 
 export const MANDATE_DURATION_MONTHS = 12;
-export const MANDATE_TAIL_MONTHS = 18;
+export const MANDATE_TAIL_MONTHS = 12;
 export const MANDATE_NOTICE_DAYS = 15;
+export const MANDATE_WITHDRAWAL_DAYS = 14;
 
 // Statuts d'un mandat (contrat) → libellé lisible
 export const MANDATE_STATUS_LABELS = {
   pending_signature: 'À signer',
   signed: 'En cours',
   denounced: 'Résilié (préavis en cours)',
+  withdrawn_retractation: 'Rétractation',
   expired: 'Expiré',
   void: 'Caduc',
 };
@@ -23,16 +26,10 @@ export const mandateStatusLabel = (mandat) => {
   return MANDATE_STATUS_LABELS[mandat.status] || String(mandat.status);
 };
 
-// Héritage v1 : seul cas où l'acquéreur est désigné débiteur. `obj` : mandat (contrat) ou annonce.
-export const legacyBuyerPays = (obj) => {
-  if (!obj) return false;
-  const payer = obj.commission_payer;
-  const version = obj.terms_version || obj.commission_terms_version || obj.contract?.terms_version;
-  return payer === 'repreneur' && (version === 'v1' || !version);
-};
-
-// Phrase à afficher pour l'héritage seulement ; '' pour tous les mandats v2 (cédant débiteur, rien à préciser)
-export const legacyPayerText = (obj) => (legacyBuyerPays(obj) ? 'Mandat v1 : commission à la charge de l\'acquéreur' : '');
+// Barème unique, toujours à la charge du vendeur : plus de mandat « acquéreur débiteur ». Conservés pour les écrans
+// qui les appellent encore (aucune mention à afficher).
+export const legacyBuyerPays = () => false;
+export const legacyPayerText = () => '';
 
 // « 12/10/2026 »
 export const formatDateTimeFr = (iso) => {
@@ -74,9 +71,17 @@ export const mandateDates = (mandat) => {
     endsAt: formatDateTimeFr(m.ends_at),
     tailEndsAt: formatDateTimeFr(m.tail_ends_at),
     effectiveAt: formatDateTimeFr(m.effective_at),
+    withdrawalEndsAt: formatDateTimeFr(m.withdrawal_ends_at),
     daysToEnd: daysUntil(m.ends_at),
     daysToEffective: daysUntil(m.effective_at),
   };
+};
+
+// Délai de rétractation encore ouvert (14 jours après la signature) : une résiliation vaut alors rétractation
+export const withdrawalOpen = (mandat, now = Date.now()) => {
+  if (!mandat || mandat.status !== 'signed' || !mandat.withdrawal_ends_at) return false;
+  const d = new Date(mandat.withdrawal_ends_at);
+  return !Number.isNaN(d.getTime()) && d.getTime() > now;
 };
 
 // Phrase d'état du mandat pour l'espace vendeur (statut + date utile)
@@ -85,9 +90,11 @@ export const mandateStatusSentence = (mandat) => {
   const d = mandateDates(mandat);
   switch (mandat.status) {
     case 'signed':
-      return d.endsAt ? `Mandat simple en cours jusqu'au ${d.endsAt}${d.daysToEnd !== null && d.daysToEnd <= 30 ? ` (dans ${Math.max(0, d.daysToEnd)} j)` : ''}.` : 'Mandat simple en cours.';
+      return d.endsAt ? `Mandat simple en cours jusqu'au ${d.endsAt}${d.daysToEnd !== null && d.daysToEnd <= 30 ? ` (dans ${Math.max(0, d.daysToEnd)} j)` : ''}.${withdrawalOpen(mandat) && d.withdrawalEndsAt ? ` Délai de rétractation ouvert jusqu'au ${d.withdrawalEndsAt}.` : ''}` : 'Mandat simple en cours.';
     case 'denounced':
       return d.effectiveAt ? `Mandat résilié : fin effective le ${d.effectiveAt} (préavis de ${MANDATE_NOTICE_DAYS} jours).` : 'Mandat résilié, préavis en cours.';
+    case 'withdrawn_retractation':
+      return `Vous vous êtes rétracté${d.effectiveAt ? ` le ${d.effectiveAt}` : ''} : le mandat a pris fin immédiatement, l'annonce n'est plus en ligne et aucune somme n'est due.`;
     case 'expired':
       return d.endsAt ? `Mandat expiré le ${d.endsAt}. Signez un nouveau mandat pour remettre l'annonce en ligne.` : 'Mandat expiré.';
     case 'void':

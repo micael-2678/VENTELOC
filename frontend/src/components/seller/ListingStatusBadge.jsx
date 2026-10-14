@@ -7,7 +7,15 @@ export const StatusBadge = ({ property, className = '' }) => {
   return <span className={`${badgeClass(info.tone)} shrink-0 whitespace-nowrap ${className}`} data-testid={`status-${property?.id || 'x'}`}>{info.label}</span>;
 };
 
-// Liste des motifs qui empêchent la publication, avec le libellé serveur (plus de « validation sous 48 h »)
+// Liste des motifs qui empêchent la publication, avec le libellé serveur et l'action qui lève chaque motif
+const ACTION_LABELS = {
+  verify_identity: 'Vérifier mon identité',
+  confirm_email: 'Renvoyer le lien de confirmation',
+  sign_mandate: 'Signer le mandat',
+  ownership: 'Déposer le justificatif',
+  edit: 'Compléter',
+};
+
 export const BlockingReasons = ({ property, onAction, compact = false }) => {
   const reasons = blockingReasons(property);
   const removed = removalReason(property);
@@ -28,7 +36,7 @@ export const BlockingReasons = ({ property, onAction, compact = false }) => {
                 <>
                   {' · '}
                   <button type="button" onClick={() => onAction(r)} className="font-semibold underline underline-offset-2 hover:text-red-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 rounded">
-                    {r.action === 'verify_identity' ? 'Vérifier mon identité' : r.action === 'confirm_email' ? 'Renvoyer le lien de confirmation' : 'Compléter'}
+                    {ACTION_LABELS[r.action] || ACTION_LABELS.edit}
                   </button>
                 </>
               )}
@@ -40,7 +48,7 @@ export const BlockingReasons = ({ property, onAction, compact = false }) => {
   );
 };
 
-// Drapeaux de post-modération : l'annonce est en ligne, relue sous 48 h par la plateforme
+// Drapeaux de relecture : l'annonce reste en ligne, ces points sont vérifiés par la plateforme
 export const ModerationFlags = ({ property }) => {
   const flags = moderationFlags(property);
   if (!flags.length || property?.moderation?.status === 'ok') return null;

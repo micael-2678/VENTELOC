@@ -3,9 +3,10 @@
 @tailwind utilities;
 
 /* ------------------------------------------------------------------------------------------------
-   Jetons de design (docs/refonte-2026-10/SPEC.md §5.3)
-   Fond clair, un seul bloc sombre (CTA final). Les mêmes couleurs sont déclarées dans
-   tailwind.config.js (brand.*). Le vert est réservé aux badges de vérification, l'ambre aux alertes.
+   Jetons de design (docs/venteloc/SPEC.md §11)
+   Fond clair, texte navy, action teal (#0f766e, survol #115e59). Les mêmes couleurs sont déclarées dans
+   tailwind.config.js (brand.*, dpe.*). Le vert est réservé aux badges de vérification, l'ambre aux alertes
+   (décence énergétique, impayés), les pastilles DPE gardent leurs couleurs réglementaires.
    Polices auto-hébergées (@fontsource, importées dans src/index.js) : Manrope 700/800 pour les titres,
    Inter 400-600 pour le texte. Aucun texte engageant sous 13 px (.text-xs = 13 px / 1,4).
    ------------------------------------------------------------------------------------------------ */
@@ -16,9 +17,9 @@
     --surface: #f5f7fa;
     --surface-hover: #eceff4;
     --line: #e3e7ee;
-    --action: #1d4ed8;
-    --action-hover: #1e40af;
-    --action-soft: #eff6ff;
+    --action: #0f766e;
+    --action-hover: #115e59;
+    --action-soft: #f0fdfa;
     --verified: #15803d;
     --verified-soft: #dcfce7;
     --amber: #b45309;
@@ -73,8 +74,8 @@ code {
         --destructive-foreground: 0 0% 98%;
         --border: 218 24% 91%;
         --input: 218 24% 91%;
-        --ring: 224 76% 48%;
-        --chart-1: 224 76% 48%;
+        --ring: 175 77% 26%;
+        --chart-1: 175 77% 26%;
         --chart-2: 142 72% 29%;
         --chart-3: 220 49% 8%;
         --chart-4: 26 90% 37%;
@@ -178,9 +179,9 @@ code {
    Classes utilitaires partagées (pages existantes + composants partagés src/components/shared)
    ------------------------------------------------------------------------------------------------ */
 @layer components {
-    /* Boutons : primaire navy plein, secondaire blanc bordé navy, lien bleu avec flèche */
+    /* Boutons : primaire teal plein (action), secondaire blanc bordé navy, lien teal avec flèche */
     .btn-primary {
-        @apply inline-flex items-center justify-center gap-2 bg-brand-navy hover:bg-brand-navy-light text-white font-semibold rounded-xl px-5 py-3 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2 disabled:opacity-60 disabled:pointer-events-none;
+        @apply inline-flex items-center justify-center gap-2 bg-brand-teal hover:bg-brand-teal-dark text-white font-semibold rounded-xl px-5 py-3 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2 disabled:opacity-60 disabled:pointer-events-none;
     }
 
     .btn-secondary {
@@ -221,18 +222,18 @@ code {
         @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium max-w-full;
     }
 
-    /* Vert : uniquement les vérifications (RGE vérifié ADEME, société vérifiée, identité vérifiée) */
+    /* Vert : uniquement les vérifications (propriétaire vérifié, société vérifiée, identité vérifiée) */
     .badge-verified {
         @apply bg-brand-green-soft text-brand-green-dark;
     }
 
-    /* Qualifications déclarées par le cédant, non vérifiées */
+    /* Informations déclarées par le vendeur, non vérifiées */
     .badge-declared {
         @apply bg-gray-100 text-gray-700;
     }
 
     .badge-success {
-        @apply bg-blue-100 text-blue-800;
+        @apply bg-teal-50 text-teal-800;
     }
 
     .badge-warning {
@@ -274,6 +275,11 @@ code {
     /* Encart d'alerte (ambre) : prix hors fourchette, action attendue… */
     .notice-amber {
         @apply rounded-xl border border-amber-200 bg-brand-amber-soft text-brand-amber px-4 py-3 text-sm;
+    }
+
+    /* Pastille DPE (classe énergie A à G) : couleur réglementaire, texte foncé ou blanc selon le contraste */
+    .dpe-pill {
+        @apply inline-flex items-center justify-center rounded-md font-bold leading-none tabular;
     }
 
     /* Seul bloc sombre autorisé : le CTA final */

@@ -14,20 +14,20 @@ import EmailVerificationBanner from "@/components/EmailVerificationBanner";
 // Bandeau du mode test : ne s'affiche que si GET /config renvoie test_mode (MODE-TEST-ET-APP.md §B.3)
 import TestModeBanner from "@/components/test/TestModeBanner";
 import { SessionContext } from "@/components/layout/session";
-import { canonicalSearch, legacyListingsPath, LISTINGS_PATH } from "@/components/shared/listingFilters";
 import { initAnalytics } from "@/lib/analytics";
 import { loginRedirectPath } from "@/lib/axiosAuth";
 import { homePathFor } from "@/lib/navigation";
 import { testPanelHeaders } from "@/lib/testMode";
 
 // Pages chargées à la demande (code-splitting) : le visiteur de l'accueil ne télécharge pas
-// les tableaux de bord, l'administration ni le lecteur PDF. Routes : docs/refonte-2026-10/API.md §10 et
-// MODE-TEST-ET-APP.md (page des annonces sur /, module /embed/annonces, panneau /test).
+// les tableaux de bord, l'administration ni le lecteur PDF. Routes : docs/venteloc/API.md §10 (annonces sur /, fiche
+// /annonce/:id, page vendeur /vendre, estimateur /estimer, module /embed/annonces, panneau /test).
 const LoginPage = lazy(() => import("@/pages/LoginPage"));
 const ResetPasswordPage = lazy(() => import("@/pages/ResetPasswordPage"));
 const RegisterPage = lazy(() => import("@/pages/RegisterPage"));
 const ConfirmEmailPage = lazy(() => import("@/pages/ConfirmEmailPage"));
 const EstimatePage = lazy(() => import("@/pages/EstimatePage"));
+const SellPage = lazy(() => import("@/pages/SellPage"));
 const SellerDashboard = lazy(() => import("@/pages/SellerDashboard"));
 const BuyerDashboard = lazy(() => import("@/pages/BuyerDashboard"));
 const AdminDashboard = lazy(() => import("@/pages/AdminDashboard"));
@@ -38,7 +38,6 @@ const MessagesPage = lazy(() => import("@/pages/MessagesPage"));
 const DataroomPage = lazy(() => import("@/pages/DataroomPage"));
 const ClosingPage = lazy(() => import("@/pages/ClosingPage"));
 const ProfilePage = lazy(() => import("@/pages/ProfilePage"));
-const PresidentAcceptPage = lazy(() => import("@/pages/PresidentAcceptPage"));
 const FollowupPage = lazy(() => import("@/pages/FollowupPage"));
 const KYCCallbackPage = lazy(() => import("@/components/KYCVerification").then((m) => ({ default: m.KYCCallbackPage })));
 // Mode test (MODE-TEST-ET-APP.md §B) : panneau /test chargé à la demande
@@ -80,7 +79,7 @@ axiosInstance.interceptors.request.use((config) => {
 
 // 403 « e-mail non confirmé » (API.md : detail {code:'email_not_verified'} ou « Confirmez d'abord… ») :
 // le compte stocké est marqué non confirmé et l'application affiche le bandeau de confirmation.
-export const EMAIL_NOT_VERIFIED_EVENT = "cession:email-not-verified";
+export const EMAIL_NOT_VERIFIED_EVENT = "venteloc:email-not-verified";
 const isEmailNotVerified = (error) => {
   if (error.response?.status !== 403) return false;
   const detail = error.response?.data?.detail;
@@ -129,7 +128,7 @@ const AppBanners = ({ user, setUser, emailUnverified }) => {
 };
 
 // Page réservée à un autre rôle : retour à l'espace du compte connecté, avec l'explication
-const ROLE_ONLY_LABEL = { seller: "cédant", buyer: "repreneur", admin: "administrateur" };
+const ROLE_ONLY_LABEL = { seller: "vendeur", buyer: "acquéreur", admin: "administrateur" };
 export const roleRestrictionMessage = (allowedRoles) => {
   const labels = (allowedRoles || []).map((r) => ROLE_ONLY_LABEL[r]).filter(Boolean);
   return labels.length ? `Cette page est réservée aux comptes ${labels.join(" ou ")}.` : "Cette page n'est pas accessible avec ce compte.";
@@ -154,30 +153,11 @@ export const ProtectedRoute = ({ user, loading, children, allowedRoles }) => {
   return children;
 };
 
-// Anciennes URL de recherche (/entreprises-a-vendre, /search, /buyer/search) → page des annonces, filtres conservés
-// et traduits (metiers, rge_type, max_price, region en toutes lettres…). nginx répond déjà 301 ; cette redirection
-// couvre la navigation interne et le serveur de développement.
-const ListingsRedirect = () => {
-  const { search } = useLocation();
-  const canonical = canonicalSearch(search);
-  const query = canonical === null ? search.replace(/^\?/, "") : canonical;
-  return <Navigate to={query ? `${LISTINGS_PATH}?${query}` : LISTINGS_PATH} replace />;
-};
-
-// Anciennes pages d'atterrissage (hubs bâtiment et RGE par métier, région, activité) → annonces filtrées
-const HubRedirect = ({ kind }) => {
-  const { slug } = useParams();
-  return <Navigate to={legacyListingsPath(kind, slug)} replace />;
-};
-
-// Anciennes URL à paramètre de chemin → pages existantes qui lisent ?token=
+// Liens à paramètre de chemin (e-mails : /reset-password/:token, /suivi/:token) → pages qui lisent ?token=
 const TokenQueryRedirect = ({ to, extra = "" }) => {
   const { token } = useParams();
   return <Navigate to={`${to}?token=${encodeURIComponent(token || "")}${extra}`} replace />;
 };
-
-// Entrée du parcours cédant (MODE-TEST-ET-APP.md §A.2) : cible des anciennes pages « vendre mon entreprise »
-export const SELLER_ENTRY_PATH = "/estimer";
 
 // Table des routes (exportée pour les tests : src/pages/__tests__/redirects.test.jsx)
 export const AppRoutes = ({ user, setUser, loading }) => (
@@ -185,33 +165,14 @@ export const AppRoutes = ({ user, setUser, loading }) => (
     {/* Pages publiques */}
     <Route path="/" element={<ListingsPage user={user} />} />
     <Route path="/embed/annonces" element={<EmbedListingsPage />} />
-    <Route path="/property/:id" element={<PropertyDetail user={user} />} />
+    <Route path="/annonce/:id" element={<PropertyDetail user={user} />} />
+    <Route path="/vendre" element={<SellPage user={user} />} />
     <Route path="/estimer" element={<EstimatePage user={user} />} />
     <Route path="/mentions-legales" element={<MentionsLegalesPage user={user} />} />
     <Route path="/confidentialite" element={<PrivacyPage user={user} />} />
     <Route path="/cgu" element={<CguPage user={user} />} />
     <Route path="/signaler" element={<ReportPage user={user} />} />
     <Route path="/test" element={<TestModePage user={user} setUser={setUser} />} />
-
-    {/* Anciennes URL (pages marketing sorties de l'application, MODE-TEST-ET-APP.md §A.1) : jamais de 404 */}
-    <Route path="/entreprises-a-vendre" element={<ListingsRedirect />} />
-    <Route path="/search" element={<ListingsRedirect />} />
-    <Route path="/buyer/search" element={<ListingsRedirect />} />
-    <Route path="/entreprises-batiment-a-vendre" element={<Navigate to={LISTINGS_PATH} replace />} />
-    <Route path="/entreprises-batiment-a-vendre/metier/:slug" element={<HubRedirect kind="metier" />} />
-    <Route path="/entreprises-batiment-a-vendre/region/:slug" element={<HubRedirect kind="region" />} />
-    <Route path="/entreprises-rge-a-vendre" element={<HubRedirect kind="rge" />} />
-    <Route path="/entreprises-rge-a-vendre/activite/:slug" element={<HubRedirect kind="rge-activite" />} />
-    <Route path="/entreprises-rge-a-vendre/region/:slug" element={<HubRedirect kind="rge-region" />} />
-    {["/reprendre-une-entreprise-batiment", "/reprendre-une-entreprise-rge", "/guides", "/guides/*",
-      "/verifier-entreprise-rge"].map((path) => (
-      <Route key={path} path={path} element={<Navigate to={LISTINGS_PATH} replace />} />
-    ))}
-    {/* Anciennes pages « vendre » : le cédant arrive sur l'entrée de son parcours (estimation), pas sur la liste des
-        annonces (nginx renvoie vers la page WordPress quand MARKETING_URL est défini) */}
-    {["/vendre-mon-entreprise-batiment", "/vendre-mon-entreprise-rge"].map((path) => (
-      <Route key={path} path={path} element={<Navigate to={SELLER_ENTRY_PATH} replace />} />
-    ))}
 
     {/* Compte */}
     <Route path="/login" element={<LoginPage setUser={setUser} />} />
@@ -220,8 +181,6 @@ export const AppRoutes = ({ user, setUser, loading }) => (
     <Route path="/reset-password" element={<ResetPasswordPage />} />
     <Route path="/reset-password/:token" element={<TokenQueryRedirect to="/reset-password" />} />
     <Route path="/confirmer-email/:token" element={<ConfirmEmailPage user={user} setUser={setUser} />} />
-    <Route path="/president/:token" element={<PresidentAcceptPage user={user} setUser={setUser} />} />
-    <Route path="/president/accept/:token" element={<PresidentAcceptPage user={user} setUser={setUser} />} />
     <Route path="/suivi" element={<FollowupPage />} />
     <Route path="/suivi/:token" element={<TokenQueryRedirect to="/suivi" />} />
 
@@ -232,7 +191,7 @@ export const AppRoutes = ({ user, setUser, loading }) => (
       </ProtectedRoute>
     } />
 
-    {/* Espace cédant */}
+    {/* Espace vendeur */}
     <Route path="/seller/dashboard" element={
       <ProtectedRoute user={user} loading={loading} allowedRoles={["seller"]}>
         <SellerDashboard user={user} setUser={setUser} />
@@ -248,20 +207,18 @@ export const AppRoutes = ({ user, setUser, loading }) => (
         <CreateListing user={user} />
       </ProtectedRoute>
     } />
-    <Route path="/seller/create-listing" element={<Navigate to="/seller/create" replace />} />
     <Route path="/seller/mandat/:propertyId" element={
       <ProtectedRoute user={user} loading={loading} allowedRoles={["seller"]}>
         <MandatePage user={user} />
       </ProtectedRoute>
     } />
 
-    {/* Espace repreneur */}
+    {/* Espace acquéreur */}
     <Route path="/buyer/dashboard" element={
       <ProtectedRoute user={user} loading={loading} allowedRoles={["buyer"]}>
         <BuyerDashboard user={user} setUser={setUser} />
       </ProtectedRoute>
     } />
-    <Route path="/buyer/credits" element={<Navigate to="/buyer/dashboard" replace />} />
 
     {/* Administration */}
     <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />

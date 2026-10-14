@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import AppHeader from '@/components/layout/AppHeader';
 
-// Gabarit des pages connectées du parcours repreneur, de la data room et de l'étape de vente (les deux rôles) :
+// Gabarit des pages connectées du parcours acquéreur, du dossier du bien et de l'étape de vente (les deux rôles) :
 // en-tête commun de l'application (AppHeader : Annonces, Messages, Mon espace, menu du compte), titre, lien de retour.
 // Aucun débordement mobile : conteneur min-w-0.
 

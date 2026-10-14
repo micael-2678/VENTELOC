@@ -6,6 +6,6 @@ import { fillBrand } from '@/seo/inline';
 
 export { content };
 
-// Remplace les jetons d'offre ({{commissionSentence}}…) puis de marque ({{brand}}, {{vertical}}…)
+// Remplace les jetons d'offre ({{commissionSentence}}…) puis de marque ({{brand}}, {{legalName}}…)
 export const BRAND_TOKENS = { ...LEGAL, ...BRAND };
 export const fillText = (text) => fillBrand(fillOffer(text), BRAND_TOKENS);

@@ -4,10 +4,11 @@ import { axiosInstance } from '@/App';
 // Après une action qui change le compte, l'utilisateur est relu et rangé comme après une connexion (localStorage
 // « user » + setUser), pour que l'en-tête, les bandeaux et les gardes voient tout de suite le nouvel état.
 
+// Personas de démonstration (SPEC §10, API.md §11) : POST /test/login-as {persona}
 export const DEMO_PERSONAS = [
-  { key: 'vendeur', label: 'Vendeur démo', email: 'vendeur.demo@test.local', role: 'Cédant' },
-  { key: 'repreneur', label: 'Repreneur démo', email: 'repreneur.demo@test.local', role: 'Repreneur' },
-  { key: 'admin', label: 'Admin démo', email: 'admin.demo@test.local', role: 'Administration' },
+  { key: 'vendeur', label: 'Vendeur démo', email: 'vendeur.demo@test.local', role: 'Vendeur', hint: 'Propriétaire des 8 annonces de démonstration' },
+  { key: 'acquereur', label: 'Acquéreur démo', email: 'acquereur.demo@test.local', role: 'Acquéreur', hint: 'Investisseur au profil complet' },
+  { key: 'admin', label: 'Admin démo', email: 'admin.demo@test.local', role: 'Administration', hint: 'Relecture, justificatifs, ventes' },
 ];
 
 // Mot de passe par défaut des comptes de démonstration (TEST_DEMO_PASSWORD côté serveur) ; le panneau affiche celui

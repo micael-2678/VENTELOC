@@ -1,10 +1,13 @@
-// Parcours du mode test (MODE-TEST-ET-APP.md §B) avec un backend lancé en TEST_MODE=true, sans jeu de données :
+// Parcours du mode test VenteLoc (SPEC §10, MODE-TEST-ET-APP.md §B) avec un backend lancé en TEST_MODE=true, sans
+// jeu de données :
 //   TEST_MODE=true JOBS_ENABLED=false NOSEED=1 restart.sh
-// bandeau → /test → données de démonstration → 8 annonces sur / → connexion rapide vendeur → inscription d'un nouveau
-// vendeur → confirmation d'e-mail (bouton du bandeau) → annonce avec un SIRET fictif → identité simulée → mandat signé
-// avec le code affiché (« Remplir ») → publication immédiate, registre TEST-… → repreneur démo : contact → demande de
-// dossier → acceptation du cédant démo → identité simulée → NDA par code affiché → origine des fonds → data room →
-// boîte mail de test → admin démo : « Mode test actif » → purge (simulation puis suppression) → / vide.
+// bandeau → /test (personas vendeur, acquéreur, admin) → données de démonstration → 8 biens loués sur / (justificatifs
+// validés) → connexion rapide vendeur → inscription d'un nouveau vendeur → confirmation d'e-mail (bouton du bandeau) →
+// bien créé et justificatif de propriété déposé → identité simulée (panneau /test) → mandat signé avec le code affiché
+// (« Remplir ») → publication immédiate, registre TEST-… → acquéreur démo : contact → demande de dossier → acceptation du
+// vendeur démo → identité simulée → engagement de confidentialité par code affiché → origine des fonds → dossier du bien
+// (adresse révélée, fiche de reprise du bail) → boîte mail de test → admin démo : « Mode test actif » → purge
+// (simulation puis suppression) → / vide.
 // Enfin, backend relancé SANS TEST_MODE (RESTART_CMD) : /test « Le mode test n'est pas activé », plus de bandeau,
 // POST /api/test/login-as → 404.
 const path = require('path');
@@ -16,28 +19,22 @@ const RESTART_CMD = process.env.RESTART_CMD || path.join(SCRATCH, 'restart.sh');
 const STAMP = Date.now().toString(36);
 const EMAIL = `vendeur.essai.${STAMP}@test.fr`;
 
-// SIRET fictif : 14 chiffres dont la clé de Luhn est fausse (aucune entreprise réelle, l'annuaire ne le trouve pas)
-const luhnOk = (n) => n.split('').reverse().reduce((s, ch, i) => {
-  let d = Number(ch);
-  if (i % 2 === 1) { d *= 2; if (d > 9) d -= 9; }
-  return s + d;
-}, 0) % 10 === 0;
-const fictitiousSiret = () => {
-  // SIREN et SIRET à clé fausse : l'annuaire des entreprises n'est même pas interrogé (open data indisponible = drapeau)
-  let siren = ('9' + String(Date.now()).slice(-8)).slice(0, 9);
-  while (luhnOk(siren)) siren = String((Number(siren) + 1) % 1e9).padStart(9, '9');
-  for (let k = 10; k < 100; k++) { const s = `${siren}000${k}`; if (!luhnOk(s)) return s; }
-  return `${siren}00011`;
-};
-const SIRET = fictitiousSiret();
-
 // Clé du panneau de test (TEST_PANEL_KEY du backend, facultative) : le panneau s'ouvre avec /test?cle=<clé>
 const KEY = process.env.TEST_PANEL_KEY || '';
 const PANEL = KEY ? `/test?cle=${encodeURIComponent(KEY)}` : '/test';
 
-const DESCRIPTION = 'Entreprise de plomberie et de chauffage installée depuis douze ans, spécialisée dans la rénovation '
-  + 'énergétique de maisons individuelles : pompes à chaleur, chaudières à condensation, salles de bains adaptées. Équipe de '
-  + 'cinq personnes dont un référent technique, clientèle de particuliers fidèles et contrats d\'entretien récurrents.';
+// Bien loué du nouveau vendeur (SPEC §3), créé par l'API : les écrans de saisie de l'annonce sont couverts par 02-seller.js
+const PROPERTY = {
+  property_type: 'appartement', owner_type: 'personne-physique', address: '8 rue du Port', postal_code: '56100', city: 'Lorient',
+  surface: 46, rooms: 2, floor: 1, elevator: false, construction_year: 1968, is_copro: true, copro_lots: 12, copro_charges_annual: 840, copro_procedure: false,
+  dpe_class: 'D', ges_class: 'C', energy_cost_min: 650, energy_cost_max: 900,
+  lease_type: 'habitation-meublee', rent_monthly: 610, charges_monthly: 50, lease_start: '2024-09-01', deposit: 1220, indexation: 'irl',
+  tenant_payment_status: 'a-jour', has_gli: true, has_guarantor: false, property_tax: 690, non_recoverable_charges: 520, management: 'direct',
+  asking_price: 132000, sale_object: 'bien', sale_reason: 'gestion', auto_accept_dataroom: false,
+  description: 'Deux pièces meublé au premier étage d\'une petite copropriété proche du port et de la gare, loué depuis septembre 2024 '
+    + 'à une locataire étudiante, loyers payés à l\'échéance et garantie loyers impayés en cours. Séjour sur rue, chambre sur cour, '
+    + 'cuisine équipée, salle d\'eau rénovée. Charges de copropriété modérées, aucun travaux votés.',
+};
 
 // Signature par code avec le raccourci du mode test : lecture du texte, case, envoi, code affiché, « Remplir », signer
 const otpSignWithTestCode = async (page) => {
@@ -136,10 +133,11 @@ const restartBackend = (env) => {
   await p.waitForSelector('[data-testid=listing-card]');
   L.check('/ : 8 annonces de démonstration visibles', (await p.getByTestId('listing-card').count()) === 8, String(await p.getByTestId('listing-card').count()));
   L.check('/ : « 8 annonces en ligne »', /8 annonces en ligne/.test(await p.getByTestId('listings-total').innerText()));
-  L.check('/ : badge « Annonce de test » sur les cartes', (await p.getByTestId('listing-card-test').count()) === 8);
-  const badges = await p.getByTestId('listing-card-badge').allInnerTexts();
-  L.check('/ : 5 annonces démo « RGE vérifié ADEME » (contrôles passés), libellés distincts', badges.filter((b) => /RGE vérifié ADEME/.test(b)).length === 5
-    && !badges.some((b) => /Qualifications déclarées/.test(b)), badges.join(' | '));
+  const cards = await p.getByTestId('listing-card').allInnerTexts();
+  L.check('/ : 8 biens démo « Propriétaire vérifié » (justificatifs validés)', cards.filter((c) => /Propriétaire vérifié/.test(c)).length === 8, cards.map((c) => c.slice(0, 60)).join(' | '));
+  L.check('/ : biens variés (studio, maison, immeuble, local commercial, parking, résidence)', ['Appartement', 'Maison', 'Immeuble', 'Local commercial', 'Parking', 'résidence'].every((w) => cards.some((c) => c.includes(w))), cards.map((c) => c.slice(0, 40)).join(' | '));
+  L.check('/ : un logement DPE F avec l\'alerte d\'échéance', (seeded.data || []).some((c) => c.dpe_class === 'F' && c.dpe_rental && c.dpe_rental.status === 'echeance'));
+  L.check('/ : vocabulaire VenteLoc (ni entreprise ni RGE)', !cards.some((c) => /entreprise|\bRGE\b/i.test(c)));
   await p.context().close();
 
   // ---- Connexion rapide « Vendeur démo »
@@ -150,11 +148,11 @@ const restartBackend = (env) => {
   await p.getByTestId('app-header').waitFor();
   await p.waitForSelector('[data-testid^=status-]', { timeout: 15000 }).catch(() => {});
   t = await L.text(p);
-  L.check('connexion rapide vendeur → espace vendeur (annonces de démonstration)', /Vincent|Espace vendeur/.test(t) && (await p.locator('[data-testid^=status-]').count()) > 0, t.slice(0, 200));
+  L.check('connexion rapide vendeur → espace vendeur (annonces de démonstration)', /Espace vendeur/.test(t) && (await p.locator('[data-testid^=status-]').count()) > 0, t.slice(0, 200));
   const sellerDemo = { token: await p.evaluate(() => localStorage.getItem('token')), user: JSON.parse(await p.evaluate(() => localStorage.getItem('user'))) };
   await p.context().close();
 
-  // ---- Nouveau vendeur : inscription, confirmation par le bandeau, annonce avec SIRET fictif
+  // ---- Nouveau vendeur : inscription (sans SIRET), confirmation par le bandeau, bien et justificatif de propriété
   p = await L.makePage(browser, { errors });
   await p.goto(L.FRONT + '/register?role=seller', { waitUntil: 'networkidle' });
   await p.waitForSelector('[data-testid=register-form]');
@@ -163,7 +161,8 @@ const restartBackend = (env) => {
   await p.getByTestId('register-email-input').fill(EMAIL);
   await p.getByTestId('register-password-input').fill('Test1234!');
   await p.getByTestId('register-phone-input').fill('06 11 22 33 44');
-  await p.getByTestId('register-source-select').selectOption('comptable_avocat').catch(() => {});
+  L.check('inscription vendeur : aucun champ SIRET', (await p.getByTestId('register-siret-input').count()) === 0);
+  await p.getByTestId('register-source-select').selectOption('notaire_conseil').catch(() => {});
   await p.getByTestId('register-submit-btn').click();
   await p.getByTestId('register-done').waitFor({ timeout: 15000 });
   await p.getByTestId('register-continue').click();
@@ -177,67 +176,34 @@ const restartBackend = (env) => {
   L.check('e-mail confirmé (simulation) : email_verified, via test', me.email_verified === true && me.email_verified_via === 'test', JSON.stringify({ v: me.email_verified, via: me.email_verified_via }));
   L.check('bandeau e-mail disparu après confirmation', (await p.getByTestId('email-verification-banner').count()) === 0);
 
-  await p.goto(L.FRONT + '/seller/create', { waitUntil: 'networkidle' });
-  await p.getByTestId('create-listing-form').waitFor();
-  await p.getByTestId('siret-input').fill(SIRET);
-  await L.sleep(800);
-  if (!(await p.getByTestId('property-name-input').inputValue())) await p.getByTestId('property-name-input').fill('RIOU THERMIQUE (essai)');
-  L.check('SIRET fictif : aucune fiche open data préremplie', !/SECRET ENERGIE/.test(await p.getByTestId('property-name-input').inputValue()));
-  if (!(await p.locator('[data-testid=trade-plomberie-chauffage] input').isChecked())) await p.getByTestId('trade-plomberie-chauffage').click();
-  await p.getByTestId('region-select').selectOption('Bretagne');
-  await L.sleep(200);
-  await p.getByTestId('department-select').selectOption('56');
-  await p.getByTestId('staff-count-input').fill('5');
-  await p.getByTestId('legal-structure-select').selectOption('SARL').catch(() => {});
-  await p.getByTestId('next-step').click();
-  await p.waitForSelector('[data-testid=ca-n-input]', { timeout: 15000 }).catch(async (e) => {
-    await L.shot(p, 'debug-step1.png');
-    console.log(await p.$$eval('[role=alert], .text-red-700, [data-sonner-toast]', (els) => els.map((x) => x.innerText).join(' | ')));
-    throw e;
-  });
-  await p.getByTestId('ca-n-input').fill('640000');
-  await p.getByTestId('ca-n1-input').fill('600000');
-  await p.getByTestId('ca-n2-input').fill('570000');
-  await p.getByTestId('margin-input').fill('30');
-  await p.getByTestId('debt-input').fill('30000');
-  await p.getByTestId('pipeline-input').fill('90000');
-  await p.getByTestId('charges-salaries-input').fill('220000');
-  await p.getByTestId('charges-rent-input').fill('14000');
-  await p.getByTestId('next-step').click();
-  await p.waitForSelector('[data-testid=asking-price-input]', { timeout: 15000 });
-  await p.getByTestId('asking-price-input').fill('280000');
-  await p.getByTestId('sale-reason-select').selectOption('retraite');
-  await p.getByTestId('sale-object-titres').click();
-  await p.getByTestId('handover-select').selectOption('6').catch(() => {});
-  await p.getByTestId('description-input').fill(DESCRIPTION);
-  await p.getByTestId('next-step').click();
-  await p.getByTestId('go-mandate').waitFor({ timeout: 15000 });
-  const mine = (await L.api('GET', '/properties', { token: sellerToken })).data.find((c) => c.seller_id === me.id);
-  const propertyId = mine && mine.id;
-  L.check('annonce : brouillon créé avec le SIRET fictif', !!propertyId, JSON.stringify(mine).slice(0, 200));
+  const created = await L.api('POST', '/properties', { token: sellerToken, body: PROPERTY });
+  const propertyId = created.data && created.data.id;
+  L.check('bien : brouillon créé (POST /properties), contrôle « justificatif » bloquant', !!propertyId && (created.data.blocking || []).some((b) => b.code === 'ownership_proof'), JSON.stringify(created.data).slice(0, 200));
+  const form = new FormData();
+  form.append('doc_type', 'titre-propriete');
+  form.append('file', new Blob(['%PDF-1.4\n% titre de propriete de test\n'], { type: 'application/pdf' }), 'titre.pdf');
+  const proof = await fetch(`${L.API}/properties/${propertyId}/ownership-proof`, { method: 'POST', headers: { authorization: `Bearer ${sellerToken}` }, body: form });
+  const proofData = await proof.json().catch(() => ({}));
+  L.check('justificatif de propriété déposé → statut pending', proof.ok && proofData.ownership && proofData.ownership.status === 'pending', JSON.stringify(proofData).slice(0, 200));
 
-  // Identité simulée depuis l'écran « Plus que deux étapes »
-  await p.getByRole('button', { name: /Vérifier mon identité/ }).first().click();
-  await p.getByTestId('kyc-simulate-btn').waitFor({ timeout: 10000 });
-  L.check('identité : bouton « Simuler la vérification (mode test) » sous le bouton Stripe', /Simuler la vérification/.test(await p.getByTestId('kyc-simulate-btn').innerText()));
-  await p.getByTestId('kyc-simulate-btn').click();
-  // Confirmation « Identité vérifiée (simulation) » puis rechargement complet de la page (comme au retour de Stripe) :
-  // le message peut disparaître avant d'être lu, on attend donc l'état côté serveur
+  // Identité simulée depuis le panneau /test (« Mon compte »), comme au retour de Stripe Identity
+  await p.goto(L.FRONT + PANEL, { waitUntil: 'networkidle' });
+  await p.getByTestId('test-identity-form').waitFor({ timeout: 10000 });
+  await p.getByTestId('test-simulate-identity').click();
   await waitVerified(sellerToken);
-  await p.waitForLoadState('networkidle');
-  await L.sleep(2500); // rechargement complet de la page, comme au retour de Stripe
+  await p.getByTestId('test-identity-ok').waitFor({ timeout: 10000 });
   me = (await L.api('GET', '/auth/profile', { token: sellerToken })).data;
   L.check('identité simulée : identity_verified, kyc_provider test', me.identity_verified === true && me.kyc_provider === 'test', JSON.stringify({ v: me.identity_verified, p: me.kyc_provider }));
   let comp = (await L.api('GET', `/properties/${propertyId}`, { token: sellerToken })).data;
-  L.check('annonce soumise après l\'identité → mandat_en_attente', comp.status === 'mandat_en_attente', comp.status);
+  L.check('bien soumis après l\'identité → mandat_en_attente', comp.status === 'mandat_en_attente', comp.status);
 
   // Mandat signé avec le code affiché
   await p.goto(L.FRONT + `/seller/mandat/${propertyId}`, { waitUntil: 'networkidle' });
   await p.getByTestId('mandant-form').waitFor({ timeout: 15000 });
-  await p.getByTestId('address-line1').fill('8 rue du Port');
+  await p.getByTestId('address-line1').fill('14 avenue de la Marne');
   await p.getByTestId('address-postal-code').fill('56100');
   await p.getByTestId('address-city').fill('Lorient');
-  await p.getByTestId('capacity-select').selectOption('dirigeant');
+  await p.getByTestId('capacity-select').selectOption('proprietaire');
   await p.getByTestId('prepare-mandate').click();
   await p.getByTestId('mandate-summary').waitFor({ timeout: 15000 });
   await p.getByTestId('open-mandate-sign').click();
@@ -280,31 +246,32 @@ const restartBackend = (env) => {
   await p.getByTestId('test-inbox-list').waitFor({ timeout: 10000 });
   const subjects = await p.getByTestId('test-inbox-item').allInnerTexts();
   L.check('boîte mail de test : e-mail « code de signature » présent', subjects.some((s) => /code de signature/i.test(s)), subjects.slice(0, 6).join(' | '));
-  L.check('boîte mail de test : seulement les e-mails du compte', !subjects.some((s) => /vendeur\.demo|repreneur\.demo/.test(s)));
+  L.check('boîte mail de test : seulement les e-mails du compte', !subjects.some((s) => /vendeur\.demo|acquereur\.demo/.test(s)));
+  L.check('boîte mail de test : justificatif de propriété reçu', subjects.some((s) => /justificatif/i.test(s)), subjects.slice(0, 8).join(' | '));
   await p.getByTestId('test-inbox-item').filter({ hasText: /code de signature/i }).first().locator('button, a').first().click().catch(() => p.getByTestId('test-inbox-item').filter({ hasText: /code de signature/i }).first().click());
   await p.getByTestId('test-inbox-iframe').waitFor({ timeout: 10000 });
   L.check('boîte mail : aperçu dans un iframe sandbox', (await p.getByTestId('test-inbox-iframe').getAttribute('sandbox')) === '');
   await p.context().close();
 
-  // ---- Repreneur démo : contact → demande de dossier
+  // ---- Acquéreur démo : contact → demande de dossier
   const demoListing = (await L.api('GET', '/properties', { params: { limit: 50 } })).data.find((c) => c.id !== propertyId);
   const cid = demoListing.id;
   // Les comptes démo sont créés avec une identité simulée : on la retire ici pour rejouer l'étape « identité » du dossier
-  await L.setUser('repreneur.demo@test.local', 'identity_verified', false);
-  await L.setUser('repreneur.demo@test.local', 'kyc_status', 'pending');
+  await L.setUser('acquereur.demo@test.local', 'identity_verified', false);
+  await L.setUser('acquereur.demo@test.local', 'kyc_status', 'pending');
   p = await L.makePage(browser, { errors });
   await p.goto(L.FRONT + PANEL, { waitUntil: 'networkidle' });
-  await p.getByTestId('test-login-repreneur').click();
+  await p.getByTestId('test-login-acquereur').click();
   await p.waitForURL(/\/buyer\/dashboard/, { timeout: 15000 });
-  L.check('connexion rapide repreneur → espace repreneur', true);
+  L.check('connexion rapide acquéreur → espace acquéreur', /Espace acquéreur/.test(await L.text(p)));
   const buyerToken = await p.evaluate(() => localStorage.getItem('token'));
-  await p.goto(L.FRONT + `/property/${cid}`, { waitUntil: 'networkidle' });
+  await p.goto(L.FRONT + `/annonce/${cid}`, { waitUntil: 'networkidle' });
   await p.waitForSelector('[data-testid=property-header]');
   L.check('fiche : badge « Annonce de test »', (await p.getByTestId('test-listing-badge').count()) === 1);
   await p.getByTestId('contact-seller-btn').first().click();
   await p.getByTestId('contact-modal').waitFor();
   const pre = await p.getByTestId('contact-message').inputValue();
-  await p.getByTestId('contact-message').fill((pre || 'Bonjour,') + ' Je souhaite échanger sur votre calendrier de cession.');
+  await p.getByTestId('contact-message').fill((pre || 'Bonjour,') + ' Je souhaite échanger sur le bail en cours et votre calendrier de vente.');
   await p.getByTestId('contact-send-btn').click();
   await p.waitForURL(/\/messages\?conversation=/, { timeout: 15000 });
   await p.waitForSelector('[data-testid=thread]', { timeout: 15000 });
@@ -313,23 +280,23 @@ const restartBackend = (env) => {
   L.check('contact : conversation ouverte', (await p.locator('[data-testid=thread] [data-testid=message]').count()) >= 1);
   await p.goto(L.FRONT + `/dataroom/${cid}`, { waitUntil: 'networkidle' });
   await p.getByTestId('request-access-btn').waitFor({ timeout: 15000 });
-  await p.locator('#request-message').fill('Projet de reprise individuelle, financement bancaire en cours.');
+  await p.locator('#request-message').fill('Investisseur particulier, financement bancaire en cours.');
   await p.getByTestId('request-access-btn').click();
   await L.sleep(1000);
   let st = (await L.api('GET', `/dataroom/${cid}/access-status`, { token: buyerToken })).data;
-  L.check('dossier : demande en attente du cédant', st.access_status === 'pending', JSON.stringify(st).slice(0, 160));
+  L.check('dossier : demande en attente du vendeur', st.access_status === 'pending', JSON.stringify(st).slice(0, 160));
 
-  // Cédant démo : accepte la demande depuis « À traiter »
+  // Vendeur démo : accepte la demande depuis « À traiter »
   const sp = await L.makePage(browser, { errors, user: sellerDemo });
   await sp.goto(L.FRONT + '/seller/dashboard', { waitUntil: 'networkidle' });
   await sp.waitForSelector('[data-testid^=accept-request-]', { timeout: 15000 });
   await sp.locator('[data-testid^=accept-request-]').first().click();
   await L.sleep(1200);
   st = (await L.api('GET', `/dataroom/${cid}/access-status`, { token: buyerToken })).data;
-  L.check('cédant démo : demande acceptée → étape identité', st.access_status === 'accepted' && st.next_step === 'identity', JSON.stringify(st).slice(0, 200));
+  L.check('vendeur démo : demande acceptée → étape identité', st.access_status === 'accepted' && st.next_step === 'identity', JSON.stringify(st).slice(0, 200));
   await sp.context().close();
 
-  // Repreneur : identité simulée → NDA par code affiché → origine des fonds → data room
+  // Acquéreur : identité simulée → engagement de confidentialité par code affiché → origine des fonds → dossier du bien
   await p.goto(L.FRONT + `/dataroom/${cid}`, { waitUntil: 'networkidle' });
   await p.getByRole('button', { name: /Vérifier mon identité/ }).first().click();
   await p.getByTestId('kyc-simulate-btn').click();
@@ -337,12 +304,10 @@ const restartBackend = (env) => {
   await L.sleep(2500);
   await p.waitForLoadState('networkidle');
   await p.getByTestId('nda-btn').waitFor({ timeout: 15000 });
-  L.check('identité simulée : étape NDA proposée', true);
+  L.check('identité simulée : étape « engagement de confidentialité » proposée', /Engagement de confidentialité et de non-contournement/.test(await L.text(p)));
   await p.getByTestId('nda-btn').click();
   const nda = await otpSignWithTestCode(p);
-  L.check('NDA : mention de test et code affiché rempli', /DOCUMENT DE TEST/.test(nda.docText) && /^\d{6}$/.test(nda.code) && nda.filled === nda.code, nda.docText.slice(0, 120));
-  await p.getByTestId('revealed-name').waitFor({ timeout: 15000 });
-  L.check('NDA signé : nom de l\'entreprise révélé', (await p.getByTestId('revealed-name').innerText()).length > 0);
+  L.check('engagement : mention de test et code affiché rempli', /DOCUMENT DE TEST/.test(nda.docText) && /^\d{6}$/.test(nda.code) && nda.filled === nda.code, nda.docText.slice(0, 120));
   await p.getByTestId('funds-form').waitFor({ timeout: 10000 });
   await p.getByTestId('funds-source').selectOption('mixte');
   await p.getByTestId('funds-amount').fill('400000');
@@ -351,7 +316,9 @@ const restartBackend = (env) => {
   await p.getByTestId('funds-submit').click();
   await p.getByTestId('open-offer-form').waitFor({ timeout: 15000 });
   st = (await L.api('GET', `/dataroom/${cid}/access-status`, { token: buyerToken })).data;
-  L.check('data room ouverte (identité, NDA, fonds)', st.access_granted === true && st.steps.identity && st.steps.nda && st.steps.funds, JSON.stringify(st).slice(0, 200));
+  L.check('dossier du bien ouvert (identité, engagement, fonds)', st.access_granted === true && st.steps.identity && st.steps.nda && st.steps.funds, JSON.stringify(st).slice(0, 200));
+  L.check('dossier : adresse révélée après l\'engagement', (await p.getByTestId('revealed-address').count()) === 1);
+  L.check('dossier : fiche de reprise du bail affichée', (await p.getByTestId('lease-transfer').count()) === 1);
   await p.context().close();
 
   // ---- Admin démo : « Mode test actif », puis purge

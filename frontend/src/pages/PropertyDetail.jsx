@@ -1,93 +1,171 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
-  AlertCircle, BadgeCheck, Building2, Calendar, Check, FileSignature, FolderLock, Heart, Loader2, Lock, MapPin,
-  MessageSquare, Send, Share2, ShieldCheck, Users, Wrench, X,
+  AlertCircle, AlertTriangle, BadgeCheck, Building2, CalendarClock, Check, Euro, FileSignature, FolderLock, Heart, Home, Info,
+  KeyRound, Leaf, Loader2, Lock, MapPin, MessageSquare, Send, Share2, ShieldCheck, X,
 } from 'lucide-react';
 import { axiosInstance } from '@/App';
 import AppHeader from '@/components/layout/AppHeader';
 import AppFooter from '@/components/layout/AppFooter';
 import { listingsPath, LISTINGS_PATH } from '@/components/shared/listingFilters';
 import NotFound from '@/pages/NotFound';
-import { AlertForm, listingTitle, qualificationBadge, formatPrice, formatDateFr, plural } from '@/components/shared';
+import {
+  AlertForm, listingTitle, listingLocation, listingPath, listingYields, ownershipVerified, dpeAlert, annualRent, DpePill, DpeScale,
+  PropertyPicto, PROPERTY_TYPE_PLURALS, formatPrice, formatDateFr, formatYield, formatMonthly, formatSurface, plural,
+} from '@/components/shared';
 import { PROJECT_TYPES, FINANCING, HORIZONS } from '@/components/shared/BuyerCard';
-import { apiErrorMessage, isEmailNotVerifiedError } from '@/components/account/errors';
+import { apiErrorCode, apiErrorMessage, isEmailNotVerifiedError } from '@/components/account/errors';
 import { useSeo, SITE_URL, NOINDEX } from '@/lib/seo';
-import { BRAND } from '@/lib/brand';
-import { OFFER, formatEuros } from '@/lib/offer';
+import { BRAND, LEGAL } from '@/lib/brand';
+import { OFFER, formatEuros, formatPercent, listingCommission } from '@/lib/offer';
+import { useCommission } from '@/lib/useCommission';
 import { breadcrumbLd } from '@/seo/schema';
 import { trackEvent } from '@/lib/analytics';
-import { legacyBuyerPays } from '@/lib/mandate';
-import { tradeLabel, departementLabel, otherQualificationLabel, shortRgeLabel, inRegion } from '@/lib/referentiels';
-import { SALE_OBJECT_LABELS, SALE_REASON_LABELS, isProfileIncomplete } from '@/components/buyer/api';
+import {
+  propertyTypeLabel, leaseTypeLabel, tenantPaymentLabel, saleObjectLabel, saleReasonLabel, ownerTypeLabel, isHousingLease,
+  inRegion,
+} from '@/lib/referentiels';
 
-// Fiche d'annonce anonyme (SPEC §4.3 point 3, API.md §2) : tout ce que le cédant a saisi, jamais son nom ni ses
-// coordonnées ; badges vérifié / déclaré ; encart « Comment ça se passe » ; CTA « Présenter mon projet au cédant »
+// Fiche d'un bien loué (docs/venteloc/SPEC.md §5.1, API.md §2) : galerie, chiffres clés (prix, loyer, rendements, charges,
+// taxe foncière, dépôt de garantie), le bien (copropriété avec les mentions obligatoires), la location, le DPE (coût
+// énergétique, alerte de décence énergétique), la vente, les honoraires (à la charge du vendeur, prix honoraires inclus),
+// « Ce que vérifie VenteLoc », « Comment ça se passe », visites. Jamais l'adresse exacte, le nom du vendeur ni la
+// dénomination de la société avant l'engagement de confidentialité. CTA « Présenter mon projet au vendeur »
 // (POST /properties/{id}/contact {message} → messagerie) ; favori visiteur → inscription ; alerte sans compte.
 
-const FIXED_CHARGE_LABELS = { salaries: 'Salaires chargés', rent: 'Loyers', insurance: 'Assurances', equipment: 'Matériel et véhicules' };
-const REASSURANCE = [
-  { key: 'has_maintenance_contracts', label: 'Contrats d\'entretien récurrents' },
-  { key: 'technical_referent_stays', label: 'Le référent technique reste' },
-  { key: 'key_staff_stays', label: 'L\'équipe clé reste' },
-  { key: 'decennale_ok', label: 'Assurance décennale à jour, sans sinistre en cours' },
-];
+const INDEXATION_LABELS = {
+  irl: 'IRL (indice de référence des loyers)',
+  ilc: 'ILC (indice des loyers commerciaux)',
+  ilat: 'ILAT (indice des loyers des activités tertiaires)',
+  aucune: 'Aucune clause d\'indexation',
+};
+const MANAGEMENT_LABELS = {
+  direct: 'Gestion par le propriétaire',
+  agence: 'Gestion confiée à une agence',
+  exploitant: 'Exploitant de la résidence',
+};
 
 const hasValue = (v) => v !== null && v !== undefined && v !== '' && !(typeof v === 'number' && Number.isNaN(v));
-const isExpired = (iso) => iso && new Date(iso) < new Date();
-const isExpiringSoon = (iso) => {
-  if (!iso) return false;
-  const d = new Date(iso);
-  const limit = new Date();
-  limit.setMonth(limit.getMonth() + 6);
-  return d >= new Date() && d <= limit;
-};
-const handoverText = (months) => {
-  const m = Number(months);
-  if (!Number.isFinite(m)) return '';
-  if (m === 0) return 'Aucun accompagnement prévu';
-  return `${m} mois d'accompagnement par le cédant`;
+const positive = (v) => hasValue(v) && Number(v) > 0;
+const yesNo = (v) => (v === true ? 'Oui' : v === false ? 'Non' : '');
+const floorLabel = (v) => {
+  if (!hasValue(v)) return '';
+  const n = Number(v);
+  if (n === 0) return 'Rez-de-chaussée';
+  if (n === 1) return '1er étage';
+  return `${n}e étage`;
 };
 
-// Message de présentation prérempli depuis le profil de projet du repreneur
-const draftMessage = (user) => {
+// Message de présentation prérempli depuis le profil d'investissement de l'acquéreur
+export const draftMessage = (user) => {
   const p = user?.buyer_profile || {};
   const lines = ['Bonjour,', ''];
-  const project = PROJECT_TYPES[p.project_type];
-  lines.push(`Votre annonce correspond à mon projet${project ? ` de ${project.toLowerCase()}` : ' de reprise'}.`);
+  lines.push('Votre bien correspond à mon projet d\'investissement locatif.');
   const details = [];
-  if (hasValue(p.budget_max)) details.push(`budget jusqu'à ${formatEuros(p.budget_max)}`);
+  if (p.project_type && PROJECT_TYPES[p.project_type]) details.push(PROJECT_TYPES[p.project_type].toLowerCase());
+  if (positive(p.budget_max)) details.push(`budget jusqu'à ${formatEuros(p.budget_max)}`);
   if (p.financing && FINANCING[p.financing]) details.push(`financement : ${FINANCING[p.financing].toLowerCase()}`);
-  if (Array.isArray(p.zones) && p.zones.length) details.push(`zones : ${p.zones.join(', ')}`);
+  if (positive(p.min_yield)) details.push(`rendement brut visé : ${formatPercent(p.min_yield)} minimum`);
   if (p.horizon && HORIZONS[p.horizon]) details.push(`horizon : ${HORIZONS[p.horizon].toLowerCase()}`);
   if (details.length) lines.push(`En quelques mots : ${details.join(' ; ')}.`);
   if (p.experience) lines.push(String(p.experience));
-  lines.push('', 'Je serais heureux d\'échanger avec vous sur l\'entreprise, son équipe et vos attentes pour la cession.', '', 'Cordialement');
+  lines.push('', 'Je souhaiterais recevoir le dossier du bien (bail, quittances, diagnostics, charges) pour étudier l\'acquisition.', '', 'Cordialement');
   return lines.join('\n');
 };
 
-const Stat = ({ label, children, testId, note }) => (
-  <div className="rounded-xl bg-brand-surface border border-brand-line p-3 sm:p-4 min-w-0">
-    <p className="text-xs text-gray-500">{label}</p>
-    <p className="font-semibold text-brand-navy tabular break-words" data-testid={testId}>{children}</p>
-    {note && <p className="text-xs text-gray-600 mt-0.5 break-words" data-testid={testId ? `${testId}-note` : undefined}>{note}</p>}
+// Ligne d'une liste de caractéristiques (affichée seulement si renseignée)
+const Fact = ({ label, children, testId, wide = false }) => (
+  <div className={`min-w-0 ${wide ? 'sm:col-span-2' : ''}`}>
+    <dt className="text-xs text-gray-500">{label}</dt>
+    <dd className="text-sm text-brand-navy font-medium break-words tabular" data-testid={testId}>{children}</dd>
   </div>
 );
 
 const Section = ({ id, title, icon: Icon, children }) => (
-  <section className="card p-5 sm:p-6 min-w-0" aria-labelledby={`${id}-title`}>
+  <section className="card p-5 sm:p-6 min-w-0" aria-labelledby={`${id}-title`} data-testid={`section-${id}`}>
     <h2 id={`${id}-title`} className="font-display text-lg sm:text-xl font-bold text-brand-navy flex items-center gap-2 mb-4">
-      {Icon && <Icon className="w-5 h-5 text-gray-500 shrink-0" aria-hidden="true" />}
+      {Icon && <Icon className="w-5 h-5 text-brand-teal shrink-0" aria-hidden="true" />}
       {title}
     </h2>
     {children}
   </section>
 );
 
+const KeyFigure = ({ label, value, note, tone = 'plain', testId }) => (
+  <div className={`rounded-xl border p-3 sm:p-4 min-w-0 ${tone === 'teal' ? 'bg-brand-teal-soft border-brand-teal-line/70' : 'bg-brand-surface border-brand-line'}`}>
+    <p className={`text-xs font-medium ${tone === 'teal' ? 'text-brand-teal-dark' : 'text-gray-600'}`}>{label}</p>
+    <p className={`font-display text-xl sm:text-2xl font-extrabold tabular leading-tight break-words ${tone === 'teal' ? 'text-brand-teal-dark' : 'text-brand-navy'}`} data-testid={testId}>{value}</p>
+    {note && <p className="text-xs text-gray-600 mt-0.5">{note}</p>}
+  </div>
+);
+
+// Galerie : photos visibles par ce visiteur (publiques, ou réservées après l'engagement de confidentialité)
+const Gallery = ({ property }) => {
+  const [photos, setPhotos] = useState([]);
+  const [srcs, setSrcs] = useState({});
+  const [current, setCurrent] = useState(0);
+  const id = property.id;
+
+  useEffect(() => {
+    let alive = true;
+    Promise.resolve()
+      .then(() => axiosInstance.get(`/properties/${id}/photos`, { skipAuthRedirect: true }))
+      .then((res) => { if (alive) setPhotos(Array.isArray(res?.data) ? res.data.filter((p) => p && p.id) : []); })
+      .catch(() => { if (alive) setPhotos([]); });
+    return () => { alive = false; };
+  }, [id]);
+
+  useEffect(() => {
+    let alive = true;
+    photos.forEach((photo) => {
+      if (srcs[photo.id]) return;
+      if (photo.url) { setSrcs((s) => ({ ...s, [photo.id]: photo.url })); return; }
+      axiosInstance.get(`/properties/${id}/photos/${photo.id}`, { skipAuthRedirect: true })
+        .then((r) => {
+          const { content, content_type: type } = r?.data || {};
+          if (alive && content) setSrcs((s) => ({ ...s, [photo.id]: `data:${type || 'image/jpeg'};base64,${content}` }));
+        })
+        .catch(() => {});
+    });
+    return () => { alive = false; };
+  }, [photos, id]);
+
+  const shown = photos.filter((p) => srcs[p.id]);
+  if (!shown.length) {
+    return <PropertyPicto type={property.property_type} className="aspect-[16/7] rounded-2xl border border-brand-line" iconClassName="w-16 h-16" />;
+  }
+  const active = shown[Math.min(current, shown.length - 1)];
+  return (
+    <div className="min-w-0" data-testid="gallery">
+      <div className="relative aspect-[16/9] rounded-2xl overflow-hidden bg-brand-surface border border-brand-line">
+        <img src={srcs[active.id]} alt={`${propertyTypeLabel(property.property_type) || 'Bien loué'}, vue ${shown.indexOf(active) + 1} sur ${shown.length}`} className="w-full h-full object-cover" />
+      </div>
+      {shown.length > 1 && (
+        <ul className="mt-2 flex gap-2 overflow-x-auto pb-1" aria-label="Photos">
+          {shown.map((p, i) => (
+            <li key={p.id} className="shrink-0">
+              <button
+                type="button"
+                onClick={() => setCurrent(i)}
+                aria-label={`Afficher la photo ${i + 1}`}
+                aria-current={p.id === active.id ? 'true' : undefined}
+                className={`block w-20 h-14 rounded-lg overflow-hidden border-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-teal ${p.id === active.id ? 'border-brand-teal' : 'border-transparent'}`}
+              >
+                <img src={srcs[p.id]} alt="" className="w-full h-full object-cover" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+};
+
 const PropertyDetail = ({ user }) => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const commission = useCommission();
   const [property, setProperty] = useState(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -100,6 +178,7 @@ const PropertyDetail = ({ user }) => {
 
   const isBuyer = user?.role === 'buyer';
   const isOwner = Boolean(user && property && (user.role === 'admin' || (property.seller_id && property.seller_id === user.id)));
+  const canContact = !isOwner && user?.role !== 'seller' && user?.role !== 'admin';
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -123,32 +202,32 @@ const PropertyDetail = ({ user }) => {
   }, [id, isBuyer]);
 
   const title = property ? listingTitle(property) : '';
-  const badge = property ? qualificationBadge(property) : null;
-  const trades = useMemo(() => (Array.isArray(property?.trades) ? property.trades : []), [property]);
-  const rgeTypes = Array.isArray(property?.rge_types) ? property.rge_types : [];
-  const others = Array.isArray(property?.other_qualifications) ? property.other_qualifications : [];
-  const firstTrade = trades[0] || null;
-  const dep = property?.department ? departementLabel(property.department) : '';
-  const location = [property?.region, dep].filter(Boolean).join(' · ');
+  const path = listingPath(id);
+  const yields = property ? listingYields(property) : { gross: null, net: null };
+  const typePlural = property ? PROPERTY_TYPE_PLURALS[property.property_type] : '';
   const seoCrumbs = [
-    { name: 'Annonces', path: LISTINGS_PATH },
-    { name: 'Annonce', path: `/property/${id}` },
+    { name: 'Biens à vendre', path: LISTINGS_PATH },
+    { name: 'Annonce', path },
   ];
-  // /property/:id est une route commune (en-tête et og:site_name CessionBâtiment) : marque principale dans le
-  // titre, y compris pour une annonce RGE (BRAND.verticalName est réservé aux pages /…-rge).
+  const seoDescription = property
+    ? [
+      `${title}${property.region ? ` ${inRegion(property.region)}` : ''}`,
+      positive(property.rent_monthly) ? `loyer ${formatMonthly(property.rent_monthly)} hors charges` : '',
+      yields.gross ? `rendement brut ${formatYield(yields.gross)}` : '',
+      positive(property.asking_price) ? `prix ${formatPrice(property.asking_price)} honoraires inclus` : '',
+    ].filter(Boolean).join(', ') + `. ${OFFER.metaMatching}`
+    : `Bien immobilier loué à vendre. ${OFFER.metaMatching}`;
   useSeo(
-    property ? `${title} | ${BRAND.name}` : notFound ? `Annonce introuvable | ${BRAND.name}` : `Entreprise à vendre | ${BRAND.name}`,
-    property
-      ? `Annonce anonyme : ${title}${property.region ? ` ${inRegion(property.region)}` : ''}${hasValue(property.asking_price) ? `, prix demandé ${formatPrice(property.asking_price)}` : ''}. ${OFFER.metaMatching}`
-      : `Annonce anonyme de cession d'entreprise du bâtiment. ${OFFER.metaMatching}`,
+    property ? `${title} | ${BRAND.name}` : notFound ? `Annonce introuvable | ${BRAND.name}` : `Bien loué à vendre | ${BRAND.name}`,
+    seoDescription,
     // Annonce fictive du mode test : jamais indexée
     notFound || property?.is_test === true ? { robots: NOINDEX }
-      : property ? { path: `/property/${id}`, jsonLd: breadcrumbLd(SITE_URL, seoCrumbs) } : {},
+      : property ? { path, jsonLd: breadcrumbLd(SITE_URL, seoCrumbs) } : {},
   );
 
   const toggleFavorite = async () => {
     if (!user) {
-      navigate(`/register?role=buyer&redirect=${encodeURIComponent(`/property/${id}`)}`);
+      navigate(`/register?role=buyer&redirect=${encodeURIComponent(path)}`);
       return;
     }
     if (!isBuyer || favoriteLoading) return;
@@ -157,11 +236,11 @@ const PropertyDetail = ({ user }) => {
       if (isFavorite) {
         await axiosInstance.delete(`/favorites/${id}`);
         setIsFavorite(false);
-        toast.success('Retirée de vos favoris');
+        toast.success('Retiré de vos favoris');
       } else {
         await axiosInstance.post('/favorites', { property_id: id });
         setIsFavorite(true);
-        toast.success('Ajoutée à vos favoris');
+        toast.success('Ajouté à vos favoris');
       }
     } catch (error) {
       toast.error(apiErrorMessage(error, 'Le favori n\'a pas pu être enregistré.'));
@@ -171,14 +250,14 @@ const PropertyDetail = ({ user }) => {
   };
 
   const share = async () => {
-    const url = `${SITE_URL}/property/${id}`;
+    const url = `${SITE_URL}${path}`;
     try {
       if (navigator.share) {
-        await navigator.share({ title, text: `${title} — annonce anonyme sur ${BRAND.name}`, url });
+        await navigator.share({ title, text: `${title} — bien loué à vendre sur ${BRAND.name}`, url });
         return;
       }
       await navigator.clipboard.writeText(url);
-      toast.success('Lien de l\'annonce copié. Il ne révèle ni le nom ni les coordonnées de l\'entreprise.');
+      toast.success('Lien de l\'annonce copié. Il ne révèle ni l\'adresse du bien ni l\'identité du vendeur.');
     } catch (e) {
       // partage annulé ou presse-papiers indisponible
     }
@@ -186,7 +265,7 @@ const PropertyDetail = ({ user }) => {
 
   const openContact = () => {
     if (!user) {
-      navigate(`/login?redirect=${encodeURIComponent(`/property/${id}`)}`);
+      navigate(`/login?redirect=${encodeURIComponent(path)}`);
       return;
     }
     if (!isBuyer) return;
@@ -206,16 +285,16 @@ const PropertyDetail = ({ user }) => {
     try {
       const res = await axiosInstance.post(`/properties/${id}/contact`, { message: text });
       const data = res.data || {};
-      if (data.already_contacted) toast.info('Vous avez déjà présenté votre projet au cédant : retrouvez la conversation dans votre messagerie.');
+      if (data.already_contacted) toast.info('Vous avez déjà présenté votre projet au vendeur : retrouvez la conversation dans votre messagerie.');
       else {
-        toast.success('Projet transmis au cédant. Il reçoit votre carte repreneur et votre message par e-mail.', { duration: 7000 });
+        toast.success('Projet transmis au vendeur. Il reçoit votre carte acquéreur et votre message par e-mail.', { duration: 7000 });
         trackEvent('contact_sent', { source: 'fiche', listing: String(id) });
       }
       setContactOpen(false);
       navigate(`/messages?conversation=${encodeURIComponent(data.conversation_id || id)}`);
     } catch (error) {
       if (isEmailNotVerifiedError(error)) setContactError({ kind: 'email', text: 'Confirmez d\'abord votre adresse e-mail : un lien vous a été envoyé (bandeau en haut de page).' });
-      else if (isProfileIncomplete(error)) setContactError({ kind: 'profile', text: apiErrorMessage(error, 'Votre profil de projet est incomplet : 40 % sont nécessaires pour contacter un cédant.') });
+      else if (error?.response?.status === 403 && apiErrorCode(error) === 'profile_incomplete') setContactError({ kind: 'profile', text: apiErrorMessage(error, 'Votre profil d\'investissement est incomplet : 40 % sont nécessaires pour contacter un vendeur.') });
       else setContactError({ kind: 'text', text: apiErrorMessage(error, 'Le message n\'a pas pu être envoyé. Réessayez dans quelques instants.') });
     } finally {
       setContactLoading(false);
@@ -232,18 +311,25 @@ const PropertyDetail = ({ user }) => {
   if (!property) return notFound ? <NotFound user={user} /> : null;
 
   const c = property;
-  const legacyPayer = legacyBuyerPays({ commission_payer: c.commission_info?.payer, terms_version: c.commission_info?.terms_version || c.commission_terms_version });
-  const multiple = hasValue(c.asking_price) && Number(c.ebitda) > 0 ? Math.round((Number(c.asking_price) / Number(c.ebitda)) * 10) / 10 : null;
-  const fixedCharges = c.fixed_charges && typeof c.fixed_charges === 'object' ? Object.keys(FIXED_CHARGE_LABELS).filter((k) => Number(c.fixed_charges[k]) > 0).map((k) => ({ key: k, label: FIXED_CHARGE_LABELS[k], value: Number(c.fixed_charges[k]) })) : [];
-  const fixedTotal = fixedCharges.reduce((s, x) => s + x.value, 0) || (typeof c.fixed_charges === 'number' ? c.fixed_charges : 0);
-  const reassurance = REASSURANCE.filter((r) => c[r.key] === true || c[r.key] === false);
-  const saleObject = SALE_OBJECT_LABELS[c.sale_object] || (c.sale_type === 'parts' ? SALE_OBJECT_LABELS.titres : c.sale_type === 'fonds' ? SALE_OBJECT_LABELS.fonds : '');
-  const dirigeantVerified = c.property_checks?.dirigeant_match === 'match_exact';
-  const rgeDeadline = c.rge_validity || null;
-  const verifiedAt = c.qualifications_verified_at || null;
-  const inAdeme = c.property_checks?.in_ademe_list;
-  const hasFinancials = ['ca_n', 'ca_n1', 'ca_n2', 'ebitda', 'margin', 'debt', 'pipeline'].some((k) => hasValue(c[k])) || fixedTotal > 0;
-  const revealedName = c.company_name && !isOwner ? c.company_name : null;
+  const housing = isHousingLease(c.lease_type);
+  const verified = ownershipVerified(c);
+  const alert = dpeAlert(c);
+  const fees = listingCommission(c, commission);
+  const location = listingLocation(c, { district: true });
+  const yearly = annualRent(c);
+  const surface = formatSurface(c.surface);
+  const revealed = !isOwner && (c.address || c.company_name);
+  const ownershipStatus = c.ownership?.status || (c.property_checks?.ownership_verified ? 'verified' : '');
+  const unpaid = c.tenant_payment_status === 'impayes';
+  const dpeLetter = /^[A-G]$/i.test(String(c.dpe_class || ''));
+  const gesLetter = /^[A-G]$/i.test(String(c.ges_class || ''));
+
+  const howSteps = [
+    { title: 'Vous présentez votre projet', text: 'Sans frais, par la messagerie. Le vendeur reçoit votre carte acquéreur (budget, apport, financement, rendement visé) et vous répond.' },
+    { title: 'Le dossier s\'ouvre après l\'engagement de confidentialité', text: 'Identité vérifiée, engagement de confidentialité et de non-contournement signé par code, origine des fonds déclarée : l\'adresse, le vendeur et les documents vous sont révélés.' },
+    { title: 'Vous faites une offre d\'achat', text: 'Prix, financement, condition de prêt : signée en ligne, contresignée par le vendeur s\'il l\'accepte. Elle n\'emporte pas vente.' },
+    { title: 'Compromis et acte chez le notaire', text: 'Le notaire rédige l\'avant-contrat et l\'acte authentique. Le bail continue : vous devenez bailleur à la signature.' },
+  ];
 
   return (
     <div className="min-h-screen flex flex-col bg-brand-surface">
@@ -252,8 +338,8 @@ const PropertyDetail = ({ user }) => {
       <main id="contenu" className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 min-w-0">
         <nav aria-label="Fil d'Ariane" className="text-sm text-gray-600 mb-4 min-w-0">
           <ol className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <li><Link to={LISTINGS_PATH} className="hover:underline">Annonces</Link></li>
-            {firstTrade && (<><li aria-hidden="true">›</li><li><Link to={listingsPath({ trades: [firstTrade] })} className="hover:underline">{tradeLabel(firstTrade, true)}</Link></li></>)}
+            <li><Link to={LISTINGS_PATH} className="hover:underline">Biens à vendre</Link></li>
+            {typePlural && (<><li aria-hidden="true">›</li><li><Link to={listingsPath({ types: [c.property_type] })} className="hover:underline">{typePlural}</Link></li></>)}
             <li aria-hidden="true">›</li>
             <li aria-current="page" className="text-brand-navy">Annonce</li>
           </ol>
@@ -261,59 +347,58 @@ const PropertyDetail = ({ user }) => {
 
         <div className="grid lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-6 min-w-0">
           <div className="space-y-6 min-w-0">
-            {/* En-tête */}
+            <Gallery property={c} />
+
+            {/* En-tête : badges, titre, localisation, chiffres clés, actions */}
             <header className="card p-5 sm:p-6 min-w-0" data-testid="property-header">
               <div className="flex flex-wrap items-center gap-2 mb-3">
-                {badge && (
-                  <span className={`badge ${badge.kind === 'verified' ? 'badge-verified' : 'badge-declared'}`} data-testid="qualification-badge">
-                    <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />{badge.label}
+                {verified && (
+                  <span className="badge badge-verified" data-testid="ownership-badge">
+                    <BadgeCheck className="w-3.5 h-3.5" aria-hidden="true" />Propriétaire vérifié
                   </span>
                 )}
-                {dirigeantVerified && <span className="badge badge-verified"><BadgeCheck className="w-3.5 h-3.5" aria-hidden="true" />Dirigeant vérifié</span>}
+                {c.lease_type && <span className="badge badge-declared">{leaseTypeLabel(c.lease_type, true)}</span>}
+                {c.dpe_class && <DpePill value={c.dpe_class} size="sm" withLabel />}
                 {c.is_test === true && <span className="badge badge-warning" data-testid="test-listing-badge">Annonce de test (fictive)</span>}
                 {c.published_at && <time dateTime={c.published_at} className="text-xs text-gray-500">Publiée le {formatDateFr(c.published_at)}</time>}
               </div>
               <h1 className="font-display text-2xl sm:text-3xl font-bold text-brand-navy tracking-tight break-words">{title}</h1>
-              <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-600">
-                {location && <div className="flex items-center gap-1 min-w-0"><dt className="sr-only">Localisation</dt><MapPin className="w-4 h-4 shrink-0" aria-hidden="true" /><dd className="truncate">{location}</dd></div>}
-                {hasValue(c.staff_count) && <div className="flex items-center gap-1"><dt className="sr-only">Effectif</dt><Users className="w-4 h-4 shrink-0" aria-hidden="true" /><dd>{plural(Number(c.staff_count), 'salarié')}</dd></div>}
-                {c.creation_date && <div className="flex items-center gap-1"><dt className="sr-only">Création</dt><Calendar className="w-4 h-4 shrink-0" aria-hidden="true" /><dd>Créée en {new Date(c.creation_date).getFullYear()}</dd></div>}
-                {c.legal_structure && <div className="flex items-center gap-1"><dt className="sr-only">Forme juridique</dt><Building2 className="w-4 h-4 shrink-0" aria-hidden="true" /><dd>{c.legal_structure}</dd></div>}
-              </dl>
-              {trades.length > 0 && (
-                <ul className="mt-3 flex flex-wrap gap-1.5" aria-label="Métiers">
-                  {trades.map((t) => <li key={t}><Link to={listingsPath({ trades: [t] })} className="badge bg-brand-blue-soft text-blue-800 hover:underline">{tradeLabel(t, true) || t}</Link></li>)}
-                </ul>
-              )}
-              {revealedName && (
-                <p className="mt-3 badge badge-verified" data-testid="revealed-identity">
-                  <Lock className="w-3.5 h-3.5" aria-hidden="true" />Nom révélé après votre accord de confidentialité : {revealedName}
+              {location && (
+                <p className="mt-2 flex items-center gap-1 text-sm text-gray-600 min-w-0">
+                  <MapPin className="w-4 h-4 shrink-0" aria-hidden="true" /><span className="sr-only">Localisation : </span>
+                  <span className="break-words">{location}</span>
                 </p>
               )}
+              {revealed && (
+                <div className="mt-3 rounded-xl border border-brand-green/30 bg-brand-green-soft px-3 py-2 text-sm text-brand-green-dark" data-testid="revealed-identity">
+                  <p className="flex items-start gap-2"><Lock className="w-4 h-4 mt-0.5 shrink-0" aria-hidden="true" /><span>Révélé après votre engagement de confidentialité :
+                    {c.address && <> adresse <strong>{c.address}{c.postal_code ? `, ${c.postal_code}` : ''} {c.city || ''}</strong></>}
+                    {c.company_name && <>{c.address ? ' ; ' : ' '}propriétaire <strong>{c.company_name}</strong></>}.</span></p>
+                </div>
+              )}
 
-              <div className="mt-5 grid grid-cols-2 sm:grid-cols-3 gap-3">
-                <Stat label="Prix demandé" testId="asking-price">{formatPrice(c.asking_price)}</Stat>
-                {hasValue(c.ca_n) && <Stat label="Chiffre d'affaires" testId="ca-n">{formatPrice(c.ca_n)}</Stat>}
-                {hasValue(c.ebitda) && (
-                  <Stat label="EBE" testId="ebitda" note={multiple ? `Prix demandé = ${String(multiple).replace('.', ',')} × l'EBE` : null}>{formatPrice(c.ebitda)}</Stat>
-                )}
+              <div className="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <KeyFigure label="Prix" value={formatPrice(c.asking_price)} note="honoraires inclus" testId="asking-price" />
+                <KeyFigure label="Loyer HC" value={positive(c.rent_monthly) ? formatMonthly(c.rent_monthly) : '—'} note={positive(c.charges_monthly) ? `+ ${formatPrice(c.charges_monthly)} de charges` : 'hors charges'} testId="rent-monthly" />
+                <KeyFigure label="Rendement brut" value={formatYield(yields.gross) || '—'} tone="teal" note="loyers HC ÷ prix" testId="gross-yield" />
+                <KeyFigure label="Rendement net" value={formatYield(yields.net) || '—'} note={yields.net ? 'après taxe foncière et charges' : 'charges non renseignées'} testId="net-yield" />
               </div>
 
-              {legacyPayer && (
-                <div className="mt-4 text-sm text-brand-amber bg-brand-amber-soft border border-amber-200 rounded-xl px-4 py-3" data-testid="commission-notice">
-                  <p className="font-semibold">Annonce antérieure au barème actuel : commission à la charge de l&apos;acquéreur.</p>
-                  {hasValue(c.commission_info?.estimate_ht) && <p className="mt-1 tabular">Estimation sur le prix demandé : {formatEuros(c.commission_info.estimate_ht)} HT ({formatEuros(c.commission_info.estimate_ttc)} TTC), due uniquement à la signature de l&apos;acte.</p>}
+              {alert && (
+                <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-brand-amber-soft px-4 py-3 text-sm text-brand-amber" role="note" data-testid="dpe-alert">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" aria-hidden="true" />
+                  <span>{alert.text}</span>
                 </div>
               )}
 
               <div className="mt-5 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap pt-4 border-t border-brand-line" data-testid="property-actions">
-                {!isOwner && user?.role !== 'seller' && (
+                {canContact && (
                   <button type="button" onClick={openContact} className="btn-primary col-span-2 sm:col-auto px-5 py-3 text-sm" data-testid="contact-seller-btn">
                     <MessageSquare className="w-4 h-4" aria-hidden="true" />
-                    Présenter mon projet au cédant
+                    Présenter mon projet au vendeur
                   </button>
                 )}
-                {!isOwner && user?.role !== 'seller' && (
+                {canContact && (
                   <button
                     type="button"
                     onClick={toggleFavorite}
@@ -329,7 +414,7 @@ const PropertyDetail = ({ user }) => {
                 {isBuyer && (
                   <Link to={`/dataroom/${id}`} className="btn-secondary w-full sm:w-auto px-4 py-3 text-sm" data-testid="dataroom-link">
                     <FolderLock className="w-4 h-4" aria-hidden="true" />
-                    Mon dossier
+                    Dossier du bien
                   </Link>
                 )}
                 <button type="button" onClick={share} className="btn-secondary w-full sm:w-auto px-4 py-3 text-sm" data-testid="share-btn">
@@ -337,125 +422,176 @@ const PropertyDetail = ({ user }) => {
                   Partager
                 </button>
               </div>
-              {isOwner && <p className="mt-3 text-sm text-gray-600">Vous voyez votre annonce telle que les repreneurs la voient, nom et coordonnées exclus. <Link to="/seller/dashboard" className="btn-link text-sm">Mon espace</Link></p>}
+              {isOwner && <p className="mt-3 text-sm text-gray-600">Vous voyez votre annonce telle que les acquéreurs la voient, adresse et identité exclues. <Link to="/seller/dashboard" className="btn-link text-sm">Mon espace</Link></p>}
             </header>
 
-            {/* Entreprise */}
-            <Section id="entreprise" title="L'entreprise" icon={Building2}>
-              {c.description ? <p className="text-gray-800 leading-relaxed whitespace-pre-line break-words" data-testid="description">{c.description}</p> : <p className="text-sm text-gray-600">Le cédant n&apos;a pas rédigé de présentation : demandez-lui ce qui vous manque par la messagerie après le premier contact.</p>}
-              <dl className="mt-4 grid sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
-                {Array.isArray(c.specialties) && c.specialties.length > 0 && <div className="min-w-0 sm:col-span-2"><dt className="text-xs text-gray-500">Spécialités</dt><dd className="text-brand-navy font-medium break-words">{c.specialties.join(', ')}</dd></div>}
-                {c.equipment && <div className="min-w-0"><dt className="text-xs text-gray-500">Matériel et véhicules</dt><dd className="text-gray-800 break-words whitespace-pre-line">{c.equipment}</dd></div>}
-                {c.premises && <div className="min-w-0"><dt className="text-xs text-gray-500">Locaux</dt><dd className="text-gray-800 break-words whitespace-pre-line">{c.premises}</dd></div>}
-                {c.mandataire_contracts && <div className="min-w-0 sm:col-span-2"><dt className="text-xs text-gray-500">Contrats avec des mandataires ou obligés (primes CEE)</dt><dd className="text-gray-800 break-words whitespace-pre-line">{c.mandataire_contracts}</dd></div>}
-                {c.creation_date && <div className="min-w-0"><dt className="text-xs text-gray-500">Date de création</dt><dd className="text-gray-800">{formatDateFr(c.creation_date)}</dd></div>}
-                {hasValue(c.staff_count) && <div className="min-w-0"><dt className="text-xs text-gray-500">Effectif</dt><dd className="text-gray-800" data-testid="staff-count">{plural(Number(c.staff_count), 'salarié')}</dd></div>}
-                {c.legal_structure && <div className="min-w-0"><dt className="text-xs text-gray-500">Forme juridique</dt><dd className="text-gray-800">{c.legal_structure}</dd></div>}
-                {location && <div className="min-w-0"><dt className="text-xs text-gray-500">Localisation</dt><dd className="text-gray-800">{location}</dd></div>}
+            {/* Chiffres clés */}
+            <Section id="chiffres" title="Chiffres clés" icon={Euro}>
+              <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+                <Fact label="Prix de vente (honoraires inclus)" testId="fact-price">{formatPrice(c.asking_price)}</Fact>
+                {positive(c.rent_monthly) && <Fact label="Loyer mensuel hors charges">{formatMonthly(c.rent_monthly)}</Fact>}
+                {yearly && <Fact label="Loyers annuels hors charges">{formatPrice(yearly)}</Fact>}
+                {positive(c.charges_monthly) && <Fact label="Provisions sur charges récupérables">{formatMonthly(c.charges_monthly)}</Fact>}
+                {yields.gross && <Fact label="Rendement brut">{formatYield(yields.gross)}</Fact>}
+                {yields.net && <Fact label="Rendement net de charges">{formatYield(yields.net)}</Fact>}
+                {hasValue(c.property_tax) && <Fact label="Taxe foncière annuelle">{formatPrice(c.property_tax)}</Fact>}
+                {hasValue(c.non_recoverable_charges) && <Fact label="Charges annuelles non récupérables">{formatPrice(c.non_recoverable_charges)}</Fact>}
+                {hasValue(c.deposit) && <Fact label="Dépôt de garantie" testId="fact-deposit">{formatPrice(c.deposit)}</Fact>}
               </dl>
+              <p className="mt-4 text-xs text-gray-600 leading-relaxed">
+                Rendement brut : loyers annuels hors charges rapportés au prix. Rendement net : après taxe foncière et charges non récupérables
+                (copropriété, assurance, gestion), avant impôts et frais d'acquisition. Montants déclarés par le vendeur ; bail, quittances et avis de
+                taxe foncière sont dans le dossier du bien.
+              </p>
             </Section>
 
-            {/* Qualifications */}
-            {(rgeTypes.length > 0 || others.length > 0) && (
-              <Section id="qualifications" title="Qualifications" icon={ShieldCheck}>
-                {rgeTypes.length > 0 && (
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2 mb-2">
-                      <h3 className="font-semibold text-brand-navy">Domaines RGE</h3>
-                      {inAdeme !== false ? (
-                        <span className="badge badge-verified"><ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />Contrôlés sur la liste ADEME{verifiedAt ? ` le ${formatDateFr(verifiedAt)}` : ''}</span>
-                      ) : (
-                        <span className="badge badge-declared">Déclarés par le cédant, non retrouvés sur la liste ADEME</span>
-                      )}
-                    </div>
-                    <ul className="divide-y divide-brand-line rounded-xl border border-brand-line bg-white" data-testid="rge-list">
-                      {rgeTypes.map((label) => (
-                        <li key={label} className="flex flex-wrap items-center justify-between gap-2 p-3 min-w-0">
-                          <span className="text-sm font-medium text-brand-navy break-words">{shortRgeLabel(label)}</span>
-                          {rgeDeadline && (
-                            // Vert réservé à la vérification (SPEC §5.3) : non retrouvée sur la liste ADEME → ton « déclaré »
-                            <span className={`badge ${isExpired(rgeDeadline) ? 'badge-danger' : inAdeme === false ? 'badge-declared' : isExpiringSoon(rgeDeadline) ? 'badge-warning' : 'badge-verified'}`} data-testid="rge-validity-badge">
-                              {isExpired(rgeDeadline) ? `Expirée le ${formatDateFr(rgeDeadline)}` : inAdeme === false ? `Déclarée valide jusqu'au ${formatDateFr(rgeDeadline)}` : `Valide jusqu'au ${formatDateFr(rgeDeadline)}`}
-                            </span>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                    <p className="text-xs text-gray-500 mt-2">
-                      {rgeDeadline ? 'Date de fin de validité déclarée par le cédant pour sa qualification principale. ' : ''}
-                      Le détail par qualification (organisme, dates) est fourni dans le dossier avec le diagnostic de transmissibilité.
-                    </p>
-                  </div>
-                )}
-                {others.length > 0 && (
-                  <div className="mt-4 min-w-0">
-                    <h3 className="font-semibold text-brand-navy mb-2">Autres qualifications <span className="badge badge-declared ml-1">Déclarées</span></h3>
-                    <ul className="flex flex-wrap gap-1.5">
-                      {others.map((o) => <li key={o} className="badge badge-locked">{otherQualificationLabel(o) || o}</li>)}
-                    </ul>
-                  </div>
-                )}
-              </Section>
-            )}
-
-            {/* Chiffres */}
-            {hasFinancials && (
-              <Section id="chiffres" title="Chiffres clés" icon={Wrench}>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  {hasValue(c.ca_n) && <Stat label="Chiffre d'affaires N">{formatPrice(c.ca_n)}</Stat>}
-                  {hasValue(c.ca_n1) && <Stat label="Chiffre d'affaires N-1">{formatPrice(c.ca_n1)}</Stat>}
-                  {hasValue(c.ca_n2) && <Stat label="Chiffre d'affaires N-2">{formatPrice(c.ca_n2)}</Stat>}
-                  {hasValue(c.ebitda) && <Stat label="EBE (excédent brut d'exploitation)">{formatPrice(c.ebitda)}</Stat>}
-                  {hasValue(c.margin) && <Stat label="Marge brute">{String(c.margin).replace('.', ',')} %</Stat>}
-                  {/* Valeurs nulles masquées : 0 € est la valeur par défaut d'un champ non renseigné (pas de compteur à zéro) */}
-                  {Number(c.debt) > 0 && <Stat label="Endettement">{formatPrice(c.debt)}</Stat>}
-                  {Number(c.pipeline) > 0 && <Stat label="Carnet de commandes">{formatPrice(c.pipeline)}</Stat>}
-                  {fixedTotal > 0 && <Stat label="Charges fixes annuelles">{formatPrice(fixedTotal)}</Stat>}
-                </div>
-                {fixedCharges.length > 0 && (
-                  <dl className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-600">
-                    {fixedCharges.map((x) => <div key={x.key}><dt className="inline">{x.label} : </dt><dd className="inline tabular text-brand-navy">{formatPrice(x.value)}</dd></div>)}
-                  </dl>
-                )}
-                {multiple && <p className="mt-3 text-sm text-gray-600 tabular">Prix demandé rapporté à l&apos;EBE : {String(multiple).replace('.', ',')} ×. Un ordre de grandeur, à affiner avec les comptes complets dans le dossier.</p>}
-                <p className="mt-2 text-xs text-gray-500">Chiffres déclarés par le cédant ; les comptes et pièces justificatives sont dans le dossier, après accord de confidentialité.</p>
-              </Section>
-            )}
-
-            {/* Conditions de cession */}
-            <Section id="cession" title="Conditions de cession" icon={FileSignature}>
-              <dl className="grid sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
-                <div className="min-w-0"><dt className="text-xs text-gray-500">Prix demandé</dt><dd className="font-semibold text-brand-navy tabular">{formatPrice(c.asking_price)}</dd></div>
-                {saleObject && <div className="min-w-0"><dt className="text-xs text-gray-500">Objet de la cession</dt><dd className="text-gray-800">{saleObject}</dd></div>}
-                {c.sale_reason && <div className="min-w-0"><dt className="text-xs text-gray-500">Motif de la cession</dt><dd className="text-gray-800">{SALE_REASON_LABELS[c.sale_reason] || c.sale_reason}</dd></div>}
-                {hasValue(c.handover_months) && <div className="min-w-0"><dt className="text-xs text-gray-500">Accompagnement</dt><dd className="text-gray-800">{handoverText(c.handover_months)}</dd></div>}
+            {/* Le bien */}
+            <Section id="bien" title="Le bien" icon={Home}>
+              {c.description ? <p className="text-gray-800 leading-relaxed whitespace-pre-line break-words mb-5" data-testid="description">{c.description}</p> : null}
+              <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+                {c.property_type && <Fact label="Type de bien">{propertyTypeLabel(c.property_type)}</Fact>}
+                {surface && <Fact label="Surface" testId="fact-surface">{surface}</Fact>}
+                {positive(c.rooms) && <Fact label="Pièces">{plural(Number(c.rooms), 'pièce')}</Fact>}
+                {hasValue(c.floor) && <Fact label="Étage">{floorLabel(c.floor)}</Fact>}
+                {yesNo(c.elevator) && <Fact label="Ascenseur">{yesNo(c.elevator)}</Fact>}
+                {positive(c.construction_year) && <Fact label="Année de construction">{c.construction_year}</Fact>}
+                {positive(c.units_count) && <Fact label="Lots">{plural(Number(c.units_count), 'lot')}{positive(c.units_rented) ? `, dont ${c.units_rented} loué${Number(c.units_rented) > 1 ? 's' : ''}` : ''}</Fact>}
+                {c.district && <Fact label="Quartier">{c.district}</Fact>}
+                {c.owner_type && <Fact label="Propriétaire">{ownerTypeLabel(c.owner_type)}</Fact>}
+                {c.equipment && <Fact label="Équipements et annexes" wide>{c.equipment}</Fact>}
+                {c.recent_works && <Fact label="Travaux récents" wide>{c.recent_works}</Fact>}
               </dl>
-              {reassurance.length > 0 && (
-                <ul className="mt-4 grid sm:grid-cols-2 gap-2" aria-label="Ce qui rassure un repreneur" data-testid="reassurance">
-                  {reassurance.map((r) => (
-                    <li key={r.key} className={`flex items-start gap-2 rounded-xl border px-3 py-2 text-sm ${c[r.key] ? 'border-brand-green/30 bg-brand-green-soft text-brand-green-dark' : 'border-brand-line bg-white text-gray-600'}`}>
-                      {c[r.key] ? <Check className="w-4 h-4 mt-0.5 shrink-0" aria-hidden="true" /> : <X className="w-4 h-4 mt-0.5 shrink-0" aria-hidden="true" />}
-                      <span>{r.label}{c[r.key] ? '' : ' : non'}</span>
-                    </li>
-                  ))}
-                </ul>
+
+              {(c.is_copro === true || c.is_copro === false) && (
+                <div className="mt-5 rounded-xl border border-brand-line bg-brand-surface p-4 min-w-0" data-testid="copro">
+                  <h3 className="font-semibold text-brand-navy mb-2 flex items-center gap-2"><Building2 className="w-4 h-4 text-gray-500" aria-hidden="true" />Copropriété</h3>
+                  {c.is_copro ? (
+                    <ul className="space-y-1 text-sm text-gray-800">
+                      <li>Bien soumis au statut de la copropriété{positive(c.copro_lots) ? ` : ${plural(Number(c.copro_lots), 'lot')} dans la copropriété` : ''}.</li>
+                      {hasValue(c.copro_charges_annual) && <li>Quote-part annuelle moyenne des charges courantes (budget prévisionnel) : <strong className="tabular">{formatPrice(c.copro_charges_annual)}</strong> par an.</li>}
+                      <li data-testid="copro-procedure">
+                        {c.copro_procedure === true
+                          ? 'Procédure en cours à l\'encontre du syndicat des copropriétaires (art. 29-1 A ou 29-1 de la loi du 10 juillet 1965).'
+                          : c.copro_procedure === false
+                            ? 'Aucune procédure en cours à l\'encontre du syndicat des copropriétaires (art. 29-1 A et 29-1 de la loi du 10 juillet 1965).'
+                            : 'Procédure à l\'encontre du syndicat des copropriétaires : non renseigné.'}
+                      </li>
+                    </ul>
+                  ) : (
+                    <p className="text-sm text-gray-800">Bien non soumis au statut de la copropriété.</p>
+                  )}
+                </div>
               )}
-              <p className="mt-4 text-sm text-gray-700">{OFFER.payerSentence}</p>
+            </Section>
+
+            {/* La location */}
+            <Section id="location" title="La location" icon={KeyRound}>
+              <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+                {c.lease_type && <Fact label="Bail" wide>{leaseTypeLabel(c.lease_type)}</Fact>}
+                {c.lease_start && <Fact label="Début du bail en cours">{formatDateFr(c.lease_start)}</Fact>}
+                {c.lease_end && <Fact label="Prochaine échéance">{formatDateFr(c.lease_end)}</Fact>}
+                {c.tenant_since && <Fact label="Locataire en place depuis">{formatDateFr(c.tenant_since, { month: 'long', year: 'numeric' })}</Fact>}
+                {hasValue(c.deposit) && <Fact label="Dépôt de garantie">{formatPrice(c.deposit)}</Fact>}
+                {c.indexation && <Fact label="Révision du loyer">{INDEXATION_LABELS[c.indexation] || c.indexation}</Fact>}
+                {c.last_revision && <Fact label="Dernière révision">{formatDateFr(c.last_revision)}</Fact>}
+                {c.management && <Fact label="Gestion">{MANAGEMENT_LABELS[c.management] || c.management}</Fact>}
+                {c.operator_lease_end && <Fact label="Fin du bail de l'exploitant">{formatDateFr(c.operator_lease_end)}</Fact>}
+                {yesNo(c.has_gli) && <Fact label="Garantie loyers impayés">{yesNo(c.has_gli)}</Fact>}
+                {yesNo(c.has_guarantor) && <Fact label="Caution du locataire">{yesNo(c.has_guarantor)}</Fact>}
+              </dl>
+              {c.tenant_payment_status && (
+                <p className={`mt-4 flex items-start gap-2 rounded-xl px-4 py-3 text-sm ${unpaid ? 'border border-amber-200 bg-brand-amber-soft text-brand-amber' : 'border border-brand-line bg-brand-surface text-gray-800'}`} data-testid="tenant-payment">
+                  {unpaid ? <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" aria-hidden="true" /> : <Info className="w-4 h-4 mt-0.5 shrink-0 text-gray-500" aria-hidden="true" />}
+                  <span>Situation déclarée du locataire sur les 12 derniers mois : <strong>{tenantPaymentLabel(c.tenant_payment_status)}</strong>. Le relevé des loyers est dans le dossier du bien.</span>
+                </p>
+              )}
+              <p className="mt-4 text-sm text-gray-700 leading-relaxed">
+                Le bail continue avec le nouveau propriétaire : le locataire reste en place et vous percevez les loyers dès la signature de l'acte.
+                {housing ? ' Le dépôt de garantie est réglé entre vendeur et acquéreur chez le notaire.' : ''}
+              </p>
+              <p className="mt-2 text-sm text-gray-700 leading-relaxed" data-testid="visits">
+                Visites : après l'engagement de confidentialité, organisées par le vendeur avec l'accord du locataire (2 heures maximum par jour ouvrable, art. 4 de la loi du 6 juillet 1989).
+              </p>
+            </Section>
+
+            {/* Performance énergétique */}
+            <Section id="dpe" title="Performance énergétique" icon={Leaf}>
+              {dpeLetter ? (
+                <div className="grid sm:grid-cols-2 gap-5 min-w-0">
+                  <DpeScale value={c.dpe_class} caption={c.dpe_date ? `Diagnostic de performance énergétique réalisé le ${formatDateFr(c.dpe_date)}.` : 'Diagnostic de performance énergétique (DPE).'} />
+                  <dl className="space-y-4">
+                    <Fact label="Classe énergie">Classe {String(c.dpe_class).toUpperCase()}</Fact>
+                    {gesLetter && <Fact label="Émissions de gaz à effet de serre"><DpePill value={c.ges_class} size="sm" kind="GES" withLabel /></Fact>}
+                    {(positive(c.energy_cost_min) || positive(c.energy_cost_max)) && (
+                      <Fact label="Dépenses annuelles d'énergie estimées" testId="energy-cost">
+                        {positive(c.energy_cost_min) && positive(c.energy_cost_max)
+                          ? `Entre ${formatPrice(c.energy_cost_min)} et ${formatPrice(c.energy_cost_max)} par an`
+                          : `${formatPrice(c.energy_cost_min || c.energy_cost_max)} par an`}
+                      </Fact>
+                    )}
+                  </dl>
+                </div>
+              ) : (
+                <p className="text-sm text-gray-800" data-testid="dpe-other">{c.dpe_class === 'vierge' ? 'DPE vierge (consommations non disponibles).' : c.dpe_class === 'non-soumis' ? 'Bien non soumis au diagnostic de performance énergétique.' : 'Diagnostic de performance énergétique non renseigné.'}</p>
+              )}
+              {(positive(c.energy_cost_min) || positive(c.energy_cost_max)) && dpeLetter && (
+                <p className="mt-3 text-xs text-gray-600">Montant estimé des dépenses annuelles d'énergie pour un usage standard, prix de l'énergie de l'année de référence du diagnostic.</p>
+              )}
+              {alert && (
+                <p className="mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-brand-amber-soft px-4 py-3 text-sm text-brand-amber">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" aria-hidden="true" />
+                  <span>{alert.text}</span>
+                </p>
+              )}
+            </Section>
+
+            {/* La vente */}
+            <Section id="vente" title="La vente" icon={FileSignature}>
+              <dl className="grid sm:grid-cols-2 gap-x-6 gap-y-4">
+                <Fact label="Prix de vente">{formatPrice(c.asking_price)} honoraires inclus</Fact>
+                {c.sale_object && <Fact label="Objet de la vente">{saleObjectLabel(c.sale_object)}</Fact>}
+                {c.sale_reason && <Fact label="Motif de la vente">{saleReasonLabel(c.sale_reason)}</Fact>}
+                {c.availability_note && <Fact label="Disponibilité" wide>{c.availability_note}</Fact>}
+              </dl>
+              <div className="mt-5 rounded-xl border border-brand-line bg-brand-surface p-4 text-sm text-gray-800 leading-relaxed" data-testid="fees">
+                <p className="font-semibold text-brand-navy mb-1">Honoraires</p>
+                <p>
+                  Honoraires de négociation à la charge du vendeur : <strong className="tabular">{formatEuros(fees.ttc)} TTC</strong> ({formatEuros(fees.ht)} HT),
+                  soit {formatPercent(Number(c.asking_price) > 0 ? Math.round((fees.ttc / Number(c.asking_price)) * 10000) / 100 : fees.ratePercentTTC)} TTC du prix affiché.
+                  {Number(c.asking_price) > fees.ttc ? <> Prix hors honoraires : <span className="tabular">{formatEuros(Number(c.asking_price) - fees.ttc)}</span>.</> : null}
+                </p>
+                <p className="mt-1">{OFFER.payerSentence} Ils sont réglés par le notaire, uniquement à la signature de l'acte authentique.</p>
+              </div>
+            </Section>
+
+            {/* Ce que vérifie la plateforme */}
+            <Section id="verifications" title={`Ce que vérifie ${BRAND.name}`} icon={ShieldCheck}>
+              <ul className="space-y-3 text-sm text-gray-800" data-testid="checks">
+                <li className="flex items-start gap-2">
+                  {ownershipStatus === 'verified'
+                    ? <BadgeCheck className="w-5 h-5 shrink-0 text-brand-green" aria-hidden="true" />
+                    : <Check className="w-5 h-5 shrink-0 text-gray-400" aria-hidden="true" />}
+                  <span>
+                    <strong>Justificatif de propriété</strong> (titre, attestation notariée, avis de taxe foncière ou statuts de la SCI) :{' '}
+                    {ownershipStatus === 'verified' ? 'contrôlé par nos équipes.' : ownershipStatus === 'pending' ? 'déposé, en cours de contrôle.' : 'exigé avant toute publication.'}
+                  </span>
+                </li>
+                <li className="flex items-start gap-2"><Check className="w-5 h-5 shrink-0 text-brand-teal" aria-hidden="true" /><span><strong>Identité du vendeur</strong> vérifiée sur pièce d'identité avant la signature du mandat de vente.</span></li>
+                <li className="flex items-start gap-2"><Check className="w-5 h-5 shrink-0 text-brand-teal" aria-hidden="true" /><span><strong>Mandat de vente</strong> signé avec {LEGAL.denomination}, titulaire de la carte professionnelle T.</span></li>
+                <li className="flex items-start gap-2"><Check className="w-5 h-5 shrink-0 text-brand-teal" aria-hidden="true" /><span><strong>Acquéreurs qualifiés</strong> : identité vérifiée, engagement de confidentialité et de non-contournement, origine des fonds déclarée avant l'accès au dossier.</span></li>
+              </ul>
+              <p className="mt-4 text-xs text-gray-600">Bail, loyers, charges, situation du locataire et diagnostics sont déclarés par le vendeur ; les pièces sont dans le dossier du bien et le notaire les vérifie avant l'acte.</p>
             </Section>
           </div>
 
           {/* Colonne latérale */}
-          <aside className="space-y-6 min-w-0 lg:sticky lg:top-24 self-start">
+          <aside className="space-y-6 min-w-0 lg:sticky lg:top-6 self-start">
             <section className="card p-5 sm:p-6 min-w-0" aria-labelledby="how-title" data-testid="how-it-works">
               <h2 id="how-title" className="font-display text-lg font-bold text-brand-navy mb-3">Comment ça se passe</h2>
               <ol className="space-y-3">
-                {[
-                  { title: 'Vous présentez votre projet', text: 'Sans frais, par la messagerie. Le cédant reçoit votre carte repreneur (projet, budget, financement, zones) et vous répond.' },
-                  { title: 'Le dossier s\'ouvre après l\'accord de confidentialité', text: 'Identité vérifiée, accord signé par code, origine des fonds déclarée : le nom de l\'entreprise et les documents vous sont alors révélés.' },
-                  { title: 'Vous faites une offre indicative', text: 'Prix, objet, financement, conditions. Signée en ligne, contresignée par le cédant s\'il l\'accepte.' },
-                ].map((s, i) => (
+                {howSteps.map((s, i) => (
                   <li key={s.title} className="flex gap-3 min-w-0">
-                    <span className="shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full bg-brand-navy text-white text-xs font-bold tabular" aria-hidden="true">{i + 1}</span>
+                    <span className="shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full bg-brand-teal text-white text-xs font-bold tabular" aria-hidden="true">{i + 1}</span>
                     <div className="min-w-0">
                       <p className="font-semibold text-brand-navy leading-snug">{s.title}</p>
                       <p className="text-sm text-gray-600 leading-relaxed">{s.text}</p>
@@ -463,33 +599,37 @@ const PropertyDetail = ({ user }) => {
                   </li>
                 ))}
               </ol>
-              <p className="mt-4 text-xs text-gray-500 leading-relaxed flex items-start gap-1.5"><Lock className="w-3.5 h-3.5 mt-0.5 shrink-0" aria-hidden="true" />Annonce anonyme : ni nom ni coordonnées avant l&apos;accord de confidentialité. {OFFER.buyerFreeShort}</p>
-              {!isOwner && user?.role !== 'seller' && (
+              <p className="mt-4 text-xs text-gray-600 leading-relaxed flex items-start gap-1.5"><Lock className="w-3.5 h-3.5 mt-0.5 shrink-0" aria-hidden="true" />Adresse et identité du vendeur communiquées après l'engagement de confidentialité. {OFFER.buyerFreeShort}</p>
+              {canContact && (
                 <button type="button" onClick={openContact} className="btn-primary w-full mt-4 px-5 py-3 text-sm" data-testid="contact-seller-side-btn">
                   <MessageSquare className="w-4 h-4" aria-hidden="true" />
-                  Présenter mon projet au cédant
+                  Présenter mon projet au vendeur
                 </button>
               )}
-              {!user && <p className="mt-2 text-xs text-gray-500 text-center">Inscription en 2 minutes, sans frais.</p>}
+              {!user && <p className="mt-2 text-xs text-gray-600 text-center">Inscription en 2 minutes, sans frais.</p>}
             </section>
+
+            {c.lease_end && (
+              <p className="flex items-start gap-2 text-sm text-gray-700 card p-4"><CalendarClock className="w-4 h-4 mt-0.5 shrink-0 text-gray-500" aria-hidden="true" />Prochaine échéance du bail : {formatDateFr(c.lease_end, { day: 'numeric', month: 'long', year: 'numeric' })}.</p>
+            )}
 
             {!user && (
               <AlertForm
                 source="fiche"
                 compact
-                defaultTrades={trades}
+                defaultTypes={c.property_type ? [c.property_type] : []}
                 defaultRegions={c.region ? [c.region] : []}
-                title="Recevoir les annonces similaires"
-                intro="Une alerte e-mail, sans compte, sur les mêmes métiers et la même région."
+                title="Recevoir les biens similaires"
+                intro="Une alerte e-mail, sans compte, sur le même type de bien et la même région."
               />
             )}
             {isBuyer && (
               <p className="text-sm text-gray-600">
-                <Link to="/buyer/dashboard" className="btn-link text-sm">Gérer mes alertes</Link> pour recevoir les annonces similaires.
+                <Link to="/buyer/dashboard" className="btn-link text-sm">Gérer mes alertes</Link> pour recevoir les biens similaires.
               </p>
             )}
             <p className="text-sm">
-              <Link to={LISTINGS_PATH} className="btn-link text-sm">Toutes les entreprises du bâtiment à vendre</Link>
+              <Link to={LISTINGS_PATH} className="btn-link text-sm">Tous les biens loués à vendre</Link>
             </p>
           </aside>
         </div>
@@ -500,15 +640,15 @@ const PropertyDetail = ({ user }) => {
           <div className="bg-white rounded-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto p-5 sm:p-6 min-w-0" data-testid="contact-modal">
             <div className="flex items-start justify-between gap-3 mb-3">
               <div className="min-w-0">
-                <h2 id="contact-title" className="font-display text-xl font-bold text-brand-navy">Présenter mon projet au cédant</h2>
-                <p className="text-sm text-gray-600 mt-1 break-words">{title}{hasValue(c.asking_price) ? ` · ${formatPrice(c.asking_price)}` : ''}</p>
+                <h2 id="contact-title" className="font-display text-xl font-bold text-brand-navy">Présenter mon projet au vendeur</h2>
+                <p className="text-sm text-gray-600 mt-1 break-words">{title}{positive(c.asking_price) ? ` · ${formatPrice(c.asking_price)}` : ''}</p>
               </div>
-              <button type="button" onClick={() => setContactOpen(false)} className="shrink-0 rounded-lg p-2 text-gray-600 hover:bg-brand-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue" aria-label="Fermer">
+              <button type="button" onClick={() => setContactOpen(false)} className="shrink-0 rounded-lg p-2 text-gray-600 hover:bg-brand-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-teal" aria-label="Fermer">
                 <X className="w-5 h-5" aria-hidden="true" />
               </button>
             </div>
             <p className="text-sm text-gray-700 leading-relaxed mb-3">
-              Le cédant reçoit votre carte repreneur (projet, budget, financement, zones, horizon, société vérifiée) et ce message. Aucune coordonnée n&apos;est transmise avant l&apos;accord de confidentialité. {OFFER.buyerFreeShort}
+              Le vendeur reçoit votre carte acquéreur (projet, budget, apport, financement, rendement visé, horizon) et ce message. Aucune coordonnée n'est transmise avant l'engagement de confidentialité. {OFFER.buyerFreeShort}
             </p>
             <label htmlFor="contact-message" className="block text-sm font-semibold text-brand-navy mb-1">Votre message</label>
             <textarea
@@ -517,10 +657,10 @@ const PropertyDetail = ({ user }) => {
               onChange={(e) => setMessage(e.target.value)}
               rows={9}
               maxLength={2000}
-              className="w-full rounded-xl border border-brand-line px-4 py-3 text-sm text-brand-navy focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+              className="w-full rounded-xl border border-brand-line px-4 py-3 text-sm text-brand-navy focus:border-brand-teal focus:outline-none focus:ring-2 focus:ring-brand-teal/30"
               data-testid="contact-message"
             />
-            <p className="text-xs text-gray-500 mt-1">Prérempli depuis votre profil de projet : adaptez-le à cette entreprise. Les coordonnées sont masquées avant l&apos;accord de confidentialité.</p>
+            <p className="text-xs text-gray-600 mt-1">Prérempli depuis votre profil d'investissement : adaptez-le à ce bien. Les coordonnées sont masquées avant l'engagement de confidentialité.</p>
             {contactError && (
               <p role="alert" className="mt-3 flex items-start gap-2 text-sm text-red-800 bg-red-50 border border-red-200 rounded-xl px-4 py-3" data-testid="contact-error">
                 <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" aria-hidden="true" />
@@ -534,7 +674,7 @@ const PropertyDetail = ({ user }) => {
               <button type="button" onClick={() => setContactOpen(false)} className="btn-secondary px-4 py-2.5 text-sm">Annuler</button>
               <button type="button" onClick={sendContact} disabled={contactLoading} className="btn-primary px-4 py-2.5 text-sm" data-testid="contact-send-btn">
                 {contactLoading ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Send className="w-4 h-4" aria-hidden="true" />}
-                Envoyer au cédant
+                Envoyer au vendeur
               </button>
             </div>
           </div>

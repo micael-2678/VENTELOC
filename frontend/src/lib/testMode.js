@@ -13,8 +13,8 @@ import { useEffect, useState } from 'react';
 
 const BACKEND_URL = String(process.env.REACT_APP_BACKEND_URL || '').replace(/\/+$/, '');
 const CONFIG_URL = `${BACKEND_URL}/api/config`;
-const STORAGE_KEY = 'cession:test_mode';
-const PANEL_KEY_STORAGE = 'cession:test_panel_key';
+const STORAGE_KEY = 'venteloc:test_mode';
+const PANEL_KEY_STORAGE = 'venteloc:test_panel_key';
 export const TEST_PANEL_KEY_HEADER = 'X-Test-Key';
 export const TEST_PANEL_KEY_PARAM = 'cle';
 

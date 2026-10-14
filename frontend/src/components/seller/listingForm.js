@@ -1,84 +1,97 @@
-// Formulaire d'annonce en 3 écrans (SPEC §4.2.2) : constantes, bornes, aides, contrôle anti-coordonnées,
-// préremplissage (estimateur en sessionStorage, open data) et construction des charges utiles de l'API.
-import { RGE_CATEGORIES, RGE_TYPES, MAX_TRADES, rgeIdFor, tradesForRge, normalizeDepartement, regionForDepartement } from '@/lib/referentiels';
+// Formulaire d'annonce en 3 écrans (docs/venteloc/SPEC.md §3 et §5.2) : le bien, la location, la vente.
+// Constantes, bornes, aides, contrôle anti-coordonnées, préremplissage depuis l'estimateur (sessionStorage), validation
+// par écran (alignée sur les contrôles de publication §5.4) et construction des charges utiles de l'API
+// (POST /properties au premier écran, PUT /properties/{id} ensuite).
+import {
+  PROPERTY_TYPES, OWNER_TYPES, departementFromPostalCode, normalizeDepartement, propertyTitle, grossYield, netYield,
+} from '@/lib/referentiels';
 
 export const ESTIMATE_STORAGE_KEY = 'estimate';
 export const STEPS = [
-  { id: 1, label: 'Entreprise', short: 'Entreprise' },
-  { id: 2, label: 'Chiffres clés', short: 'Chiffres' },
-  { id: 3, label: 'Cession et aperçu', short: 'Cession' },
+  { id: 1, label: 'Le bien', short: 'Le bien' },
+  { id: 2, label: 'La location', short: 'Location' },
+  { id: 3, label: 'La vente', short: 'Vente' },
 ];
 
-export const LEGAL_STRUCTURES = [
-  { value: 'SARL', label: 'SARL' },
-  { value: 'EURL', label: 'EURL' },
-  { value: 'SAS', label: 'SAS' },
-  { value: 'SASU', label: 'SASU' },
-  { value: 'SA', label: 'SA' },
-  { value: 'SNC', label: 'SNC' },
-  { value: 'EI', label: 'Entreprise individuelle (EI, micro-entreprise)' },
-  { value: 'AUTRE', label: 'Autre forme' },
+// Propriétaire en société : dénomination et SIRET demandés (confidentiels), vente des parts possible
+export const COMPANY_OWNERS = ['sci', 'societe'];
+export const isCompanyOwner = (ownerType) => COMPANY_OWNERS.includes(ownerType);
+
+// Types de biens d'habitation : DPE avec une classe A à G (ou « DPE vierge ») et estimation des dépenses d'énergie
+export const HOUSING_TYPES = ['appartement', 'maison', 'immeuble', 'residence-geree'];
+export const isHousingType = (type) => HOUSING_TYPES.includes(type);
+// Pièces, étage, ascenseur : seulement pour les logements
+export const hasRooms = (type) => ['appartement', 'maison', 'residence-geree'].includes(type);
+export const hasFloor = (type) => ['appartement', 'residence-geree', 'bureaux', 'local-commercial', 'parking'].includes(type);
+export const hasUnits = (type, leaseType) => type === 'immeuble' || leaseType === 'plusieurs-baux';
+
+// Bail le plus courant pour un type de bien (préremplissage, modifiable)
+export const defaultLeaseFor = (type) => ({
+  appartement: 'habitation-vide',
+  maison: 'habitation-vide',
+  immeuble: 'plusieurs-baux',
+  'residence-geree': 'residence-geree',
+  'local-commercial': 'commercial',
+  bureaux: 'commercial',
+  parking: 'parking',
+}[type] || '');
+
+export const INDEXATIONS = [
+  { value: 'irl', label: 'IRL (indice de référence des loyers)' },
+  { value: 'ilc', label: 'ILC (indice des loyers commerciaux)' },
+  { value: 'ilat', label: 'ILAT (indice des activités tertiaires)' },
+  { value: 'aucune', label: 'Aucune indexation' },
 ];
 
-export const SALE_OBJECTS = [
-  { value: 'titres', label: 'Cession des titres (parts ou actions de la société)', short: 'Titres' },
-  { value: 'fonds', label: 'Cession du fonds de commerce (clientèle, matériel, contrats)', short: 'Fonds de commerce' },
-  { value: 'indifferent', label: 'Indifférent : à décider avec le repreneur', short: 'Titres ou fonds' },
+export const MANAGEMENTS = [
+  { value: 'direct', label: 'Je gère moi-même' },
+  { value: 'agence', label: 'Gestion confiée à une agence' },
+  { value: 'exploitant', label: 'Exploitant de résidence' },
 ];
 
-export const SALE_REASONS = [
-  { value: 'retraite', label: 'Départ à la retraite' },
-  { value: 'reconversion', label: 'Reconversion ou nouveau projet' },
-  { value: 'sante', label: 'Raison de santé' },
-  { value: 'autre', label: 'Autre raison' },
-];
+export const GES_CLASSES = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
 
-export const HANDOVER_OPTIONS = [0, 1, 3, 6, 12, 24].map((m) => ({ value: m, label: m === 0 ? 'Aucun accompagnement' : m === 1 ? '1 mois' : `${m} mois` }));
-
-// Cases « ce qui rassure un repreneur » (SPEC §4.2.2 écran 3)
-export const REASSURANCE = [
-  { key: 'has_maintenance_contracts', label: 'Contrats d\'entretien récurrents', hint: 'Un chiffre d\'affaires prévisible : le premier levier de valeur.' },
-  { key: 'technical_referent_stays', label: 'Le référent technique reste', hint: 'Indispensable pour conserver les qualifications RGE après la cession.' },
-  { key: 'key_staff_stays', label: 'L\'équipe clé reste', hint: 'Chefs d\'équipe, conducteurs de travaux, bureau d\'études.' },
-  { key: 'decennale_ok', label: 'Assurance décennale à jour, sans sinistre en cours', hint: 'Évite les décotes de dernière minute et facilite le transfert.' },
-];
-
-// Bornes de saisie (SPEC : chiffres bornés, marge et dette bornées)
+// Bornes de saisie
 export const BOUNDS = {
-  ca: { min: 0, max: 100000000 },
-  ebitda: { min: -100000000, max: 100000000 },
-  margin: { min: 0, max: 100 },
-  debt: { min: 0, max: 100000000 },
-  pipeline: { min: 0, max: 100000000 },
-  charges: { min: 0, max: 100000000 },
+  surface: { min: 1, max: 100000 },
+  rooms: { min: 1, max: 50 },
+  floor: { min: -5, max: 100 },
+  units: { min: 1, max: 1000 },
+  year: { min: 1500, max: new Date().getFullYear() + 3 },
+  amount: { min: 0, max: 100000000 },
+  rent: { min: 1, max: 1000000 },
   price: { min: 1, max: 100000000 },
-  staff: { min: 0, max: 10000 },
-  handover: { min: 0, max: 24 },
   description: { min: 200, max: 1500 },
 };
 
-export const ACCOUNTANT_NOTE = 'Si vous ne l\'avez pas sous la main, laissez vide : à préciser avec votre comptable.';
+// Rendement brut plausible pour un bien loué : hors de cette fourchette, alerte (non bloquante)
+export const YIELD_RANGE = { min: 2, max: 15 };
 
-// Textes d'aide (info-bulles) des chiffres clés
+// Textes d'aide (info-bulles)
 export const HELP = {
-  ca_n: `Chiffre d'affaires hors taxes du dernier exercice clos (ligne « Production vendue » ou « Chiffre d'affaires net » de votre compte de résultat). ${ACCOUNTANT_NOTE}`,
-  ca_n1: `Chiffre d'affaires HT de l'exercice précédent. ${ACCOUNTANT_NOTE}`,
-  ca_n2: `Chiffre d'affaires HT d'il y a deux exercices. ${ACCOUNTANT_NOTE}`,
-  ebitda: `Excédent brut d'exploitation : ce que l'activité dégage avant amortissements, intérêts et impôts. Si vous ne le connaissez pas, indiquez votre résultat net. ${ACCOUNTANT_NOTE}`,
-  margin: `Marge brute en pourcentage du chiffre d'affaires : (ventes − achats de matériaux et sous-traitance) ÷ ventes. Dans le bâtiment, souvent entre 30 et 60 %. ${ACCOUNTANT_NOTE}`,
-  debt: `Dettes financières restant dues (emprunts bancaires, crédits-bails, comptes courants). Hors dettes fournisseurs courantes. ${ACCOUNTANT_NOTE}`,
-  pipeline: 'Montant HT des devis signés non encore facturés (carnet de commandes). Un carnet de plus de trois mois se valorise.',
-  fixed_charges: `Charges annuelles hors matériaux : salaires chargés, loyers, assurances, matériel et véhicules. ${ACCOUNTANT_NOTE}`,
-  asking_price: 'Prix de cession souhaité, hors stock et trésorerie selon l\'objet retenu. Il reste indicatif : vous acceptez ou refusez librement chaque offre.',
-  staff_count: 'Salariés en équivalent temps plein, vous compris si vous êtes salarié de la société.',
-  rge_validity: 'Date de fin de validité de votre qualification RGE principale (sur le certificat ou l\'annuaire ADEME).',
-  description: 'Histoire de l\'entreprise, types de chantiers, clientèle, atouts, organisation. Sans nom, adresse, téléphone, e-mail ni site web : votre annonce reste anonyme jusqu\'à l\'accord de confidentialité.',
-  handover_months: 'Durée pendant laquelle vous acceptez d\'accompagner le repreneur après la vente (présentation des clients, passation technique).',
-  auto_accept_dataroom: 'Les repreneurs dont le projet est renseigné (profil complété à 50 % au moins) accèdent à la suite du parcours sans attendre votre validation : identité vérifiée, accord de confidentialité, puis déclaration d\'origine des fonds.',
+  address: 'Numéro et voie. Elle n\'apparaît jamais sur l\'annonce : seuls la ville, le département et le quartier sont publics. L\'adresse est révélée aux acquéreurs à l\'identité vérifiée qui ont signé l\'engagement de confidentialité.',
+  company: 'La dénomination et le SIRET de la société propriétaire restent confidentiels : ils figurent sur le mandat et ne sont révélés qu\'après l\'engagement de confidentialité. Le SIRET sert à vérifier que la société est active.',
+  surface: 'Surface habitable (loi Carrez pour un lot de copropriété) ou surface utile pour un local.',
+  copro: 'Mentions obligatoires d\'une annonce de lot de copropriété (art. L721-1 du Code de la construction et de l\'habitation).',
+  copro_charges_annual: 'Montant annuel moyen de votre quote-part des charges courantes (budget prévisionnel), sur l\'appel de charges ou le relevé du syndic.',
+  copro_procedure: 'Le syndicat des copropriétaires fait-il l\'objet d\'une procédure (mandataire ad hoc ou administrateur provisoire, art. 29-1 A ou 29-1 de la loi du 10 juillet 1965) ?',
+  dpe: 'Sur la première page de votre DPE. Un logement doit afficher sa classe énergie et l\'estimation des dépenses annuelles d\'énergie.',
+  energy_cost: 'Fourchette « estimation des coûts annuels d\'énergie » indiquée sur le DPE.',
+  rent_monthly: 'Loyer hors charges du bail en cours (tous les lots pour un immeuble).',
+  charges_monthly: 'Provisions sur charges récupérables payées chaque mois par le locataire.',
+  deposit: 'Le dépôt de garantie suit le bail : il est réglé entre vous et l\'acquéreur chez le notaire.',
+  property_tax: 'Montant de la dernière taxe foncière (hors taxe d\'enlèvement des ordures ménagères si elle est refacturée au locataire).',
+  non_recoverable_charges: 'Charges que vous payez sans les refacturer : part non récupérable de la copropriété, assurance propriétaire non occupant, frais de gestion.',
+  tenant_payment_status: 'Déclaratif, sur les 12 derniers mois. Le relevé des loyers (quittances) sera demandé dans le dossier du bien.',
+  asking_price: 'Prix de vente honoraires inclus : les honoraires sont à votre charge et réglés par le notaire sur ce prix. Vous restez libre d\'accepter ou de refuser chaque offre.',
+  description: 'Atouts du bien et de son emplacement, état, environnement, historique de la location. Sans nom ni coordonnées (ni les vôtres ni celles du locataire), sans adresse exacte.',
+  auto_accept_dataroom: 'Les acquéreurs dont le projet est renseigné (profil complété à 50 % au moins) poursuivent sans attendre votre accord : identité vérifiée, engagement de confidentialité, origine des fonds, puis accès au dossier.',
 };
 
+export const TENANT_DATA_WARNING = 'Ne saisissez aucun nom ni coordonnée du locataire.';
+
 // ------------------------------------------------------------------------------------------------
-// Contrôle anti-coordonnées (description) : e-mail, téléphone, URL ; le serveur masque aussi côté API
+// Contrôle anti-coordonnées (description, textes libres) ; le serveur masque aussi côté API
 const EMAIL_RE = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/i;
 const PHONE_RE = /(?:(?:\+|00)\s*33\s*[\s.-]?|\b0)[1-9](?:[\s.-]?\d{2}){4}\b/;
 const URL_RE = /(?:https?:\/\/|www\.)[^\s]+|\b[\w-]+\.(?:fr|com|net|org|eu|io|pro|bzh|paris|info|biz)\b(?:\/[^\s]*)?/i;
@@ -106,69 +119,31 @@ export const descriptionIssues = (text) => {
 };
 
 // ------------------------------------------------------------------------------------------------
-// Domaines ADEME (texte libre) → ids de RGE_CATEGORIES
-export const rgeIdsFromAdeme = (domaines, qualifications = []) => {
-  const mapped = new Set();
-  const texts = [...(Array.isArray(domaines) ? domaines : []), ...(Array.isArray(qualifications) ? qualifications : [])]
-    .map((d) => (typeof d === 'string' ? d : d?.domaine || d?.name || ''))
-    .filter(Boolean);
-  texts.forEach((text) => {
-    const d = text.toLowerCase();
-    if (d.includes('isolation') && d.includes('intérieur')) mapped.add('isolation_interieur');
-    if (d.includes('isolation') && d.includes('extérieur') && d.includes('mur')) mapped.add('isolation_exterieur');
-    if (d.includes('toiture') || d.includes('terrasse')) mapped.add('isolation_toiture');
-    if (d.includes('combles')) mapped.add('isolation_combles');
-    if (d.includes('plancher')) mapped.add('isolation_plancher');
-    if (d.includes('fenêtre') || d.includes('volet') || d.includes('porte') || d.includes('menuiserie')) mapped.add('menuiserie');
-    if (d.includes('bois') && (d.includes('chauffage') || d.includes('appareil') || d.includes('poêle') || d.includes('insert') || d.includes('granul'))) mapped.add('chauffage_bois');
-    if (d.includes('chaudière') && (d.includes('gaz') || d.includes('fioul') || d.includes('condensation'))) mapped.add('chauffage_gaz');
-    if (d.includes('pompe') && d.includes('chaleur') && d.includes('air') && d.includes('eau')) mapped.add('pac_air_eau');
-    if (d.includes('pompe') && d.includes('chaleur') && d.includes('air/air')) mapped.add('pac_air_air');
-    if (d.includes('pompe') && d.includes('chaleur') && (d.includes('géotherm') || d.includes('eau/eau'))) mapped.add('pac_eau_eau');
-    if (d.includes('chauffe-eau') && d.includes('thermodynamique')) mapped.add('chauffe_eau_thermo');
-    if (d.includes('solaire') && d.includes('combiné')) mapped.add('solaire_combine');
-    else if (d.includes('solaire') && d.includes('thermique')) mapped.add('solaire_thermique');
-    if (d.includes('photovoltaïque') || d.includes('photovoltaique')) mapped.add('photovoltaique');
-    if (d.includes('ventilation') || d.includes('vmc')) mapped.add('ventilation');
-    if (d.includes('audit')) mapped.add('audit_energetique');
-    if (d.includes('borne') || d.includes('recharge')) mapped.add('borne_recharge');
-    const direct = rgeIdFor(text);
-    if (direct) mapped.add(direct);
-  });
-  return RGE_CATEGORIES.filter((c) => mapped.has(c.id)).map((c) => c.id);
-};
+// Estimateur (/estimer → « Déposer mon annonce ») : lecture tolérante de sessionStorage.estimate
+// Forme écrite par EstimatePage : { inputs: {property_type, lease_type, department, surface, rent_monthly…}, result: {low, high, mid} }
+const numOrNull = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
 
-export const rgeLabelsFromIds = (ids) => (Array.isArray(ids) ? ids : []).map((id) => RGE_TYPES.find((t) => t.id === id)?.value || id);
-export const rgeIdsFromLabels = (labels) => (Array.isArray(labels) ? labels : []).map((l) => rgeIdFor(l)).filter(Boolean);
-
-// ------------------------------------------------------------------------------------------------
-// Estimateur (/estimer → « Déposer mon annonce anonyme ») : lecture tolérante de sessionStorage.estimate
 export const readEstimateSession = () => {
   try {
     const raw = sessionStorage.getItem(ESTIMATE_STORAGE_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
     if (!data || typeof data !== 'object') return null;
-    // Deux formes écrites par EstimatePage : {inputs:{ca,ebe,staff…}, result:{low,high,mid}} ou, à plat,
-    // {ca, ebe, staff, maintenance_contracts…, low, high, mid} (HANDOFF compte-estimateur §2.3)
-    const inputs = data.inputs || data.form || data;
-    const property = data.property || {};
-    const result = data.result || data.estimate || data;
-    const rge = data.rge || {};
-    const num = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
+    const inputs = data.inputs && typeof data.inputs === 'object' ? data.inputs : data;
+    const result = data.result && typeof data.result === 'object' ? data.result : {};
     return {
-      siret: String(data.siret || property.siret || inputs.siret || '').replace(/\D/g, '').slice(0, 14),
-      property,
-      rge,
       inputs: {
-        ca: num(inputs.ca ?? inputs.ca_n),
-        ebe: num(inputs.ebe ?? inputs.ebitda),
-        staff: num(inputs.staff ?? inputs.staff_count),
-        maintenance_contracts: !!(inputs.maintenance_contracts ?? inputs.has_maintenance_contracts),
-        team_stays: !!(inputs.team_stays ?? inputs.technical_referent_stays),
-        owner_dispensable: !!inputs.owner_dispensable,
+        property_type: PROPERTY_TYPES.some((t) => t.id === inputs.property_type) ? inputs.property_type : '',
+        lease_type: String(inputs.lease_type || ''),
+        department: normalizeDepartement(inputs.department),
+        surface: numOrNull(inputs.surface),
+        rent_monthly: numOrNull(inputs.rent_monthly),
+        charges_monthly: numOrNull(inputs.charges_monthly),
+        property_tax: numOrNull(inputs.property_tax),
+        non_recoverable_charges: numOrNull(inputs.non_recoverable_charges),
+        asking_price: numOrNull(inputs.asking_price),
       },
-      result: { low: num(result.low), high: num(result.high), mid: num(result.mid) },
+      result: { low: numOrNull(result.low), high: numOrNull(result.high), mid: numOrNull(result.mid) },
     };
   } catch (e) {
     return null;
@@ -180,39 +155,60 @@ export const clearEstimateSession = () => {
 };
 
 // ------------------------------------------------------------------------------------------------
-// État du formulaire
+// État du formulaire (valeurs de saisie en chaînes ; oui/non en 'oui' | 'non' | '')
 export const emptyForm = () => ({
-  siret: '',
+  // Écran 1 — le bien
+  property_type: '',
+  owner_type: '',
   company_name: '',
-  trades: [],
-  rge_ids: [],
-  rge_validity: '',
-  other_qualifications: [],
-  region: '',
+  siret: '',
+  address: '',
+  postal_code: '',
+  city: '',
   department: '',
-  staff_count: '',
-  creation_date: '',
-  legal_structure: '',
-  ca_n: '',
-  ca_n1: '',
-  ca_n2: '',
-  ebitda: '',
-  margin: '',
-  debt: '',
-  pipeline: '',
-  fixed_charges: { salaries: '', rent: '', insurance: '', equipment: '' },
+  district: '',
+  surface: '',
+  rooms: '',
+  floor: '',
+  elevator: '',
+  construction_year: '',
+  units_count: '',
+  units_rented: '',
+  is_copro: '',
+  copro_lots: '',
+  copro_charges_annual: '',
+  copro_procedure: '',
+  dpe_class: '',
+  ges_class: '',
+  energy_cost_min: '',
+  energy_cost_max: '',
+  dpe_date: '',
+  // Écran 2 — la location
+  lease_type: '',
+  rent_monthly: '',
+  charges_monthly: '',
+  lease_start: '',
+  lease_end: '',
+  tenant_since: '',
+  deposit: '',
+  indexation: '',
+  last_revision: '',
+  tenant_payment_status: '',
+  has_gli: '',
+  has_guarantor: '',
+  property_tax: '',
+  non_recoverable_charges: '',
+  management: '',
+  operator_lease_end: '',
+  // Écran 3 — la vente
   asking_price: '',
   sale_object: '',
   sale_reason: '',
-  handover_months: '',
-  has_maintenance_contracts: false,
-  technical_referent_stays: false,
-  key_staff_stays: false,
-  decennale_ok: false,
-  auto_accept_dataroom: false,
-  equipment: '',
-  premises: '',
+  availability_note: '',
   description: '',
+  equipment: '',
+  recent_works: '',
+  auto_accept_dataroom: false,
 });
 
 const str = (v) => (v === null || v === undefined ? '' : String(v));
@@ -221,208 +217,245 @@ const isoDate = (v) => {
   const s = str(v);
   return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : '';
 };
+export const triFrom = (v) => (v === true ? 'oui' : v === false ? 'non' : '');
+export const triTo = (v) => (v === 'oui' ? true : v === 'non' ? false : undefined);
 
 // Formulaire depuis une annonce existante (reprise d'un brouillon, modification)
 export const formFromProperty = (property) => {
   const c = property || {};
   const form = emptyForm();
-  const fc = c.fixed_charges || {};
-  return {
-    ...form,
-    siret: str(c.siret).replace(/\D/g, ''),
-    company_name: str(c.company_name),
-    trades: Array.isArray(c.trades) && c.trades.length ? c.trades.slice(0, MAX_TRADES) : tradesForRge(c.rge_types),
-    rge_ids: rgeIdsFromLabels(c.rge_types),
-    rge_validity: isoDate(c.rge_validity),
-    other_qualifications: Array.isArray(c.other_qualifications) ? c.other_qualifications : [],
-    region: str(c.region),
-    department: normalizeDepartement(c.department),
-    staff_count: numStr(c.staff_count),
-    creation_date: isoDate(c.creation_date),
-    legal_structure: str(c.legal_structure),
-    ca_n: numStr(c.ca_n), ca_n1: numStr(c.ca_n1), ca_n2: numStr(c.ca_n2),
-    ebitda: numStr(c.ebitda), margin: numStr(c.margin), debt: numStr(c.debt), pipeline: numStr(c.pipeline),
-    fixed_charges: { salaries: numStr(fc.salaries), rent: numStr(fc.rent), insurance: numStr(fc.insurance), equipment: numStr(fc.equipment) },
-    asking_price: numStr(c.asking_price),
-    sale_object: str(c.sale_object) || (c.sale_type === 'parts' ? 'titres' : c.sale_type === 'fonds' ? 'fonds' : c.sale_type === 'mixte' ? 'indifferent' : ''),
-    sale_reason: str(c.sale_reason),
-    handover_months: numStr(c.handover_months),
-    has_maintenance_contracts: !!c.has_maintenance_contracts,
-    technical_referent_stays: !!c.technical_referent_stays,
-    key_staff_stays: !!c.key_staff_stays,
-    decennale_ok: !!c.decennale_ok,
-    auto_accept_dataroom: !!c.auto_accept_dataroom,
-    equipment: str(c.equipment),
-    premises: str(c.premises),
-    description: str(c.description),
-  };
+  const out = { ...form };
+  ['property_type', 'owner_type', 'company_name', 'address', 'city', 'district', 'dpe_class', 'ges_class', 'lease_type', 'indexation',
+    'tenant_payment_status', 'management', 'sale_object', 'sale_reason', 'availability_note', 'description', 'equipment', 'recent_works']
+    .forEach((k) => { out[k] = str(c[k]); });
+  ['surface', 'rooms', 'floor', 'construction_year', 'units_count', 'units_rented', 'copro_lots', 'copro_charges_annual', 'energy_cost_min',
+    'energy_cost_max', 'rent_monthly', 'charges_monthly', 'deposit', 'property_tax', 'non_recoverable_charges', 'asking_price']
+    .forEach((k) => { out[k] = numStr(c[k]); });
+  ['dpe_date', 'lease_start', 'lease_end', 'tenant_since', 'last_revision', 'operator_lease_end'].forEach((k) => { out[k] = isoDate(c[k]); });
+  ['elevator', 'is_copro', 'copro_procedure', 'has_gli', 'has_guarantor'].forEach((k) => { out[k] = triFrom(c[k]); });
+  out.siret = str(c.siret).replace(/\D/g, '');
+  out.postal_code = str(c.postal_code).replace(/\D/g, '').slice(0, 5);
+  out.department = normalizeDepartement(c.department) || departementFromPostalCode(out.postal_code);
+  out.auto_accept_dataroom = !!c.auto_accept_dataroom;
+  return out;
 };
 
-// Préremplissage depuis l'estimateur et la fiche open data (normalizeCompanyLookup de components/account/siret)
+// Préremplissage depuis l'estimateur : seulement les champs encore vides
 export const applyEstimateToForm = (form, estimate) => {
-  if (!estimate) return form;
+  if (!estimate || !estimate.inputs) return form;
   const next = { ...form };
-  if (estimate.siret && !next.siret) next.siret = estimate.siret;
-  const i = estimate.inputs || {};
-  if (i.ca !== null && i.ca !== undefined && next.ca_n === '') next.ca_n = String(i.ca);
-  if (i.ebe !== null && i.ebe !== undefined && next.ebitda === '') next.ebitda = String(i.ebe);
-  if (i.staff !== null && i.staff !== undefined && next.staff_count === '') next.staff_count = String(i.staff);
-  if (i.maintenance_contracts) next.has_maintenance_contracts = true;
-  if (i.team_stays) next.technical_referent_stays = true;
-  return next;
-};
-
-export const applyLookupToForm = (form, lookup) => {
-  if (!lookup) return form;
-  const next = { ...form };
-  const c = lookup.property || {};
-  if (c.found) {
-    if (c.name) next.company_name = c.name;
-    if (c.department && !next.department) next.department = normalizeDepartement(c.department);
-    if (!next.region) next.region = c.region || regionForDepartement(next.department);
-    if (c.creationDate && !next.creation_date) next.creation_date = isoDate(c.creationDate);
-    if (c.staffCount !== null && c.staffCount !== undefined && next.staff_count === '') next.staff_count = String(c.staffCount);
-    if (c.legalStructure && !next.legal_structure) next.legal_structure = c.legalStructure;
-    if (Array.isArray(c.trades) && c.trades.length && !next.trades.length) next.trades = c.trades.slice(0, MAX_TRADES);
-  }
-  const r = lookup.rge || {};
-  if (r.found) {
-    const ids = rgeIdsFromAdeme(r.domaines, r.qualifications);
-    if (ids.length) {
-      next.rge_ids = Array.from(new Set([...next.rge_ids, ...ids]));
-      if (!next.trades.length) next.trades = tradesForRge(rgeLabelsFromIds(next.rge_ids));
-    }
-    const ends = (r.qualifications || []).map((q) => q.dateFin).filter(Boolean).sort();
-    if (ends.length && !next.rge_validity) next.rge_validity = isoDate(ends[ends.length - 1]);
-  }
+  const i = estimate.inputs;
+  ['property_type', 'lease_type'].forEach((k) => { if (i[k] && !next[k]) next[k] = i[k]; });
+  if (i.department && !next.department && !next.postal_code) next.department = i.department;
+  ['surface', 'rent_monthly', 'charges_monthly', 'property_tax', 'non_recoverable_charges', 'asking_price'].forEach((k) => {
+    if (i[k] !== null && i[k] !== undefined && next[k] === '') next[k] = String(i[k]);
+  });
   return next;
 };
 
 // ------------------------------------------------------------------------------------------------
-// Validation par écran → { champ: message }
+// Rendements en direct (écrans 2 et 3) : brut sur le loyer HC, net si la taxe foncière ou les charges sont saisies
 const n = (v) => (v === '' || v === null || v === undefined ? null : Number(v));
+
+export const liveYields = (form) => {
+  const rent = n(form.rent_monthly);
+  const price = n(form.asking_price);
+  const costsKnown = form.property_tax !== '' || form.non_recoverable_charges !== '';
+  return {
+    gross: grossYield(rent, price),
+    net: costsKnown ? netYield(rent, price, n(form.property_tax) || 0, n(form.non_recoverable_charges) || 0) : null,
+    annualRent: rent > 0 ? Math.round(rent * 12) : null,
+  };
+};
+
+// Alerte (non bloquante) si le rendement brut sort de 2 % à 15 % : 'low' | 'high' | null
+export const yieldAlert = (gross) => {
+  if (gross === null || gross === undefined || !Number.isFinite(Number(gross))) return null;
+  if (gross < YIELD_RANGE.min) return 'low';
+  if (gross > YIELD_RANGE.max) return 'high';
+  return null;
+};
+
+// ------------------------------------------------------------------------------------------------
+// Validation par écran → { champ: message } (mêmes exigences que la publication automatique, SPEC §5.4)
 const inRange = (v, b) => v === null || (Number.isFinite(v) && v >= b.min && v <= b.max);
 const fmt = (x) => Number(x).toLocaleString('fr-FR');
+const isDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
 
 export const validateStep = (step, form) => {
   const errors = {};
   if (step === 1) {
-    if (!form.trades.length) errors.trades = 'Choisissez au moins un métier.';
-    if (form.trades.length > MAX_TRADES) errors.trades = `${MAX_TRADES} métiers au maximum.`;
-    if (!form.region) errors.region = 'Indiquez la région.';
-    if (form.staff_count !== '' && !inRange(n(form.staff_count), BOUNDS.staff)) errors.staff_count = `Effectif entre ${BOUNDS.staff.min} et ${fmt(BOUNDS.staff.max)}.`;
-    if (form.siret && form.siret.length !== 14) errors.siret = 'Un SIRET compte 14 chiffres.';
+    if (!form.property_type) errors.property_type = 'Choisissez le type de bien.';
+    if (!form.owner_type) errors.owner_type = 'Indiquez à qui appartient le bien.';
+    if (isCompanyOwner(form.owner_type)) {
+      if (!String(form.company_name || '').trim()) errors.company_name = 'Indiquez la dénomination de la société.';
+      if (String(form.siret || '').replace(/\D/g, '').length !== 14) errors.siret = 'Un SIRET compte 14 chiffres.';
+    }
+    if (!/^\d{5}$/.test(String(form.postal_code || ''))) errors.postal_code = 'Code postal à 5 chiffres.';
+    else if (!departementFromPostalCode(form.postal_code)) errors.postal_code = 'Code postal inconnu.';
+    if (!String(form.city || '').trim()) errors.city = 'Indiquez la ville.';
+    if (form.property_type !== 'parking') {
+      if (form.surface === '') errors.surface = 'Indiquez la surface.';
+      else if (!inRange(n(form.surface), BOUNDS.surface)) errors.surface = `Surface entre ${BOUNDS.surface.min} et ${fmt(BOUNDS.surface.max)} m².`;
+    }
+    if (form.rooms !== '' && !inRange(n(form.rooms), BOUNDS.rooms)) errors.rooms = `Entre ${BOUNDS.rooms.min} et ${BOUNDS.rooms.max} pièces.`;
+    if (form.floor !== '' && !inRange(n(form.floor), BOUNDS.floor)) errors.floor = 'Étage entre -5 et 100.';
+    if (form.construction_year !== '' && !inRange(n(form.construction_year), BOUNDS.year)) errors.construction_year = `Année entre ${BOUNDS.year.min} et ${BOUNDS.year.max}.`;
+    if (form.units_count !== '' && !inRange(n(form.units_count), BOUNDS.units)) errors.units_count = 'Nombre de lots positif attendu.';
+    if (form.units_rented !== '' && form.units_count !== '' && n(form.units_rented) > n(form.units_count)) errors.units_rented = 'Pas plus de lots loués que de lots.';
+    if (!form.is_copro) errors.is_copro = 'Indiquez si le bien est en copropriété.';
+    if (form.is_copro === 'oui') {
+      if (!(n(form.copro_lots) > 0)) errors.copro_lots = 'Indiquez le nombre de lots de la copropriété.';
+      if (form.copro_charges_annual === '' || !inRange(n(form.copro_charges_annual), BOUNDS.amount)) errors.copro_charges_annual = 'Indiquez votre quote-part annuelle de charges.';
+      if (!form.copro_procedure) errors.copro_procedure = 'Indiquez si une procédure est en cours.';
+    }
+    if (!form.dpe_class) errors.dpe_class = 'Indiquez la classe énergie du DPE.';
+    else if (isHousingType(form.property_type) && form.dpe_class === 'non-soumis') errors.dpe_class = 'Un logement doit afficher sa classe énergie (ou « DPE vierge »).';
+    if (isHousingType(form.property_type) && /^[A-G]$/.test(form.dpe_class)) {
+      if (!(n(form.energy_cost_min) > 0) || !(n(form.energy_cost_max) > 0)) errors.energy_cost = 'Indiquez l\'estimation des dépenses annuelles d\'énergie (fourchette du DPE).';
+      else if (n(form.energy_cost_min) > n(form.energy_cost_max)) errors.energy_cost = 'Le montant bas doit être inférieur au montant haut.';
+    }
   }
   if (step === 2) {
-    ['ca_n', 'ca_n1', 'ca_n2'].forEach((k) => {
-      if (!inRange(n(form[k]), BOUNDS.ca)) errors[k] = `Montant entre 0 et ${fmt(BOUNDS.ca.max)} €.`;
-    });
-    if (!inRange(n(form.ebitda), BOUNDS.ebitda)) errors.ebitda = `Montant entre −${fmt(BOUNDS.ebitda.max)} et ${fmt(BOUNDS.ebitda.max)} €.`;
-    if (!inRange(n(form.margin), BOUNDS.margin)) errors.margin = 'Pourcentage entre 0 et 100.';
-    if (!inRange(n(form.debt), BOUNDS.debt)) errors.debt = `Montant entre 0 et ${fmt(BOUNDS.debt.max)} €.`;
-    if (!inRange(n(form.pipeline), BOUNDS.pipeline)) errors.pipeline = `Montant entre 0 et ${fmt(BOUNDS.pipeline.max)} €.`;
-    Object.keys(form.fixed_charges || {}).forEach((k) => {
-      if (!inRange(n(form.fixed_charges[k]), BOUNDS.charges)) errors[`fixed_charges.${k}`] = 'Montant positif attendu.';
+    if (!form.lease_type) errors.lease_type = 'Choisissez le type de bail.';
+    if (form.rent_monthly === '' || !inRange(n(form.rent_monthly), BOUNDS.rent)) errors.rent_monthly = 'Indiquez le loyer mensuel hors charges.';
+    if (!isDate(form.lease_start)) errors.lease_start = 'Indiquez la date de prise d\'effet du bail en cours.';
+    if (isDate(form.lease_start) && isDate(form.lease_end) && form.lease_end < form.lease_start) errors.lease_end = 'L\'échéance doit suivre le début du bail.';
+    ['charges_monthly', 'deposit', 'property_tax', 'non_recoverable_charges'].forEach((k) => {
+      if (form[k] !== '' && !inRange(n(form[k]), BOUNDS.amount)) errors[k] = 'Montant positif attendu.';
     });
   }
   if (step === 3) {
     const price = n(form.asking_price);
-    if (price === null || !inRange(price, BOUNDS.price)) errors.asking_price = 'Indiquez un prix demandé (en euros).';
-    if (!form.sale_object) errors.sale_object = 'Indiquez ce que vous cédez.';
-    if (!form.sale_reason) errors.sale_reason = 'Indiquez le motif de la cession.';
-    if (form.handover_months !== '' && !inRange(n(form.handover_months), BOUNDS.handover)) errors.handover_months = 'Entre 0 et 24 mois.';
+    if (price === null || !inRange(price, BOUNDS.price)) errors.asking_price = 'Indiquez le prix de vente (en euros).';
+    if (!form.sale_object) errors.sale_object = 'Indiquez ce que vous vendez.';
+    else if (form.sale_object !== 'bien' && !isCompanyOwner(form.owner_type)) errors.sale_object = 'La cession de parts n\'est possible que pour un bien détenu par une société.';
     const d = descriptionIssues(form.description);
-    if (d.empty) errors.description = `Présentez votre entreprise en ${BOUNDS.description.min} à ${fmt(BOUNDS.description.max)} caractères.`;
+    if (d.empty) errors.description = `Présentez votre bien en ${BOUNDS.description.min} à ${fmt(BOUNDS.description.max)} caractères.`;
     else if (d.tooShort) errors.description = `Encore ${BOUNDS.description.min - d.length} caractères au minimum.`;
     else if (d.tooLong) errors.description = `${d.length - BOUNDS.description.max} caractères de trop.`;
-    else if (d.contacts.length) errors.description = `Retirez ${d.contacts.join(', ')} : l'annonce doit rester anonyme.`;
+    else if (d.contacts.length) errors.description = `Retirez ${d.contacts.join(', ')} : les coordonnées ne sont jamais publiées.`;
+    ['equipment', 'recent_works', 'availability_note'].forEach((k) => {
+      const found = findContactDetails(form[k]);
+      if (found.length) errors[k] = `Retirez ${found.join(', ')}.`;
+    });
   }
   return errors;
 };
 
 // ------------------------------------------------------------------------------------------------
-// Charges utiles de l'API
-const num0 = (v) => (v === '' || v === null || v === undefined || Number.isNaN(Number(v)) ? 0 : Number(v));
+// Charges utiles de l'API (champs vides omis ; montants en nombres ; oui/non en booléens)
 const numOrUndef = (v) => (v === '' || v === null || v === undefined || Number.isNaN(Number(v)) ? undefined : Number(v));
+const textOrUndef = (v) => (String(v || '').trim() ? String(v).trim() : undefined);
 const compact = (obj) => Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined));
 
-export const legacySaleType = (saleObject) => ({ titres: 'parts', fonds: 'fonds', indifferent: 'mixte' }[saleObject] || '');
-
-// Champs de l'écran 1 (PUT /properties/{id})
-export const step1Payload = (form) => compact({
-  siret: form.siret || undefined,
-  company_name: form.company_name || undefined,
-  trades: form.trades,
-  rge_types: rgeLabelsFromIds(form.rge_ids),
-  rge_validity: form.rge_validity || undefined,
-  other_qualifications: form.other_qualifications,
-  region: form.region || undefined,
-  department: form.department || undefined,
-  staff_count: numOrUndef(form.staff_count),
-  creation_date: form.creation_date || undefined,
-  legal_structure: form.legal_structure || undefined,
-});
+// Écran 1 (POST /properties à la création, PUT ensuite)
+export const step1Payload = (form) => {
+  const company = isCompanyOwner(form.owner_type);
+  const copro = form.is_copro === 'oui';
+  const department = departementFromPostalCode(form.postal_code) || normalizeDepartement(form.department);
+  return compact({
+    property_type: form.property_type || undefined,
+    owner_type: form.owner_type || undefined,
+    company_name: company ? textOrUndef(form.company_name) : undefined,
+    siret: company && form.siret ? String(form.siret).replace(/\D/g, '') : undefined,
+    address: textOrUndef(form.address),
+    postal_code: form.postal_code || undefined,
+    city: textOrUndef(form.city),
+    department: department || undefined,
+    district: textOrUndef(form.district),
+    surface: numOrUndef(form.surface),
+    rooms: hasRooms(form.property_type) ? numOrUndef(form.rooms) : undefined,
+    floor: hasFloor(form.property_type) ? numOrUndef(form.floor) : undefined,
+    elevator: hasFloor(form.property_type) ? triTo(form.elevator) : undefined,
+    construction_year: numOrUndef(form.construction_year),
+    units_count: numOrUndef(form.units_count),
+    units_rented: numOrUndef(form.units_rented),
+    is_copro: triTo(form.is_copro),
+    copro_lots: copro ? numOrUndef(form.copro_lots) : undefined,
+    copro_charges_annual: copro ? numOrUndef(form.copro_charges_annual) : undefined,
+    copro_procedure: copro ? triTo(form.copro_procedure) : undefined,
+    dpe_class: form.dpe_class || undefined,
+    ges_class: form.ges_class || undefined,
+    energy_cost_min: numOrUndef(form.energy_cost_min),
+    energy_cost_max: numOrUndef(form.energy_cost_max),
+    dpe_date: form.dpe_date || undefined,
+  });
+};
 
 export const step2Payload = (form) => compact({
-  ca_n: numOrUndef(form.ca_n),
-  ca_n1: numOrUndef(form.ca_n1),
-  ca_n2: numOrUndef(form.ca_n2),
-  ebitda: numOrUndef(form.ebitda),
-  margin: numOrUndef(form.margin),
-  debt: numOrUndef(form.debt),
-  pipeline: numOrUndef(form.pipeline),
-  fixed_charges: {
-    salaries: num0(form.fixed_charges?.salaries),
-    rent: num0(form.fixed_charges?.rent),
-    insurance: num0(form.fixed_charges?.insurance),
-    equipment: num0(form.fixed_charges?.equipment),
-  },
+  lease_type: form.lease_type || undefined,
+  rent_monthly: numOrUndef(form.rent_monthly),
+  charges_monthly: numOrUndef(form.charges_monthly),
+  lease_start: form.lease_start || undefined,
+  lease_end: form.lease_end || undefined,
+  tenant_since: form.tenant_since || undefined,
+  deposit: numOrUndef(form.deposit),
+  indexation: form.indexation || undefined,
+  last_revision: form.last_revision || undefined,
+  tenant_payment_status: form.tenant_payment_status || undefined,
+  has_gli: triTo(form.has_gli),
+  has_guarantor: triTo(form.has_guarantor),
+  property_tax: numOrUndef(form.property_tax),
+  non_recoverable_charges: numOrUndef(form.non_recoverable_charges),
+  management: form.management || undefined,
+  operator_lease_end: form.property_type === 'residence-geree' || form.lease_type === 'residence-geree' ? (form.operator_lease_end || undefined) : undefined,
 });
 
 export const step3Payload = (form) => compact({
   asking_price: numOrUndef(form.asking_price),
   sale_object: form.sale_object || undefined,
-  sale_type: legacySaleType(form.sale_object) || undefined,
   sale_reason: form.sale_reason || undefined,
-  handover_months: numOrUndef(form.handover_months),
-  has_maintenance_contracts: !!form.has_maintenance_contracts,
-  technical_referent_stays: !!form.technical_referent_stays,
-  key_staff_stays: !!form.key_staff_stays,
-  decennale_ok: !!form.decennale_ok,
+  availability_note: textOrUndef(form.availability_note),
+  description: textOrUndef(form.description),
+  equipment: textOrUndef(form.equipment),
+  recent_works: textOrUndef(form.recent_works),
   auto_accept_dataroom: !!form.auto_accept_dataroom,
-  equipment: form.equipment || undefined,
-  premises: form.premises || undefined,
-  description: form.description.trim() || undefined,
 });
 
-// POST /properties : création du brouillon au premier écran. Le modèle de création attend encore des montants
-// (anciens champs obligatoires) : ils sont envoyés à zéro et complétés aux écrans suivants par PUT.
-export const createPayload = (form) => ({
-  rge_types: rgeLabelsFromIds(form.rge_ids),
-  rge_validity: form.rge_validity || '',
-  ca_n: num0(form.ca_n), ca_n1: num0(form.ca_n1), ca_n2: num0(form.ca_n2),
-  margin: num0(form.margin), ebitda: num0(form.ebitda),
-  creation_date: form.creation_date || '',
-  staff_count: Math.round(num0(form.staff_count)),
-  legal_structure: form.legal_structure || '',
-  pipeline: num0(form.pipeline),
-  fixed_charges: { salaries: 0, rent: 0, insurance: 0, equipment: 0 },
-  debt: num0(form.debt),
-  asking_price: num0(form.asking_price),
-  sale_type: legacySaleType(form.sale_object),
-  region: form.region || '',
-  ...step1Payload(form),
-});
+// POST /properties : brouillon créé dès le premier écran (tous les champs sont facultatifs au brouillon)
+export const createPayload = (form) => step1Payload(form);
 
 export const stepPayload = (step, form) => (step === 1 ? step1Payload(form) : step === 2 ? step2Payload(form) : step3Payload(form));
 
 // Premier écran incomplet d'une annonce reprise (pour ouvrir le brouillon au bon endroit)
 export const firstIncompleteStep = (form) => {
   if (Object.keys(validateStep(1, form)).length) return 1;
-  if (form.ca_n === '' && form.ebitda === '') return 2;
-  if (Object.keys(validateStep(3, form)).length) return 3;
+  if (Object.keys(validateStep(2, form)).length) return 2;
   return 3;
 };
 
-// Données du composant ListingPreview à partir du formulaire (aperçu anonyme)
+// Annonce publique simulée à partir du formulaire (aperçu de la carte, sans adresse ni société)
+export const previewProperty = (form) => {
+  const department = departementFromPostalCode(form.postal_code) || normalizeDepartement(form.department);
+  const num = (v) => (v === '' ? null : Number(v));
+  const y = liveYields(form);
+  return {
+    id: 'apercu',
+    title: propertyTitle({
+      propertyType: form.property_type, city: form.city, department, surface: form.surface, rooms: form.rooms, unitsCount: form.units_count,
+    }),
+    property_type: form.property_type,
+    owner_type: form.owner_type,
+    city: form.city,
+    department,
+    district: form.district,
+    surface: num(form.surface),
+    rooms: num(form.rooms),
+    lease_type: form.lease_type,
+    rent_monthly: num(form.rent_monthly),
+    asking_price: num(form.asking_price),
+    gross_yield: y.gross,
+    net_yield: y.net,
+    dpe_class: form.dpe_class,
+    tenant_since: form.tenant_since,
+    lease_start: form.lease_start,
+    published_at: new Date().toISOString(),
+    photos: [],
+  };
+};
+
+export const ownerTypeOptions = () => OWNER_TYPES.map((o) => ({ value: o.id, label: o.label }));
+
+// Montant lisible (« 145 000 € ») pour les phrases d'aide ; '' si vide
 export const fmtEur = (v) => (v === '' || v === null || v === undefined || Number.isNaN(Number(v)) ? '' : `${Math.round(Number(v)).toLocaleString('fr-FR')} €`);

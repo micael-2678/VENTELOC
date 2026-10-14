@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowRight, CheckCircle2, Clock, Loader2, Lock, Mail, MailX, Sparkles, TrendingUp, TrendingDown, ShieldCheck } from 'lucide-react';
+import { ArrowRight, Calculator, CheckCircle2, Clock, Info, Loader2, Lock, Mail, MailX, ShieldCheck, TrendingUp } from 'lucide-react';
 import { toast } from 'sonner';
 import { axiosInstance } from '@/App';
 import AppLayout from '@/components/layout/AppLayout';
@@ -8,29 +8,22 @@ import { Breadcrumbs, fillText } from '@/components/seo/Content';
 import { useSeo, SITE_URL } from '@/lib/seo';
 import { content } from '@/seo';
 import { breadcrumbLd } from '@/seo/schema';
-import { OFFER } from '@/lib/offer';
+import { commissionSentenceFor } from '@/lib/offer';
+import { useCommission } from '@/lib/useCommission';
 import { trackEvent } from '@/lib/analytics';
-import { formatPrice } from '@/components/shared/formatters';
-import SiretField from '@/components/account/SiretField';
-import CompanyPrefillCard from '@/components/account/CompanyPrefillCard';
-import ChoiceGroup from '@/components/account/ChoiceGroup';
+import { formatPrice, formatYield } from '@/components/shared/formatters';
 import { apiErrorMessage } from '@/components/account/errors';
-import { useCompanyLookup, cleanSiret } from '@/components/account/siret';
-// Même définition de l'effectif que le formulaire d'annonce, que l'estimateur préremplit (SPEC §4.2)
-import { HELP } from '@/components/seller/listingForm';
+import { PROPERTY_TYPES, LEASE_TYPES, departementOptions, grossYield } from '@/lib/referentiels';
+import { ESTIMATE_STORAGE_KEY, defaultLeaseFor } from '@/components/seller/listingForm';
 
-// /estimer (SPEC §4.2 point 1, API.md §8) : SIRET → GET /estimates/property/{siret} (préremplissage, jamais
-// bloquant) → 3 chiffres + 3 cases → POST /estimates → fourchette, méthode, leviers, pédagogie ; e-mail
-// facultatif (double opt-in) ; « Déposer mon annonce anonyme » (sessionStorage 'estimate' lu par CreateListing).
+// /estimer (docs/venteloc/SPEC.md §6.1, API.md §8) : estimateur par la méthode du rendement, sans compte ni appel
+// externe. Type de bien, bail, département, loyer (et, si connus, surface, charges, taxe foncière, charges non
+// récupérables, prix envisagé) → POST /estimates → fourchette, rendements, facteurs, pédagogie, avertissement ;
+// e-mail facultatif avec consentement (double opt-in) ; « Déposer mon annonce » préremplit le formulaire
+// (sessionStorage 'estimate', lu par CreateListing).
 
 const PATH = '/estimer';
-const inputClass = 'w-full rounded-xl border border-brand-line bg-white px-4 py-3 text-brand-navy focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30';
-
-const DRIVER_OPTIONS = [
-  { value: 'maintenance_contracts', label: 'Contrats d\'entretien récurrents', hint: 'Contrats signés qui reviennent chaque année (entretien, maintenance, dépannage).' },
-  { value: 'team_stays', label: 'Le référent technique et l\'équipe restent', hint: 'Les salariés clés, dont le référent des qualifications RGE, continuent après la vente.' },
-  { value: 'owner_dispensable', label: 'Le dirigeant n\'est pas indispensable au quotidien', hint: 'Devis, chantiers et clients ne passent pas tous par vous.' },
-];
+const inputClass = 'w-full rounded-xl border border-brand-line bg-white px-4 py-3 text-brand-navy focus:border-brand-teal focus:outline-none focus:ring-2 focus:ring-brand-teal/30';
 
 const CONFIRMATION_MESSAGES = {
   ok: { tone: 'ok', icon: CheckCircle2, text: 'Adresse confirmée : votre estimation vous a été envoyée par e-mail.' },
@@ -38,135 +31,152 @@ const CONFIRMATION_MESSAGES = {
   expire: { tone: 'warn', icon: Clock, text: 'Ce lien de confirmation a expiré (48 heures). Refaites une estimation ci-dessous pour en recevoir un nouveau.' },
 };
 
-// Montant en euros, saisie fr-FR, signe négatif autorisé (résultat déficitaire)
-const MoneyInput = ({ id, value, onChange, allowNegative = false, placeholder = '0', ...rest }) => {
-  const digits = String(value || '').replace(/[^\d-]/g, '');
-  const negative = allowNegative && digits.startsWith('-');
-  const abs = digits.replace(/-/g, '');
-  const display = abs ? `${negative ? '-' : ''}${Number(abs).toLocaleString('fr-FR')}` : (negative ? '-' : '');
+const EMPTY = {
+  property_type: '', lease_type: '', department: '', surface: '', rent_monthly: '', charges_monthly: '', property_tax: '',
+  non_recoverable_charges: '', asking_price: '',
+};
+
+// Montant en euros, saisie fr-FR (chiffres seulement, séparateur de milliers affiché)
+export const MoneyInput = ({ id, value, onChange, placeholder = '', suffix = '€', ...rest }) => {
+  const digits = String(value || '').replace(/\D/g, '');
+  const display = digits ? Number(digits).toLocaleString('fr-FR') : '';
   return (
     <div className="relative">
       <input
         id={id}
         type="text"
-        inputMode={allowNegative ? 'text' : 'numeric'}
+        inputMode="numeric"
         value={display}
-        onChange={(e) => {
-          const raw = e.target.value;
-          const neg = allowNegative && raw.trim().startsWith('-');
-          const d = raw.replace(/\D/g, '').slice(0, 9);
-          onChange(`${neg ? '-' : ''}${d}`);
-        }}
+        onChange={(e) => onChange(e.target.value.replace(/\D/g, '').slice(0, 9))}
         placeholder={placeholder}
-        className={`${inputClass} pr-10 tabular`}
+        className={`${inputClass} pr-16 tabular`}
         {...rest}
       />
-      <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500" aria-hidden="true">€</span>
+      <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-gray-500" aria-hidden="true">{suffix}</span>
     </div>
   );
 };
 
 const toNumber = (v) => {
   const s = String(v == null ? '' : v).replace(/\s/g, '');
-  if (!s || s === '-') return null;
+  if (!s) return null;
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
 };
 
+// Formulaire → corps de POST /estimates (champs vides omis)
+export const estimatePayload = (form, extra = {}) => {
+  const out = {
+    property_type: form.property_type,
+    lease_type: form.lease_type,
+    department: form.department,
+    rent_monthly: toNumber(form.rent_monthly),
+  };
+  ['surface', 'charges_monthly', 'property_tax', 'non_recoverable_charges', 'asking_price'].forEach((k) => {
+    if (k === 'surface' && form.property_type === 'parking') return;
+    const n = toNumber(form[k]);
+    if (n !== null && n > 0) out[k] = n;
+  });
+  return { ...out, ...extra };
+};
+
+const Field = ({ id, label, hint, optional, children }) => (
+  <div className="min-w-0">
+    <label htmlFor={id} className="block text-sm font-semibold text-brand-navy mb-1">
+      {label}{optional && <span className="font-normal text-gray-500"> (facultatif)</span>}
+    </label>
+    {children}
+    {hint && <p id={`${id}-hint`} className="text-xs text-gray-600 mt-1 leading-snug">{hint}</p>}
+  </div>
+);
+
 const EstimatePage = ({ user }) => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const commission = useCommission();
   const page = content.estimate;
-  const crumbs = [{ name: 'Accueil', path: '/' }, { name: 'Estimer mon entreprise', path: PATH }];
+  const crumbs = [{ name: 'Accueil', path: '/' }, { name: 'Estimer mon bien', path: PATH }];
   useSeo(fillText(page.title), fillText(page.description), { path: PATH, jsonLd: breadcrumbLd(SITE_URL, crumbs) });
 
   const confirmation = CONFIRMATION_MESSAGES[searchParams.get('confirmation')] || null;
-  const lookup = useCompanyLookup();
-  const [step, setStep] = useState(1); // 1 SIRET · 2 chiffres · 3 résultat
-  const [siret, setSiret] = useState(cleanSiret(searchParams.get('siret') || ''));
-  const [figures, setFigures] = useState({ ca: '', ebe: '', staff: '' });
-  const [drivers, setDrivers] = useState([]);
+  const [form, setForm] = useState(EMPTY);
+  const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [email, setEmail] = useState('');
+  const [consent, setConsent] = useState(false);
   const [emailState, setEmailState] = useState('idle'); // idle | sending | sent
   const startedRef = useRef(false);
   const resultRef = useRef(null);
+  const departements = useMemo(() => departementOptions(), []);
 
-  const markStarted = (how) => {
-    if (startedRef.current) return;
-    startedRef.current = true;
-    trackEvent('estimate_started', { how, with_siret: cleanSiret(siret).length === 14 });
-  };
-
-  // Effectif prérempli depuis l'open data (modifiable)
-  useEffect(() => {
-    const n = lookup.result?.property?.staffCount;
-    if (lookup.status === 'found' && Number.isFinite(Number(n)) && n !== null) {
-      setFigures((f) => (f.staff === '' ? { ...f, staff: String(n) } : f));
+  const set = (key) => (value) => {
+    if (!startedRef.current) {
+      startedRef.current = true;
+      trackEvent('estimate_started', { how: 'form' });
     }
-  }, [lookup.status, lookup.result]);
-
-  const siretReady = cleanSiret(siret).length === 14;
-  const canContinue = !siretReady || ['found', 'not_found', 'unavailable'].includes(lookup.status);
-
-  const goToFigures = (e) => {
-    e.preventDefault();
-    if (siretReady && lookup.status === 'invalid') return;
-    markStarted(siretReady ? 'siret' : 'without_siret');
-    setStep(2);
+    setForm((f) => {
+      const next = { ...f, [key]: value };
+      // Bail proposé selon le type de bien (modifiable)
+      if (key === 'property_type' && (!f.lease_type || f.lease_type === defaultLeaseFor(f.property_type))) next.lease_type = defaultLeaseFor(value);
+      return next;
+    });
+    setErrors((e) => (e[key] ? { ...e, [key]: undefined } : e));
   };
 
-  const canEstimate = useMemo(() => {
-    const ca = toNumber(figures.ca);
-    const ebe = toNumber(figures.ebe);
-    return (ca !== null && ca > 0) || (ebe !== null && ebe > 0);
-  }, [figures]);
+  const liveGross = grossYield(toNumber(form.rent_monthly), toNumber(form.asking_price));
+  const yearlyRent = toNumber(form.rent_monthly) > 0 ? toNumber(form.rent_monthly) * 12 : null;
 
-  const payloadOf = (extra = {}) => ({
-    siret: siretReady ? cleanSiret(siret) : null,
-    ca: toNumber(figures.ca),
-    ebe: toNumber(figures.ebe),
-    staff: toNumber(figures.staff) === null ? null : Math.max(0, Math.round(toNumber(figures.staff))),
-    maintenance_contracts: drivers.includes('maintenance_contracts'),
-    team_stays: drivers.includes('team_stays'),
-    owner_dispensable: drivers.includes('owner_dispensable'),
-    ...extra,
-  });
+  const validate = () => {
+    const e = {};
+    if (!form.property_type) e.property_type = 'Choisissez le type de bien.';
+    if (!form.lease_type) e.lease_type = 'Choisissez le type de bail.';
+    if (!form.department) e.department = 'Choisissez le département.';
+    if (!(toNumber(form.rent_monthly) > 0)) e.rent_monthly = 'Indiquez le loyer mensuel hors charges.';
+    return e;
+  };
 
-  const estimate = async (e) => {
-    e.preventDefault();
-    if (!canEstimate) {
-      toast.error('Indiquez au moins un chiffre d\'affaires ou un EBE positif.');
+  const estimate = async (ev) => {
+    ev.preventDefault();
+    const e = validate();
+    setErrors(e);
+    if (Object.keys(e).length) {
+      toast.error('Complétez les champs signalés.');
       return;
     }
     setLoading(true);
     try {
-      const res = await axiosInstance.post('/estimates', payloadOf());
+      const res = await axiosInstance.post('/estimates', estimatePayload(form));
       setResult(res.data);
       setEmailState('idle');
-      setStep(3);
-      trackEvent('estimate_completed', {
-        low: res.data.low, high: res.data.high, method: res.data.method_code, rge: !!res.data.rge?.found, with_siret: siretReady,
-      });
-      window.setTimeout(() => resultRef.current?.focus(), 50);
+      trackEvent('estimate_completed', { low: res.data?.low, high: res.data?.high, property_type: form.property_type, lease_type: form.lease_type });
+      window.setTimeout(() => {
+        if (resultRef.current) {
+          if (typeof resultRef.current.scrollIntoView === 'function') resultRef.current.scrollIntoView({ block: 'start' });
+          resultRef.current.focus();
+        }
+      }, 50);
     } catch (error) {
-      toast.error(apiErrorMessage(error, 'L\'estimation n\'a pas pu être calculée. Vérifiez les chiffres saisis.'));
+      toast.error(apiErrorMessage(error, 'L\'estimation n\'a pas pu être calculée. Vérifiez les montants saisis.'));
     } finally {
       setLoading(false);
     }
   };
 
-  const sendByEmail = async (e) => {
-    e.preventDefault();
+  const sendByEmail = async (ev) => {
+    ev.preventDefault();
     const address = email.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(address)) {
       toast.error('Indiquez une adresse e-mail valide.');
       return;
     }
+    if (!consent) {
+      toast.error('Cochez la case pour accepter l\'envoi de l\'estimation.');
+      return;
+    }
     setEmailState('sending');
     try {
-      await axiosInstance.post('/estimates', payloadOf({ email: address }));
+      await axiosInstance.post('/estimates', estimatePayload(form, { email: address, consent: true }));
       setEmailState('sent');
     } catch (error) {
       setEmailState('idle');
@@ -174,30 +184,25 @@ const EstimatePage = ({ user }) => {
     }
   };
 
-  // « Déposer mon annonce anonyme » : CreateListing lit sessionStorage 'estimate'
-  // {siret, property, rge, ca, ebe, staff, low, high}
+  // « Déposer mon annonce » : CreateListing lit sessionStorage 'estimate' {inputs, result}
   const depositListing = () => {
-    const payload = {
-      siret: siretReady ? cleanSiret(siret) : '',
-      property: lookup.result?.property || null,
-      rge: lookup.result?.rge || null,
-      ca: toNumber(figures.ca),
-      ebe: toNumber(figures.ebe),
-      staff: toNumber(figures.staff),
-      low: result?.low ?? null,
-      high: result?.high ?? null,
-      mid: result?.mid ?? null,
-      saved_at: new Date().toISOString(),
-    };
+    const inputs = estimatePayload(form);
     try {
-      sessionStorage.setItem('estimate', JSON.stringify(payload));
+      sessionStorage.setItem(ESTIMATE_STORAGE_KEY, JSON.stringify({
+        inputs,
+        result: result ? { low: result.low ?? null, high: result.high ?? null, mid: result.mid ?? null } : null,
+        saved_at: new Date().toISOString(),
+      }));
     } catch (err) {
       // stockage indisponible : l'annonce sera saisie sans préremplissage
     }
+    trackEvent('estimate_deposit', { property_type: form.property_type });
     navigate(user && user.role === 'seller' ? '/seller/create' : '/register?role=seller');
   };
 
-  const rgeFound = !!lookup.result?.rge?.found;
+  const yields = result?.yields || {};
+  const drivers = Array.isArray(result?.drivers) ? result.drivers : [];
+  const pedagogy = Array.isArray(result?.pedagogy) ? result.pedagogy : [];
 
   return (
     <AppLayout user={user} className="bg-brand-surface">
@@ -224,143 +229,130 @@ const EstimatePage = ({ user }) => {
               </div>
             )}
 
-            {/* Étapes */}
-            <ol className="flex flex-wrap gap-2 text-sm" aria-label="Étapes de l'estimation">
-              {['Votre SIRET', 'Trois chiffres, trois cases', 'Votre fourchette'].map((label, i) => {
-                const n = i + 1;
-                const state = n < step ? 'done' : n === step ? 'current' : 'todo';
-                return (
-                  <li key={label} aria-current={state === 'current' ? 'step' : undefined}
-                    className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 border ${state === 'current' ? 'bg-brand-navy text-white border-brand-navy' : state === 'done' ? 'bg-white text-brand-navy border-brand-navy' : 'bg-white text-gray-500 border-brand-line'}`}>
-                    <span className="tabular font-semibold">{n}</span>
-                    <span>{label}</span>
-                  </li>
-                );
-              })}
-            </ol>
+            <form onSubmit={estimate} className="card p-5 sm:p-6 space-y-6" noValidate data-testid="estimate-form">
+              <div>
+                <h2 className="font-display text-xl font-bold text-brand-navy">Votre bien et sa location</h2>
+                <p className="text-sm text-gray-600 mt-1 leading-relaxed">Quatre informations suffisent ; les montants facultatifs affinent le rendement net.</p>
+              </div>
 
-            {step === 1 && (
-              <form onSubmit={goToFigures} className="card p-5 sm:p-6 space-y-5" data-testid="estimate-step-siret">
-                <div>
-                  <h2 className="font-display text-xl font-bold text-brand-navy">Votre entreprise</h2>
-                  <p className="text-sm text-gray-600 mt-1 leading-relaxed">
-                    Le SIRET charge le nom, l'activité, l'effectif et, le cas échéant, les qualifications RGE lues sur la base ADEME. Rien n'est enregistré.
-                  </p>
-                </div>
-                <SiretField value={siret} onChange={(v) => { setSiret(v); markStarted('siret'); }} lookup={lookup} testId="estimate-siret-input" />
-                {lookup.result && lookup.status !== 'loading' && lookup.status !== 'invalid' && <CompanyPrefillCard result={lookup.result} />}
-                <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                  <button type="submit" disabled={!canContinue || lookup.status === 'loading'} className="btn-primary w-full sm:w-auto" data-testid="estimate-siret-continue">
-                    {lookup.status === 'loading' ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : null}
-                    {siretReady ? 'Continuer' : 'Continuer sans SIRET'}
-                    <ArrowRight className="w-4 h-4" aria-hidden="true" />
-                  </button>
-                  {siretReady && (
-                    <button type="button" onClick={() => { setSiret(''); lookup.reset(); markStarted('without_siret'); setStep(2); }} className="btn-link text-sm justify-center">
-                      Continuer sans SIRET
-                    </button>
-                  )}
-                </div>
-              </form>
-            )}
-
-            {step === 2 && (
-              <form onSubmit={estimate} className="card p-5 sm:p-6 space-y-6" data-testid="estimate-step-figures">
-                <div>
-                  <h2 className="font-display text-xl font-bold text-brand-navy">Trois chiffres</h2>
-                  <p className="text-sm text-gray-600 mt-1 leading-relaxed">Ordres de grandeur suffisants : prenez votre dernière liasse ou demandez-les à votre comptable.</p>
-                </div>
-                {lookup.result?.property?.found && (
-                  <p className="text-sm text-gray-700 rounded-xl bg-brand-surface border border-brand-line px-4 py-3 break-words">
-                    Estimation pour <span className="font-semibold text-brand-navy">{lookup.result.property.name}</span>
-                    {rgeFound && <span className="badge badge-verified ml-2"><ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />RGE vérifié ADEME</span>}
-                    {' '}<button type="button" onClick={() => setStep(1)} className="btn-link text-sm">Modifier</button>
-                  </p>
+              <div className="grid sm:grid-cols-2 gap-4">
+                <Field id="estimate-type" label="Type de bien">
+                  <select id="estimate-type" value={form.property_type} onChange={(e) => set('property_type')(e.target.value)} className={inputClass} aria-invalid={errors.property_type ? 'true' : undefined} data-testid="estimate-type-select">
+                    <option value="">Choisir</option>
+                    {PROPERTY_TYPES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                  </select>
+                  {errors.property_type && <p role="alert" className="text-sm text-red-700 mt-1">{errors.property_type}</p>}
+                </Field>
+                <Field id="estimate-lease" label="Type de bail">
+                  <select id="estimate-lease" value={form.lease_type} onChange={(e) => set('lease_type')(e.target.value)} className={inputClass} aria-invalid={errors.lease_type ? 'true' : undefined} data-testid="estimate-lease-select">
+                    <option value="">Choisir</option>
+                    {LEASE_TYPES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                  </select>
+                  {errors.lease_type && <p role="alert" className="text-sm text-red-700 mt-1">{errors.lease_type}</p>}
+                </Field>
+                <Field id="estimate-department" label="Département">
+                  <select id="estimate-department" value={form.department} onChange={(e) => set('department')(e.target.value)} className={inputClass} aria-invalid={errors.department ? 'true' : undefined} data-testid="estimate-department-select">
+                    <option value="">Choisir</option>
+                    {departements.map((d) => <option key={d.code} value={d.code}>{d.label}</option>)}
+                  </select>
+                  {errors.department && <p role="alert" className="text-sm text-red-700 mt-1">{errors.department}</p>}
+                </Field>
+                {form.property_type !== 'parking' && (
+                  <Field id="estimate-surface" label="Surface" optional>
+                    <MoneyInput id="estimate-surface" value={form.surface} onChange={set('surface')} suffix="m²" data-testid="estimate-surface-input" />
+                  </Field>
                 )}
-                <div className="grid sm:grid-cols-2 gap-4">
-                  <div className="min-w-0">
-                    <label htmlFor="estimate-ca" className="block text-sm font-semibold text-brand-navy mb-1">Chiffre d'affaires annuel HT</label>
-                    <MoneyInput id="estimate-ca" value={figures.ca} onChange={(v) => setFigures({ ...figures, ca: v })} data-testid="estimate-ca-input" aria-describedby="estimate-ca-hint" />
-                    <p id="estimate-ca-hint" className="text-xs text-gray-500 mt-1">Dernier exercice clos.</p>
-                  </div>
-                  <div className="min-w-0">
-                    <label htmlFor="estimate-ebe" className="block text-sm font-semibold text-brand-navy mb-1">EBE ou résultat net</label>
-                    <MoneyInput id="estimate-ebe" value={figures.ebe} onChange={(v) => setFigures({ ...figures, ebe: v })} allowNegative data-testid="estimate-ebe-input" aria-describedby="estimate-ebe-hint" />
-                    <p id="estimate-ebe-hint" className="text-xs text-gray-500 mt-1">Excédent brut d'exploitation (avant amortissements et impôts) ; à défaut, le résultat net. Peut être négatif.</p>
-                  </div>
-                  <div className="min-w-0">
-                    <label htmlFor="estimate-staff" className="block text-sm font-semibold text-brand-navy mb-1">Effectif</label>
-                    <input id="estimate-staff" type="number" min={0} max={10000} step={1} inputMode="numeric" value={figures.staff}
-                      onChange={(e) => setFigures({ ...figures, staff: e.target.value })} className={`${inputClass} tabular`} data-testid="estimate-staff-input" aria-describedby="estimate-staff-hint" />
-                    <p id="estimate-staff-hint" className="text-xs text-gray-500 mt-1">{HELP.staff_count}</p>
-                  </div>
-                </div>
+              </div>
 
-                <ChoiceGroup
-                  legend="Trois cases qui changent la valeur"
-                  name="drivers"
-                  options={DRIVER_OPTIONS}
-                  value={drivers}
-                  onChange={setDrivers}
-                  multiple
-                  columns={1}
-                  hint="Cochez ce qui est vrai aujourd'hui : chaque case pèse ± 5 % sur la fourchette."
-                  showSummary={false}
-                  testId="estimate-driver"
-                />
+              <div className="grid sm:grid-cols-2 gap-4">
+                <Field id="estimate-rent" label="Loyer mensuel hors charges" hint={yearlyRent ? `Soit ${formatPrice(yearlyRent)} de loyers par an.` : 'Le loyer du bail en cours, sans les provisions sur charges.'}>
+                  <MoneyInput id="estimate-rent" value={form.rent_monthly} onChange={set('rent_monthly')} suffix="€/mois" aria-invalid={errors.rent_monthly ? 'true' : undefined} aria-describedby="estimate-rent-hint" data-testid="estimate-rent-input" />
+                  {errors.rent_monthly && <p role="alert" className="text-sm text-red-700 mt-1">{errors.rent_monthly}</p>}
+                </Field>
+                <Field id="estimate-charges" label="Provisions sur charges" optional hint="Charges récupérables payées par le locataire.">
+                  <MoneyInput id="estimate-charges" value={form.charges_monthly} onChange={set('charges_monthly')} suffix="€/mois" aria-describedby="estimate-charges-hint" data-testid="estimate-charges-input" />
+                </Field>
+                <Field id="estimate-tax" label="Taxe foncière annuelle" optional hint="Si vous la laissez vide, elle est estimée à un mois de loyer.">
+                  <MoneyInput id="estimate-tax" value={form.property_tax} onChange={set('property_tax')} suffix="€/an" aria-describedby="estimate-tax-hint" data-testid="estimate-tax-input" />
+                </Field>
+                <Field id="estimate-nonrec" label="Charges non récupérables par an" optional hint="Copropriété non récupérable, assurance propriétaire non occupant, gestion. Vide : 5 % des loyers.">
+                  <MoneyInput id="estimate-nonrec" value={form.non_recoverable_charges} onChange={set('non_recoverable_charges')} suffix="€/an" aria-describedby="estimate-nonrec-hint" data-testid="estimate-nonrec-input" />
+                </Field>
+                <Field id="estimate-price" label="Prix que vous envisagez" optional hint={liveGross ? `Rendement brut à ce prix : ${formatYield(liveGross)}.` : 'Pour connaître le rendement que verra un acquéreur.'}>
+                  <MoneyInput id="estimate-price" value={form.asking_price} onChange={set('asking_price')} aria-describedby="estimate-price-hint" data-testid="estimate-price-input" />
+                </Field>
+              </div>
 
-                <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                  <button type="submit" disabled={loading || !canEstimate} className="btn-primary w-full sm:w-auto" data-testid="estimate-submit">
-                    {loading ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Sparkles className="w-4 h-4" aria-hidden="true" />}
-                    Obtenir ma fourchette
-                  </button>
-                  <button type="button" onClick={() => setStep(1)} className="btn-link text-sm justify-center">Retour</button>
-                </div>
-                {!canEstimate && <p className="text-xs text-gray-500">Indiquez au moins un chiffre d'affaires ou un EBE positif.</p>}
-              </form>
-            )}
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                <button type="submit" disabled={loading} className="btn-primary w-full sm:w-auto" data-testid="estimate-submit">
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Calculator className="w-4 h-4" aria-hidden="true" />}
+                  Obtenir ma fourchette
+                </button>
+                <p className="text-xs text-gray-600">Rien n'est enregistré : aucune donnée nominative sans votre accord.</p>
+              </div>
+            </form>
 
-            {step === 3 && result && (
+            {result && (
               <div className="space-y-5" data-testid="estimate-result">
-                <section ref={resultRef} tabIndex={-1} className="card p-5 sm:p-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue" aria-labelledby="estimate-result-title">
+                <section ref={resultRef} tabIndex={-1} className="card p-5 sm:p-6 scroll-mt-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-teal" aria-labelledby="estimate-result-title">
                   <p className="eyebrow">Fourchette indicative</p>
-                  <h2 id="estimate-result-title" className="font-display text-2xl sm:text-3xl font-extrabold text-brand-navy mt-1 tabular break-words">
+                  <h2 id="estimate-result-title" className="font-display text-2xl sm:text-3xl font-extrabold text-brand-navy mt-1 tabular break-words" data-testid="estimate-range">
                     {formatPrice(result.low)} <span className="text-gray-400 font-semibold">à</span> {formatPrice(result.high)}
                   </h2>
                   <p className="text-gray-700 mt-2">
                     Valeur centrale : <span className="font-semibold text-brand-navy tabular">{formatPrice(result.mid)}</span>
-                    {lookup.result?.property?.found && <> pour <span className="font-semibold text-brand-navy">{lookup.result.property.name}</span></>}.
                   </p>
-                  <p className="text-sm text-gray-600 mt-3 leading-relaxed">{result.method}</p>
-                  {result.disclaimer && <p className="text-xs text-gray-500 mt-2 leading-relaxed">{result.disclaimer}</p>}
+                  <dl className="mt-4 grid grid-cols-2 gap-3" data-testid="estimate-yields">
+                    {formatYield(yields.gross_at_mid) && (
+                      <div className="rounded-xl bg-brand-teal-soft border border-brand-teal-line/70 p-3 min-w-0">
+                        <dt className="text-xs font-medium text-brand-teal-dark">Rendement brut à la valeur centrale</dt>
+                        <dd className="font-display text-xl font-extrabold text-brand-teal-dark tabular">{formatYield(yields.gross_at_mid)}</dd>
+                      </div>
+                    )}
+                    {formatYield(yields.net_at_mid) && (
+                      <div className="rounded-xl bg-brand-surface border border-brand-line p-3 min-w-0">
+                        <dt className="text-xs font-medium text-gray-600">Rendement net à la valeur centrale</dt>
+                        <dd className="font-display text-xl font-extrabold text-brand-navy tabular">{formatYield(yields.net_at_mid)}</dd>
+                      </div>
+                    )}
+                    {formatYield(yields.gross_at_price) && (
+                      <div className="rounded-xl bg-brand-surface border border-brand-line p-3 min-w-0" data-testid="estimate-yield-at-price">
+                        <dt className="text-xs font-medium text-gray-600">Brut à votre prix ({formatPrice(toNumber(form.asking_price))})</dt>
+                        <dd className="font-display text-xl font-extrabold text-brand-navy tabular">{formatYield(yields.gross_at_price)}</dd>
+                      </div>
+                    )}
+                    {formatYield(yields.net_at_price) && (
+                      <div className="rounded-xl bg-brand-surface border border-brand-line p-3 min-w-0">
+                        <dt className="text-xs font-medium text-gray-600">Net à votre prix</dt>
+                        <dd className="font-display text-xl font-extrabold text-brand-navy tabular">{formatYield(yields.net_at_price)}</dd>
+                      </div>
+                    )}
+                  </dl>
+                  {result.method && <p className="text-sm text-gray-700 mt-4 leading-relaxed">{result.method}</p>}
+                  {result.disclaimer && <p className="text-xs text-gray-600 mt-2 leading-relaxed" data-testid="estimate-disclaimer">{result.disclaimer}</p>}
                 </section>
 
-                <section className="card p-5 sm:p-6" aria-labelledby="estimate-drivers-title">
-                  <h3 id="estimate-drivers-title" className="font-display text-lg font-bold text-brand-navy">Vos trois réponses</h3>
-                  <ul className="mt-3 space-y-3">
-                    {(result.drivers || []).map((d) => (
-                      <li key={d.key} className="flex items-start gap-3 min-w-0">
-                        <span className={`shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full ${d.active ? 'bg-brand-green-soft text-brand-green-dark' : 'bg-brand-amber-soft text-brand-amber'}`} aria-hidden="true">
-                          {d.active ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                        </span>
-                        <div className="min-w-0">
-                          <p className="font-semibold text-brand-navy break-words">
-                            {d.label} <span className={`tabular text-sm ${d.active ? 'text-brand-green-dark' : 'text-brand-amber'}`}>{d.effect_label}</span>
-                          </p>
-                          <p className="text-sm text-gray-600 leading-relaxed">{d.hint}</p>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                </section>
+                {drivers.length > 0 && (
+                  <section className="card p-5 sm:p-6" aria-labelledby="estimate-drivers-title">
+                    <h3 id="estimate-drivers-title" className="font-display text-lg font-bold text-brand-navy">Ce qui a été pris en compte</h3>
+                    <ul className="mt-3 divide-y divide-brand-line" data-testid="estimate-drivers">
+                      {drivers.map((d) => (
+                        <li key={`${d.label}-${d.effect}`} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2 min-w-0">
+                          <span className="text-sm text-gray-800 break-words min-w-0">{d.label}</span>
+                          {d.effect && <span className="text-sm font-semibold text-brand-navy tabular">{d.effect}</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
 
-                {Array.isArray(result.pedagogy) && result.pedagogy.length > 0 && (
+                {pedagogy.length > 0 && (
                   <section className="card p-5 sm:p-6" aria-labelledby="estimate-pedagogy-title">
-                    <h3 id="estimate-pedagogy-title" className="font-display text-lg font-bold text-brand-navy">Ce qui fait monter la valeur</h3>
+                    <h3 id="estimate-pedagogy-title" className="font-display text-lg font-bold text-brand-navy">Ce qui fait monter le prix</h3>
                     <ul className="mt-3 space-y-2">
-                      {result.pedagogy.map((p) => (
+                      {pedagogy.map((p) => (
                         <li key={p} className="flex items-start gap-2 text-sm text-gray-700 leading-relaxed">
-                          <CheckCircle2 className="w-4 h-4 mt-0.5 text-brand-navy shrink-0" aria-hidden="true" />
+                          <TrendingUp className="w-4 h-4 mt-0.5 text-brand-teal shrink-0" aria-hidden="true" />
                           <span className="min-w-0 break-words">{p}</span>
                         </li>
                       ))}
@@ -368,23 +360,23 @@ const EstimatePage = ({ user }) => {
                   </section>
                 )}
 
-                <section className="card p-5 sm:p-6 bg-brand-navy text-white border-brand-navy" aria-labelledby="estimate-next-title">
-                  <h3 id="estimate-next-title" className="font-display text-xl font-bold">Et maintenant ?</h3>
-                  <p className="text-gray-200 mt-2 leading-relaxed">
-                    Déposez une annonce anonyme préremplie avec ces éléments. Les repreneurs se présentent avec leur projet ; votre nom n'est révélé qu'après un accord de confidentialité signé. {OFFER.commissionSentence}
+                <section className="card p-5 sm:p-6 border-brand-teal-line bg-brand-teal-soft" aria-labelledby="estimate-next-title">
+                  <h3 id="estimate-next-title" className="font-display text-xl font-bold text-brand-navy">Et maintenant ?</h3>
+                  <p className="text-gray-700 mt-2 leading-relaxed">
+                    Déposez votre annonce, préremplie avec ces éléments : le bien, la location, la vente, en trois écrans. L'adresse et votre identité ne sont révélées qu'aux acquéreurs vérifiés qui ont signé l'engagement de confidentialité.
                   </p>
                   <div className="mt-4 flex flex-col sm:flex-row gap-3">
-                    <button type="button" onClick={depositListing} className="btn-secondary border-white w-full sm:w-auto" data-testid="estimate-deposit-btn">
-                      Déposer mon annonce anonyme
+                    <button type="button" onClick={depositListing} className="btn-primary w-full sm:w-auto" data-testid="estimate-deposit-btn">
+                      Déposer mon annonce
                       <ArrowRight className="w-4 h-4" aria-hidden="true" />
                     </button>
-                    <button type="button" onClick={() => setStep(2)} className="btn-link text-gray-200 hover:text-white justify-center">Refaire une estimation</button>
+                    <Link to="/vendre" className="btn-link justify-center">Comment se passe la vente</Link>
                   </div>
                 </section>
 
                 <section className="card p-5 sm:p-6" aria-labelledby="estimate-email-title">
                   {emailState === 'sent' ? (
-                    <div className="flex items-start gap-3" role="status">
+                    <div className="flex items-start gap-3" role="status" data-testid="estimate-email-sent">
                       <Mail className="w-5 h-5 mt-0.5 text-brand-navy shrink-0" aria-hidden="true" />
                       <div className="min-w-0">
                         <p className="font-display font-bold text-brand-navy">Vérifiez votre boîte mail</p>
@@ -399,15 +391,19 @@ const EstimatePage = ({ user }) => {
                       <div className="flex flex-col sm:flex-row gap-3">
                         <div className="flex-1 min-w-0">
                           <label htmlFor="estimate-email" className="sr-only">Adresse e-mail</label>
-                          <input id="estimate-email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="prenom@entreprise.fr" className={inputClass} data-testid="estimate-email-input" />
+                          <input id="estimate-email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="prenom@exemple.fr" className={inputClass} data-testid="estimate-email-input" />
                         </div>
                         <button type="submit" disabled={emailState === 'sending'} className="btn-secondary w-full sm:w-auto" data-testid="estimate-email-submit">
                           {emailState === 'sending' ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Mail className="w-4 h-4" aria-hidden="true" />}
                           M'envoyer l'estimation
                         </button>
                       </div>
-                      <p className="text-xs text-gray-500 leading-relaxed">
-                        Double confirmation : vous recevez d'abord un lien à cliquer, puis l'estimation. Votre adresse ne sert qu'à cet envoi, n'est jamais conservée sans ce clic et peut être effacée à tout moment sur simple demande.
+                      <label className="flex items-start gap-2 text-sm text-gray-700 cursor-pointer">
+                        <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-1 h-4 w-4 shrink-0 accent-[#0f766e]" data-testid="estimate-consent" />
+                        <span>J'accepte de recevoir cette estimation par e-mail. Mon adresse ne sert qu'à cet envoi et n'est conservée qu'après confirmation.</span>
+                      </label>
+                      <p className="text-xs text-gray-600 leading-relaxed">
+                        Double confirmation : vous recevez d'abord un lien à cliquer, puis l'estimation. Effacement à tout moment sur simple demande.
                       </p>
                     </form>
                   )}
@@ -416,26 +412,26 @@ const EstimatePage = ({ user }) => {
             )}
           </div>
 
-          <aside className="min-w-0 space-y-4 lg:sticky lg:top-24 self-start">
+          <aside className="min-w-0 space-y-4 lg:sticky lg:top-6 self-start">
             <div className="card p-5">
-              <p className="eyebrow mb-2">Comment est calculée la fourchette</p>
+              <p className="eyebrow mb-2">La méthode du rendement</p>
               <ul className="text-sm text-gray-700 space-y-2 leading-relaxed">
-                <li>0,3 à 0,6 × chiffre d'affaires et 2,5 à 4 × EBE, pondérés, puis ± 5 % par case cochée.</li>
-                <li>Le résultat est arrondi à 5 000 € : c'est un ordre de grandeur, pas une expertise.</li>
-                <li>Un expert-comptable ou un conseil en transmission affine ce chiffre avec vos retraitements.</li>
+                <li>Loyer net annuel : loyers hors charges, moins la taxe foncière et les charges non récupérables.</li>
+                <li>Rendement net attendu par un acquéreur selon la zone : Paris, grandes métropoles, autres départements ; majoré pour un local commercial, des bureaux, un parking, une résidence gérée.</li>
+                <li>Prix = loyer net ÷ rendement attendu, arrondi au millier : un ordre de grandeur, pas un avis de valeur.</li>
               </ul>
             </div>
             <div className="card p-5">
               <p className="eyebrow mb-2">Vos données</p>
               <ul className="text-sm text-gray-700 space-y-2 leading-relaxed">
-                <li className="flex items-start gap-2"><Lock className="w-4 h-4 mt-0.5 text-brand-navy shrink-0" aria-hidden="true" />Aucune donnée nominative n'est conservée sans votre accord explicite (lien de confirmation).</li>
-                <li className="flex items-start gap-2"><ShieldCheck className="w-4 h-4 mt-0.5 text-brand-navy shrink-0" aria-hidden="true" />Les informations d'entreprise viennent de bases publiques (annuaire des entreprises, liste ADEME).</li>
+                <li className="flex items-start gap-2"><Lock className="w-4 h-4 mt-0.5 text-brand-teal shrink-0" aria-hidden="true" />Aucune donnée nominative n'est conservée sans votre accord explicite (lien de confirmation).</li>
+                <li className="flex items-start gap-2"><ShieldCheck className="w-4 h-4 mt-0.5 text-brand-teal shrink-0" aria-hidden="true" />Calcul fait par nos soins, sans base payante ni appel extérieur.</li>
               </ul>
             </div>
             <div className="card p-5">
-              <p className="eyebrow mb-2">Rien à payer avant la vente</p>
-              <p className="text-sm text-gray-700 leading-relaxed">{OFFER.commissionSentence}</p>
-              <Link to={user && user.role === 'seller' ? '/seller/create' : '/register?role=seller'} className="btn-link text-sm mt-3">Déposer mon annonce<ArrowRight className="w-4 h-4" aria-hidden="true" /></Link>
+              <p className="eyebrow mb-2">Rien à payer avant l'acte</p>
+              <p className="text-sm text-gray-700 leading-relaxed" data-testid="estimate-commission">{commissionSentenceFor(commission)}</p>
+              <p className="mt-3 flex items-start gap-2 text-xs text-gray-600"><Info className="w-3.5 h-3.5 mt-0.5 shrink-0" aria-hidden="true" />Honoraires réglés par le notaire sur le prix, le jour de l'acte authentique.</p>
             </div>
           </aside>
         </div>

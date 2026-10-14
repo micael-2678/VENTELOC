@@ -8,7 +8,7 @@ import { axiosInstance } from '@/App';
 import { apiErrorMessage, isEmailNotVerifiedError } from '@/components/account/errors';
 import { ActionButton, ActionDialog, DataTable, Field, FilterSelect, Loading, NoteDialog, Pill, Section, daysSince, fmtDate, fmtEur, saleObjectLabel, today } from './shared';
 
-// Onglet « Ventes » (SPEC §4.5) : GET /admin/closings, résolution d'une déclaration en attente ou contestée
+// Onglet « Ventes » (SPEC §7.4) : GET /admin/closings, résolution d'une déclaration en attente ou contestée
 // (PUT /admin/closings/{id}/resolve {action: 'confirm'|'cancel', note}) ; correction d'une vente confirmée dont la
 // facture a été annulée par avoir (PUT /admin/closings/{id}/declaration {signed_on, final_price, sale_object, note} :
 // une nouvelle facture est émise sous le numéro suivant).
@@ -24,29 +24,29 @@ export const CorrectDeclarationDialog = ({ open, onClose, closing, onConfirm }) 
   }, [open]); // Réinitialisé à chaque ouverture (la vente ne change pas pendant la saisie)
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const price = Number(String(form.final_price).replace(/\s/g, '').replace(',', '.'));
-  const valid = !!form.signed_on && form.signed_on <= today() && price > 0 && ['titres', 'fonds'].includes(form.sale_object);
+  const valid = !!form.signed_on && form.signed_on <= today() && price > 0 && ['bien', 'parts'].includes(form.sale_object);
   return (
     <ActionDialog
       open={open}
       onClose={onClose}
       title="Corriger la déclaration de vente"
-      description="La facture précédente a été annulée par avoir. La déclaration corrigée est conservée dans l'historique et une nouvelle facture est émise sous le numéro suivant, puis envoyée au cédant."
+      description="La facture précédente a été annulée par avoir. La déclaration corrigée est conservée dans l'historique et une nouvelle facture est émise sous le numéro suivant, puis envoyée au vendeur."
       confirmLabel="Corriger et émettre la facture"
       disabled={!valid}
       onConfirm={() => onConfirm({ signed_on: form.signed_on, final_price: price, sale_object: form.sale_object, note: form.note.trim() || null })}
       testId="correct-declaration-dialog"
     >
-      <Field id="correct-signed-on" label="Date de signature de l'acte">
+      <Field id="correct-signed-on" label="Date de signature de l'acte authentique">
         <Input id="correct-signed-on" type="date" value={form.signed_on} max={today()} onChange={set('signed_on')} className="rounded-xl" data-testid="correct-signed-on" />
       </Field>
-      <Field id="correct-price" label="Prix de cession définitif (euros)">
+      <Field id="correct-price" label="Prix de vente définitif (euros)">
         <Input id="correct-price" type="number" min="1" step="1000" inputMode="decimal" value={form.final_price} onChange={set('final_price')} className="rounded-xl" data-testid="correct-price" />
       </Field>
-      <Field id="correct-object" label="Objet de la cession">
+      <Field id="correct-object" label="Objet de la vente">
         <select id="correct-object" value={form.sale_object} onChange={set('sale_object')} className="w-full rounded-xl border border-brand-line bg-white px-3 py-2 text-sm text-brand-navy" data-testid="correct-object">
           <option value="">Choisir…</option>
-          <option value="titres">Cession de titres</option>
-          <option value="fonds">Cession de fonds</option>
+          <option value="bien">Vente du bien</option>
+          <option value="parts">Cession des parts de la société</option>
         </select>
       </Field>
       <Field id="correct-note" label="Note (facultative)">
@@ -73,20 +73,20 @@ const STATUS_INFO = {
   abandoned: { label: 'Abandonnée', tone: 'info' },
 };
 
-const PARTY = { seller: 'le cédant', buyer: 'le repreneur', admin: 'la plateforme' };
+const PARTY = { seller: 'le vendeur', buyer: 'l\'acquéreur', admin: 'la plateforme' };
 
-const REDACTEUR_TYPES = { notaire: 'Notaire', avocat: 'Avocat', 'expert-comptable': 'Expert-comptable', autre: 'Rédacteur' };
+const REDACTEUR_TYPES = { notaire: 'Notaire', autre: 'Autre professionnel' };
 
 const redacteurText = (r) => {
-  if (!r || !(r.name || r.email)) return 'Rédacteur d\'acte non renseigné';
-  return [REDACTEUR_TYPES[r.type] || 'Rédacteur', r.name, r.email, r.phone].filter(Boolean).join(' · ');
+  if (!r || !(r.name || r.email)) return 'Notaire non renseigné';
+  return [REDACTEUR_TYPES[r.type] || 'Notaire', r.name, r.email, r.phone].filter(Boolean).join(' · ');
 };
 
 const declarationText = (cl) => {
   const d = cl.declaration || cl.declared;
   if (!d) return '';
   const by = PARTY[d.by] || PARTY[d.declared_by] || 'une partie';
-  return `Déclarée par ${by}${d.signed_on ? `, acte signé le ${fmtDate(d.signed_on)}` : ''}${d.final_price > 0 ? `, prix ${fmtEur(d.final_price)}` : ''}${d.sale_object ? ` (${saleObjectLabel(d.sale_object).toLowerCase()})` : ''}.`;
+  return `Déclarée par ${by}${d.signed_on ? `, acte authentique signé le ${fmtDate(d.signed_on)}` : ''}${d.final_price > 0 ? `, prix ${fmtEur(d.final_price)}` : ''}${d.sale_object ? ` (${saleObjectLabel(d.sale_object).toLowerCase()})` : ''}.`;
 };
 
 const AdminClosings = ({ focusId, onNavigate, onEmailBlocked }) => {
@@ -126,7 +126,7 @@ const AdminClosings = ({ focusId, onNavigate, onEmailBlocked }) => {
   const correct = async (closing, body) => {
     try {
       const res = await axiosInstance.put(`/admin/closings/${closing.id}/declaration`, body);
-      toast.success(`Déclaration corrigée : facture ${res?.data?.invoice?.number || res?.data?.invoice_number || ''} émise et envoyée au cédant.`.replace('  ', ' '));
+      toast.success(`Déclaration corrigée : facture ${res?.data?.invoice?.number || res?.data?.invoice_number || ''} émise et envoyée au vendeur.`.replace('  ', ' '));
       load();
     } catch (err) {
       if (isEmailNotVerifiedError(err)) onEmailBlocked?.();
@@ -136,7 +136,7 @@ const AdminClosings = ({ focusId, onNavigate, onEmailBlocked }) => {
   };
 
   const columns = [
-    { key: 'company', label: 'Annonce', primary: true, wide: true, render: (cl) => <span className="font-semibold text-brand-navy break-words">{cl.property_title || cl.property_label || 'Annonce'}</span> },
+    { key: 'property', label: 'Bien', primary: true, wide: true, render: (cl) => <span className="font-semibold text-brand-navy break-words">{cl.property_title || cl.property_label || 'Bien'}</span> },
     {
       key: 'status',
       label: 'Statut',
@@ -149,7 +149,7 @@ const AdminClosings = ({ focusId, onNavigate, onEmailBlocked }) => {
     { key: 'amount', label: 'Montant', align: 'right', render: (cl) => fmtEur(cl.declaration?.final_price || cl.declared?.final_price || cl.offer_amount) },
     { key: 'sale_object', label: 'Objet', render: (cl) => saleObjectLabel(cl.declaration?.sale_object || cl.sale_object) },
     { key: 'accepted_at', label: 'Offre acceptée le', nowrap: true, render: (cl) => fmtDate(cl.accepted_at || cl.created_at) },
-    { key: 'expected_date', label: 'Acte prévu le', nowrap: true, render: (cl) => fmtDate(cl.expected_date) },
+    { key: 'avant_contrat_on', label: 'Avant-contrat', nowrap: true, render: (cl) => (cl.avant_contrat_on ? fmtDate(cl.avant_contrat_on) : (cl.expected_date ? `prévu vers le ${fmtDate(cl.expected_date)}` : '—')) },
     {
       key: 'details',
       label: 'Détails',
@@ -160,7 +160,7 @@ const AdminClosings = ({ focusId, onNavigate, onEmailBlocked }) => {
           {cl.status === 'declared' && (cl.confirm_deadline || cl.declaration?.confirm_deadline) && (
             <span className="block text-[13px] text-gray-600">
               {(cl.declaration?.declared_by || cl.declaration?.by) === 'buyer'
-                ? `Déclarée par le repreneur : pas de confirmation automatique (échéance ${fmtDate(cl.confirm_deadline || cl.declaration?.confirm_deadline)}, puis ligne « À faire »).`
+                ? `Déclarée par l'acquéreur : pas de confirmation automatique (échéance ${fmtDate(cl.confirm_deadline || cl.declaration?.confirm_deadline)}, puis ligne « À faire »).`
                 : `Confirmation automatique le ${fmtDate(cl.confirm_deadline || cl.declaration?.confirm_deadline)}.`}
             </span>
           )}
@@ -190,7 +190,7 @@ const AdminClosings = ({ focusId, onNavigate, onEmailBlocked }) => {
   return (
     <Section
       title="Étapes de vente"
-      description="Créées à l'acceptation d'une offre ou par une vente directe ; déclaration par une partie, confirmation par l'autre sous 7 jours, sinon par la plateforme."
+      description="Créées à l'acceptation d'une offre d'achat ou par une vente directe ; avant-contrat puis acte authentique déclarés par une partie, confirmation par l'autre sous 7 jours, sinon par la plateforme."
       actions={(
         <>
           <FilterSelect id="closings-filter" label="Afficher" value={status} onChange={setStatus} options={STATUS_FILTERS} testId="closings-filter" />
@@ -209,7 +209,7 @@ const AdminClosings = ({ focusId, onNavigate, onEmailBlocked }) => {
           rows={data || []}
           actions={actions}
           highlightId={focusId}
-          emptyText={status ? 'Aucune vente dans ce statut.' : 'Aucune étape de vente pour le moment : la première est créée à l\'acceptation d\'une offre.'}
+          emptyText={status ? 'Aucune vente dans ce statut.' : 'Aucune étape de vente pour le moment : la première est créée à l\'acceptation d\'une offre d\'achat.'}
           testId="closings-table"
         />
       )}
@@ -220,7 +220,7 @@ const AdminClosings = ({ focusId, onNavigate, onEmailBlocked }) => {
         title={dialog?.action === 'cancel' ? 'Annuler la déclaration de vente' : 'Confirmer la vente'}
         description={dialog?.action === 'cancel'
           ? `${dialog?.closing?.property_title || ''} : l'étape de vente revient « en cours », la déclaration est conservée dans l'historique.`
-          : `${dialog?.closing?.property_title || ''} : la vente est confirmée au nom de la plateforme. La facture d'honoraires est émise et envoyée au cédant, l'ordre de paiement au rédacteur d'acte.`}
+          : `${dialog?.closing?.property_title || ''} : la vente est confirmée au nom de la plateforme. La facture d'honoraires est émise et envoyée au vendeur, l'ordre de paiement au notaire.`}
         confirmLabel={dialog?.action === 'cancel' ? 'Annuler la déclaration' : 'Confirmer la vente'}
         noteLabel="Note (facultative)"
         tone={dialog?.action === 'cancel' ? 'danger' : 'navy'}

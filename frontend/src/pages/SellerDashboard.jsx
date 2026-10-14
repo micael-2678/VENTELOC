@@ -2,33 +2,35 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
-  Plus, Building2, Eye, Heart, Users, Euro, FileSignature, FolderOpen, BarChart3, MapPin, Handshake, Calculator,
+  Plus, Home, Eye, Heart, Users, Euro, FileSignature, FolderOpen, BarChart3, MapPin, Handshake, Calculator, FileCheck2, BadgeCheck,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { usePrivateSeo } from '@/lib/seo';
 import AppHeader from '@/components/layout/AppHeader';
 import { formatEur } from '@/lib/format';
-import { listingTitle } from '@/components/shared';
-import { departementLabel, tradeLabel } from '@/lib/referentiels';
+import { listingTitle, listingLocation, listingYields, formatYield, formatMonthly } from '@/components/shared';
+import { leaseTypeLabel } from '@/lib/referentiels';
 import { mandateStatusSentence, formatDateTimeFr } from '@/lib/mandate';
 import {
   fetchSellerProperties, fetchMandateStatus, fetchAccessRequests, fetchOffers, fetchStats, fetchClosings, fetchKyc, fetchConversations, closingStatus,
 } from '@/components/seller/api';
 import { StatusBadge, BlockingReasons, ModerationFlags } from '@/components/seller/ListingStatusBadge';
-import { badgeClass } from '@/components/seller/listingStatus';
+import { badgeClass, ownershipStatusOf, OWNERSHIP_STATUS } from '@/components/seller/listingStatus';
 import TodoBlock from '@/components/seller/TodoBlock';
 import ListingActions from '@/components/seller/ListingActions';
 import AccessRequests from '@/components/seller/AccessRequests';
 import OffersPanel from '@/components/seller/OffersPanel';
 import MandatePanel from '@/components/seller/MandatePanel';
 import DataroomPanel from '@/components/seller/DataroomPanel';
+import OwnershipProofPanel from '@/components/seller/OwnershipProofPanel';
 
 const TABS = [
-  { id: 'buyers', label: 'Repreneurs', icon: Users },
+  { id: 'buyers', label: 'Acquéreurs', icon: Users },
   { id: 'offers', label: 'Offres', icon: Euro },
   { id: 'mandate', label: 'Mandat', icon: FileSignature },
-  { id: 'dataroom', label: 'Dossier', icon: FolderOpen },
+  { id: 'dataroom', label: 'Dossier du bien', icon: FolderOpen },
+  { id: 'ownership', label: 'Justificatif', icon: FileCheck2 },
   { id: 'stats', label: 'Statistiques', icon: BarChart3 },
 ];
 
@@ -37,7 +39,7 @@ const StatsPanel = ({ property, stats, closings }) => {
   const items = [
     { key: 'views', label: 'Vues de l\'annonce', value: Number(stats?.views ?? property.views) || 0, icon: Eye },
     { key: 'favorites', label: 'Mises en favori', value: Number(stats?.favorites_count) || 0, icon: Heart },
-    { key: 'contacts', label: 'Repreneurs en contact', value: Number(stats?.unique_contacts ?? property.contacts_count) || 0, icon: Users },
+    { key: 'contacts', label: 'Acquéreurs en contact', value: Number(stats?.unique_contacts ?? property.contacts_count) || 0, icon: Users },
     { key: 'offers', label: 'Offres reçues', value: Number(stats?.offers_count) || 0, icon: Euro },
   ].filter((i) => i.value > 0);
   const mine = (closings || []).filter((c) => c.property_id === property.id);
@@ -55,7 +57,7 @@ const StatsPanel = ({ property, stats, closings }) => {
       ) : (
         <p className="text-sm text-gray-600">
           {property.status === 'published'
-            ? 'Aucune consultation enregistrée pour l\'instant : les repreneurs reçoivent les nouvelles annonces chaque semaine et dès qu\'elles correspondent à leurs alertes.'
+            ? 'Aucune consultation enregistrée pour l\'instant : les acquéreurs reçoivent les nouveaux biens chaque semaine et dès qu\'ils correspondent à leurs alertes.'
             : 'Les statistiques apparaissent dès que l\'annonce est en ligne.'}
         </p>
       )}
@@ -70,7 +72,7 @@ const StatsPanel = ({ property, stats, closings }) => {
                 <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-brand-line px-3 py-2 text-sm min-w-0">
                   <span className="flex flex-wrap items-center gap-2 min-w-0">
                     <span className={badgeClass(st.tone)}>{st.label}</span>
-                    <span className="text-gray-700">{c.buyer_name || 'Repreneur'}{c.declared?.final_price ? ` · ${formatEur(c.declared.final_price)}` : ''}{c.expected_date ? ` · signature prévue le ${formatDateTimeFr(c.expected_date)}` : ''}</span>
+                    <span className="text-gray-700">{c.buyer_name || 'Acquéreur'}{c.declared?.final_price ? ` · ${formatEur(c.declared.final_price)}` : ''}{c.expected_date ? ` · acte prévu le ${formatDateTimeFr(c.expected_date)}` : ''}</span>
                   </span>
                   <Link to={`/vente/${c.id}`} className="btn-link">Suivre la vente</Link>
                 </li>
@@ -148,7 +150,7 @@ const SellerDashboard = ({ user, setUser }) => {
           </div>
           <Link to="/seller/create" className="btn-primary shrink-0" data-testid="new-listing">
             <Plus className="w-5 h-5" aria-hidden="true" />
-            {properties.length ? 'Nouvelle annonce' : 'Déposer mon annonce anonyme'}
+            {properties.length ? 'Nouvelle annonce' : 'Déposer mon annonce'}
           </Link>
         </header>
 
@@ -169,12 +171,12 @@ const SellerDashboard = ({ user, setUser }) => {
           <h2 id="listings-title" className="font-display text-xl font-bold text-brand-navy mb-3">Mes annonces</h2>
           {properties.length === 0 ? (
             <div className="card p-6 sm:p-8" data-testid="no-listings">
-              <Building2 className="w-10 h-10 text-brand-navy/40 mb-3" aria-hidden="true" />
+              <Home className="w-10 h-10 text-brand-teal/50 mb-3" aria-hidden="true" />
               <p className="font-semibold text-brand-navy text-lg">Vous n'avez pas encore d'annonce</p>
-              <p className="text-sm text-gray-700 mt-1 mb-4">Trois écrans courts, enregistrés à chaque étape. Votre annonce reste anonyme : nom et coordonnées ne sont révélés qu'après accord de confidentialité signé par un repreneur à l'identité vérifiée.</p>
+              <p className="text-sm text-gray-700 mt-1 mb-4">Trois écrans courts (le bien, la location, la vente), enregistrés à chaque étape. L'adresse et votre identité ne sont révélées qu'après l'engagement de confidentialité signé par un acquéreur à l'identité vérifiée.</p>
               <div className="flex flex-wrap gap-3">
-                <Link to="/seller/create" className="btn-primary">Déposer mon annonce anonyme</Link>
-                <Link to="/estimer" className="btn-secondary"><Calculator className="w-4 h-4" aria-hidden="true" />Estimer mon entreprise d'abord</Link>
+                <Link to="/seller/create" className="btn-primary">Déposer mon annonce</Link>
+                <Link to="/estimer" className="btn-secondary"><Calculator className="w-4 h-4" aria-hidden="true" />Estimer mon bien d'abord</Link>
               </div>
             </div>
           ) : (
@@ -188,24 +190,33 @@ const SellerDashboard = ({ user, setUser }) => {
                 const counters = [
                   (Number(st?.views ?? c.views) || 0) > 0 ? `${Number(st?.views ?? c.views).toLocaleString('fr-FR')} vue${Number(st?.views ?? c.views) > 1 ? 's' : ''}` : '',
                   (Number(st?.favorites_count) || 0) > 0 ? `${st.favorites_count} favoris` : '',
-                  (Number(st?.unique_contacts ?? c.contacts_count) || 0) > 0 ? `${Number(st?.unique_contacts ?? c.contacts_count)} repreneurs en contact` : '',
+                  (Number(st?.unique_contacts ?? c.contacts_count) || 0) > 0 ? `${Number(st?.unique_contacts ?? c.contacts_count)} acquéreur${Number(st?.unique_contacts ?? c.contacts_count) > 1 ? 's' : ''} en contact` : '',
                 ].filter(Boolean);
                 const active = selectedId === c.id;
+                const { gross } = listingYields(c);
+                const proof = ownershipStatusOf(c);
+                const where = listingLocation(c);
                 return (
                   <li key={c.id} className={`card p-4 sm:p-5 min-w-0 flex flex-col gap-3 ${active ? 'ring-2 ring-brand-blue' : ''}`} data-testid={`listing-${c.id}`}>
                     <div className="flex items-start justify-between gap-2 min-w-0">
                       <div className="min-w-0">
                         <h3 className="font-display text-lg font-bold text-brand-navy leading-snug break-words">{listingTitle(c)}</h3>
-                        <p className="text-sm text-gray-600 break-words">
-                          {(c.trades || []).map((t) => tradeLabel(t, true)).filter(Boolean).join(', ') || (c.rge_types || []).slice(0, 2).join(', ')}
-                        </p>
+                        {c.lease_type && <p className="text-sm text-gray-600 break-words">{leaseTypeLabel(c.lease_type, true)}</p>}
                       </div>
                       <StatusBadge property={c} />
                     </div>
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-700">
                       <span className="font-bold text-brand-navy text-lg tabular">{c.asking_price > 0 ? formatEur(c.asking_price) : 'Prix à renseigner'}</span>
-                      {(c.region || c.department) && <span className="flex items-center gap-1"><MapPin className="w-4 h-4" aria-hidden="true" />{[c.region, departementLabel(c.department)].filter(Boolean).join(' · ')}</span>}
+                      {c.rent_monthly > 0 && <span className="tabular">{formatMonthly(c.rent_monthly)} HC</span>}
+                      {gross && <span className="font-semibold text-brand-teal-dark tabular" data-testid={`seller-yield-${c.id}`}>{formatYield(gross)} brut</span>}
+                      {where && <span className="flex items-center gap-1"><MapPin className="w-4 h-4" aria-hidden="true" />{where}</span>}
                     </div>
+                    <p>
+                      <button type="button" onClick={() => select(c.id, 'ownership')} className={`${badgeClass(OWNERSHIP_STATUS[proof].tone)} hover:underline`} data-testid={`ownership-badge-${c.id}`}>
+                        {proof === 'verified' ? <BadgeCheck className="w-3.5 h-3.5" aria-hidden="true" /> : <FileCheck2 className="w-3.5 h-3.5" aria-hidden="true" />}
+                        {OWNERSHIP_STATUS[proof].label}
+                      </button>
+                    </p>
                     <BlockingReasons property={c} compact />
                     <ModerationFlags property={c} />
                     <p className="text-sm text-gray-600">{mandateStatusSentence(m?.mandat)}</p>
@@ -217,7 +228,7 @@ const SellerDashboard = ({ user, setUser }) => {
                       </p>
                     )}
                     <div className="flex flex-wrap items-center gap-2 pt-1">
-                      <Button type="button" onClick={() => select(c.id)} className="rounded-xl bg-brand-navy hover:bg-brand-navy-light text-white" data-testid={`open-${c.id}`}>
+                      <Button type="button" onClick={() => select(c.id)} className="rounded-xl bg-brand-teal hover:bg-brand-teal-dark text-white" data-testid={`open-${c.id}`}>
                         Suivre cette annonce
                       </Button>
                       <ListingActions property={c} presentedBuyers={m?.presented_buyers} closings={closings} mandat={m?.mandat} onChanged={load} />
@@ -242,7 +253,7 @@ const SellerDashboard = ({ user, setUser }) => {
                     const count = t.id === 'buyers' ? (requests[selected.id] || []).filter((r) => r.status === 'pending').length
                       : t.id === 'offers' ? (offers[selected.id] || []).filter((o) => o.status === 'pending').length : 0;
                     return (
-                      <TabsTrigger key={t.id} value={t.id} className="rounded-xl data-[state=active]:bg-brand-navy data-[state=active]:text-white text-sm px-3 py-2">
+                      <TabsTrigger key={t.id} value={t.id} className="rounded-xl data-[state=active]:bg-brand-teal data-[state=active]:text-white text-sm px-3 py-2">
                         <t.icon className="w-4 h-4 mr-1.5" aria-hidden="true" />
                         {t.label}
                         {count > 0 && <span className="ml-1.5 inline-flex items-center justify-center min-w-5 h-5 px-1 rounded-full bg-brand-amber text-white text-xs font-bold tabular">{count}</span>}
@@ -257,7 +268,7 @@ const SellerDashboard = ({ user, setUser }) => {
                       <AccessRequests requests={requests[selected.id]} propertyId={selected.id} onChanged={load} />
                     </div>
                     <div className="text-sm text-gray-600">
-                      Les conversations avec les repreneurs sont dans la <Link to="/messages" className="btn-link">messagerie</Link>.
+                      Les conversations avec les acquéreurs sont dans la <Link to="/messages" className="btn-link">messagerie</Link>.
                       {conversations.filter((cv) => cv.property_id === selected.id).length > 0 && ` ${conversations.filter((cv) => cv.property_id === selected.id).length} conversation(s) pour cette annonce.`}
                     </div>
                   </TabsContent>
@@ -269,6 +280,9 @@ const SellerDashboard = ({ user, setUser }) => {
                   </TabsContent>
                   <TabsContent value="dataroom" className="mt-0">
                     <DataroomPanel propertyId={selected.id} />
+                  </TabsContent>
+                  <TabsContent value="ownership" className="mt-0">
+                    <OwnershipProofPanel key={selected.id} property={selected} onChanged={load} />
                   </TabsContent>
                   <TabsContent value="stats" className="mt-0">
                     <StatsPanel property={selected} stats={stats[selected.id]} closings={closings} />

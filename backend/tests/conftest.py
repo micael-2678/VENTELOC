@@ -2,7 +2,7 @@
 Tests de bout en bout de l'API, sans services externes :
 - MongoDB remplacé par mongomock (en mémoire)
 - emails Brevo interceptés (liste `sent_emails`)
-- appels INPI / Stripe non utilisés ou simulés
+- open data (recherche-entreprises) et Stripe simulés
 - limitation de débit désactivée (réactivée ponctuellement par test_fondations.py)
 Lancer : cd backend && pip install -r requirements.txt -r requirements-dev.txt && pytest
 """
@@ -15,14 +15,14 @@ from types import SimpleNamespace
 import pytest
 
 os.environ.update({
-    "MONGO_URL": "mongodb://mock", "DB_NAME": "cessionrge_test", "JWT_SECRET": "x" * 32,
-    "SITE_URL": "https://cessionrge.test", "FRONTEND_URL": "https://cessionrge.test", "SITE_NAME": "CessionBâtiment",
+    "MONGO_URL": "mongodb://mock", "DB_NAME": "venteloc_test", "JWT_SECRET": "x" * 32,
+    "SITE_URL": "https://venteloc.test", "FRONTEND_URL": "https://venteloc.test", "SITE_NAME": "VenteLoc",
     "ADMIN_EMAIL": "admin@test.fr", "ADMIN_PASSWORD": "AdminTest123!",
     "JOBS_ENABLED": "false", "RATE_LIMIT_ENABLED": "false", "ENV": "test",
     # Plafond journalier d'e-mails désactivé (la suite en envoie plusieurs centaines) ; test dédié dans test_integration_vague3.py
     "EMAIL_DAILY_SOFT_LIMIT": "0",
 })
-for var in ("S3_BUCKET", "SENTRY_DSN", "COMMISSION_MIN_HT"):
+for var in ("S3_BUCKET", "SENTRY_DSN", "COMMISSION_MIN_HT", "COMMISSION_RATE_PERCENT"):
     os.environ.pop(var, None)
 
 import motor.motor_asyncio  # noqa: E402
@@ -45,20 +45,17 @@ business_model._send_brevo_email_sync = _fake_send
 
 import server  # noqa: E402
 import opendata  # noqa: E402
-import veille  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-# Open data (recherche-entreprises) simulé : « Paul DUPONT » est le président de tous les SIREN, entreprise active,
-# NAF 43.22A (bâtiment), département 29. Les tests qui ont besoin d'un autre résultat remplacent opendata.fetch_json
-# par monkeypatch (et clear_cache()).
+# Open data (recherche-entreprises) simulé : « Paul DUPONT » est le gérant de toutes les sociétés (SCI active, siège à
+# Lyon). Les tests qui ont besoin d'un autre résultat remplacent opendata.fetch_json par monkeypatch (et clear_cache()).
 _FAKE_ENTREPRISE = {
-    "siren": "", "nom_complet": "SECRET ENERGIE", "nom_raison_sociale": "SECRET ENERGIE", "etat_administratif": "A",
-    "nature_juridique": "5710", "activite_principale": "43.22A", "date_creation": "2010-01-01", "tranche_effectif_salarie": "11",
-    "siege": {"siret": "", "departement": "29", "region": "53", "code_postal": "29200", "libelle_commune": "BREST",
-              "adresse": "1 RUE DE LA RADE 29200 BREST", "activite_principale": "43.22A", "etat_administratif": "A"},
+    "siren": "", "nom_complet": "SCI DES TILLEULS", "nom_raison_sociale": "SCI DES TILLEULS", "etat_administratif": "A",
+    "nature_juridique": "6540", "activite_principale": "68.20B", "date_creation": "2010-01-01", "tranche_effectif_salarie": "NN",
+    "siege": {"siret": "", "departement": "69", "region": "84", "code_postal": "69007", "libelle_commune": "LYON",
+              "adresse": "1 RUE DE LA RADE 69007 LYON", "activite_principale": "68.20B", "etat_administratif": "A"},
     "matching_etablissements": [],
-    "dirigeants": [{"nom": "DUPONT", "prenoms": "Paul", "qualite": "Président", "type_dirigeant": "personne physique"}],
-    "complements": {"est_rge": True},
+    "dirigeants": [{"nom": "DUPONT", "prenoms": "Paul", "qualite": "Gérant", "type_dirigeant": "personne physique"}],
 }
 
 
@@ -76,16 +73,6 @@ def _fake_fetch(url):
 
 opendata.fetch_json = _fake_fetch
 opendata.clear_cache()
-# Veille BODACC : aucun appel réseau pendant les tests (run_scheduled_jobs(force=True) lance veille.monthly_job)
-veille.fetch_json = lambda url: {"total_count": 0, "results": []}
-
-
-async def _fake_verify_rge(siret):
-    # ADEME simulée : jamais de réseau ; tous les SIRET sont « non trouvés » (drapeau rge_absent_ademe, non bloquant)
-    return {"verified": False, "message": "SIRET non trouvé dans la base RGE (simulation)", "siret_recherche": siret}
-
-
-server.verify_rge = _fake_verify_rge
 
 
 @pytest.fixture(scope="session")
@@ -139,16 +126,16 @@ class Api:
         self.c = client
         self._admin_token = None
 
-    # Profil de projet complet (score 90 sans SIREN : 100 avec un SIREN vérifié) — SPEC §4.1, API.md §1
-    BUYER_PROFILE = {"project_type": "reprise-individuelle", "budget_max": 600000, "apport": 150000, "financing": "mixte",
-                     "zones": ["Île-de-France", "Bretagne"], "trades": ["plomberie-chauffage", "pac-clim-cvc"], "horizon": "6-12"}
+    # Profil de projet complet (90 points, 100 avec un téléphone valide) — SPEC §4, API.md §1
+    BUYER_PROFILE = {"project_type": "particulier", "budget_max": 600000, "apport": 150000, "financing": "mixte",
+                     "zones": ["Île-de-France", "Auvergne-Rhône-Alpes"], "property_types": ["appartement", "maison"],
+                     "min_yield": 4, "horizon": "6-12"}
 
     def register(self, email, role, first="Jean", last="Test", verify_email=True, profile=True, **extra):
         """Inscription ; l'adresse e-mail est confirmée automatiquement (lien lu dans l'e-mail) sauf verify_email=False.
-        Un repreneur reçoit par défaut un profil de projet complet et un téléphone (score ≥ 50) ; profile=False pour un
+        Un acquéreur reçoit par défaut un profil de projet complet et un téléphone (score 100) ; profile=False pour un
         compte sans profil (score 0)."""
-        body = {"email": email, "password": "Password1!", "role": role, "first_name": first, "last_name": last,
-                "company_name": f"{last} SAS"}
+        body = {"email": email, "password": "Password1!", "role": role, "first_name": first, "last_name": last}
         if role == "buyer" and profile:
             body["buyer_profile"] = dict(self.BUYER_PROFILE)
             body["phone"] = "06 12 34 56 78"
@@ -162,7 +149,7 @@ class Api:
         return user
 
     def buyer_profile(self, user, score_min=50, **overrides):
-        """Renseigne (ou complète) le profil de projet du repreneur via PUT /auth/profile ; renvoie le compte avec son score"""
+        """Renseigne (ou complète) le profil de projet de l'acquéreur via PUT /auth/profile ; renvoie le compte avec son score"""
         body = {"buyer_profile": {**self.BUYER_PROFILE, **overrides}, "phone": "06 12 34 56 78"}
         r = self.c.put("/api/auth/profile", headers=self.h(user), json=body)
         assert r.status_code == 200, r.text
@@ -226,21 +213,28 @@ class Api:
         return self.c.post(f"/api/seller/mandat/{contract_id}/sign", headers=self.h(user), json={"otp_code": code})
 
     MANDANT_ADDRESS = {"line1": "12 rue de la Mer", "postal_code": "29200", "city": "Brest"}
+    PDF = b"%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF"
 
-    def prepare_mandate(self, seller, property_id, address=None):
-        """Renseigne l'adresse postale du mandant et l'objet de la cession sur l'annonce (préalable au mandat v2).
-        L'adresse est envoyée sous forme d'objet {line1, postal_code, city} (API.md §2) ; repli en chaîne tant que
-        PUT /properties/{id} n'accepte qu'un texte."""
+    def prepare_mandate(self, seller, property_id, address=None, capacity=None):
+        """Renseigne l'adresse postale et la qualité du mandant (et l'objet de la vente s'il manque) : préalables au mandat"""
         address = address or self.MANDANT_ADDRESS
         property = self.c.get(f"/api/properties/{property_id}", headers=self.h(seller)).json()
-        body = {"mandant_address": address}
+        body = {"mandant_address": address,
+                "mandant_capacity": capacity or ("gerant" if property.get("owner_type") in ("sci", "societe") else "proprietaire")}
         if not property.get("sale_object"):
-            body["sale_object"] = "titres"
+            body["sale_object"] = "bien"
         r = self.c.put(f"/api/properties/{property_id}", headers=self.h(seller), json=body)
-        if r.status_code == 422 and isinstance(address, dict):
-            body["mandant_address"] = f"{address['line1']}, {address['postal_code']} {address['city']}"
-            r = self.c.put(f"/api/properties/{property_id}", headers=self.h(seller), json=body)
         assert r.status_code == 200, r.text
+        return r.json()
+
+    def ownership(self, seller, property_id, doc_type="titre-propriete", verify=False):
+        """Dépose le justificatif de propriété (PDF) ; `verify=True` : validé ensuite par l'admin"""
+        r = self.c.post(f"/api/properties/{property_id}/ownership-proof", headers=self.h(seller), data={"doc_type": doc_type},
+                        files={"file": ("titre.pdf", self.PDF, "application/pdf")})
+        assert r.status_code == 200, r.text
+        if verify:
+            r = self.c.put(f"/api/admin/properties/{property_id}/ownership", headers=self.h(self.admin()), json={"status": "verified"})
+            assert r.status_code == 200, r.text
         return r.json()
 
     def mandate(self, seller, property_id, address=None, expect=200):
@@ -251,7 +245,11 @@ class Api:
         return r.json()
 
     def publish(self, seller, property_id):
-        """Adresse et objet renseignés, mandat signé (code par e-mail) puis publication par l'admin si l'annonce est en validation"""
+        """Justificatif déposé, adresse et qualité du mandant renseignées, mandat signé (code par e-mail) : publication
+        automatique ; puis validation par l'admin (relecture close)"""
+        stored = self.c.get(f"/api/properties/{property_id}/ownership-proof", headers=self.h(seller))
+        if stored.status_code != 200 or stored.json()["ownership"]["status"] not in ("pending", "verified"):
+            self.ownership(seller, property_id)
         m = self.mandate(seller, property_id)
         if not m.get("already_signed"):
             r = self.sign_mandate(seller, m["contract_id"])
@@ -260,7 +258,7 @@ class Api:
         assert r.status_code == 200, r.text
 
     def accept_dataroom(self, seller, buyer, property_id):
-        """Demande de dossier du repreneur acceptée par le cédant ; renvoie l'identifiant de la demande"""
+        """Demande de dossier de l'acquéreur acceptée par le vendeur ; renvoie l'identifiant de la demande"""
         r = self.c.post(f"/api/dataroom/{property_id}/request-access", headers=self.h(buyer))
         assert r.status_code == 200, r.text
         reqs = self.c.get(f"/api/dataroom/{property_id}/access-requests", headers=self.h(seller)).json()
@@ -272,7 +270,7 @@ class Api:
         return req["id"]
 
     def sign_nda(self, buyer, property_id):
-        """Génère et signe l'accord de confidentialité (identité vérifiée et demande acceptée requises)"""
+        """Génère et signe l'engagement de confidentialité (identité vérifiée et demande acceptée requises)"""
         nda = self.c.post("/api/contracts/generate-for-signature", headers=self.h(buyer), json={"property_id": property_id, "doc_type": "nda"})
         assert nda.status_code == 200, nda.text
         nda = nda.json()
@@ -283,8 +281,8 @@ class Api:
         return nda["contract_id"]
 
     def grant_dataroom(self, seller, buyer, property_id):
-        """Parcours complet d'accès au dossier : demande → acceptation par le cédant → identité → NDA → origine des fonds
-        (POST /dataroom/{id}/funds-declaration ouvre l'accès automatiquement)."""
+        """Parcours complet d'accès au dossier : demande → acceptation par le vendeur → identité → engagement → origine des
+        fonds (POST /dataroom/{id}/funds-declaration ouvre l'accès automatiquement)."""
         self.accept_dataroom(seller, buyer, property_id)
         self.verify_kyc(buyer)
         contract_id = self.sign_nda(buyer, property_id)
@@ -303,10 +301,21 @@ def api(client):
     return Api(client)
 
 
-def listing(siret="12345678900011", name="SECRET ENERGIE SAS", **extra):
-    base = {"rge_types": ["Pompes à chaleur air/eau"], "rge_validity": "2027-12-31", "ca_n": 900000, "ca_n1": 800000,
-            "ca_n2": 700000, "margin": 20, "ebitda": 150000, "creation_date": "2010-01-01", "staff_count": 10,
-            "legal_structure": "SAS", "pipeline": 100000, "fixed_charges": {}, "debt": 0, "asking_price": 500000,
-            "sale_type": "totale", "sale_object": "titres", "region": "Île-de-France", "siret": siret, "company_name": name}
+_ADDRESS_COUNTER = [0]
+
+
+def listing(siret=None, name=None, **extra):
+    """Annonce complète d'un appartement loué (SPEC §3) ; chaque appel a sa propre adresse (pas de doublon). `siret` :
+    bien détenu par une SCI (dénomination `name`)."""
+    _ADDRESS_COUNTER[0] += 1
+    base = {"property_type": "appartement", "owner_type": "personne-physique", "address": f"{_ADDRESS_COUNTER[0]} rue des Lilas",
+            "postal_code": "69007", "city": "Lyon", "district": "Jean Macé", "surface": 42, "rooms": 2, "floor": 2,
+            "elevator": True, "is_copro": True, "copro_lots": 20, "copro_charges_annual": 900, "copro_procedure": False,
+            "dpe_class": "C", "ges_class": "C", "lease_type": "habitation-vide", "rent_monthly": 800, "charges_monthly": 60,
+            "lease_start": "2023-01-01", "deposit": 800, "indexation": "irl", "tenant_payment_status": "a-jour",
+            "property_tax": 900, "non_recoverable_charges": 400, "asking_price": 200000, "sale_object": "bien",
+            "sale_reason": "arbitrage"}
+    if siret:
+        base.update({"owner_type": "sci", "siret": siret, "company_name": name or "SCI des Tilleuls"})
     base.update(extra)
     return base

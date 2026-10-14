@@ -1,20 +1,20 @@
 import { cn } from '@/lib/utils';
 import { SCORE_CONTACT_MIN, SCORE_AUTO_ACCEPT_MIN } from './profileScore';
 
-// « Profil complet à 80 % » : jauge + ce qu'elle ouvre (contact dès 40 %, acceptation automatique dès 50 %).
+// « Profil complet à 80 % » : jauge + ce qu'elle ouvre (contact dès 40 %, dossier ouvert automatiquement dès 50 %).
 const tone = (score) => (score >= 70 ? 'bg-brand-navy' : score >= SCORE_CONTACT_MIN ? 'bg-brand-blue' : 'bg-brand-amber');
 
 const ScoreMeter = ({ score, missing = [], className = '', compact = false }) => {
   const s = Math.max(0, Math.min(100, Math.round(Number(score) || 0)));
-  const next = missing.filter((m) => m.key !== 'siren_verified');
+  const next = Array.isArray(missing) ? missing : [];
   return (
     <div className={cn('rounded-2xl border border-brand-line bg-white p-4 min-w-0', className)} data-testid="profile-score">
       <div className="flex items-baseline justify-between gap-3">
         <p className="font-display font-bold text-brand-navy">
-          {s > 0 ? <>Profil complet à <span className="tabular" data-testid="profile-score-value">{s} %</span></> : <span data-testid="profile-score-value">Profil de projet à compléter</span>}
+          {s > 0 ? <>Profil complet à <span className="tabular" data-testid="profile-score-value">{s} %</span></> : <span data-testid="profile-score-value">Profil d'investisseur à compléter</span>}
         </p>
-        <p className={cn('text-xs font-semibold shrink-0', s >= SCORE_CONTACT_MIN ? 'text-brand-green-dark' : 'text-brand-amber')}>
-          {s >= SCORE_AUTO_ACCEPT_MIN ? 'Dossiers acceptés automatiquement' : s >= SCORE_CONTACT_MIN ? 'Contact possible' : `Contact dès ${SCORE_CONTACT_MIN} %`}
+        <p className={cn('text-xs font-semibold shrink-0', s >= SCORE_CONTACT_MIN ? 'text-brand-teal-dark' : 'text-brand-amber')}>
+          {s >= SCORE_AUTO_ACCEPT_MIN ? 'Dossiers ouverts automatiquement' : s >= SCORE_CONTACT_MIN ? 'Contact possible' : `Contact dès ${SCORE_CONTACT_MIN} %`}
         </p>
       </div>
       <div role="meter" aria-label="Profil complété" aria-valuemin={0} aria-valuemax={100} aria-valuenow={s}
@@ -25,11 +25,10 @@ const ScoreMeter = ({ score, missing = [], className = '', compact = false }) =>
       </div>
       {!compact && (
         <p className="text-xs text-gray-600 mt-2 leading-relaxed">
-          À partir de {SCORE_CONTACT_MIN} % vous pouvez contacter un cédant ; à partir de {SCORE_AUTO_ACCEPT_MIN} %, les cédants qui l'ont choisi acceptent votre demande de dossier automatiquement.
+          À partir de {SCORE_CONTACT_MIN} % vous pouvez contacter un vendeur ; à partir de {SCORE_AUTO_ACCEPT_MIN} %, les vendeurs qui l'ont choisi vous ouvrent le dossier du bien automatiquement.
           {next.length > 0 && (
             <> Pour progresser : {next.slice(0, 3).map((m) => `${m.label.toLowerCase()} (+${m.points})`).join(', ')}.</>
           )}
-          {missing.some((m) => m.key === 'siren_verified') && <> Un SIREN vérifié sur l'open data ajoute 10 % après l'enregistrement.</>}
         </p>
       )}
     </div>

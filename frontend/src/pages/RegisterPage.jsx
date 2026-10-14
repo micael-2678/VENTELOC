@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
-import { Loader2, Lock, Mail, MailCheck, Phone, User, Megaphone, Building2 } from 'lucide-react';
+import { Loader2, Lock, Mail, MailCheck, Phone, User, Megaphone } from 'lucide-react';
 import { toast } from 'sonner';
 import { axiosInstance } from '@/App';
 import { useSeo, NOINDEX } from '@/lib/seo';
@@ -10,32 +10,29 @@ import { homePathFor } from '@/lib/navigation';
 import { trackEvent } from '@/lib/analytics';
 import AuthShell from '@/components/account/AuthShell';
 import ChoiceGroup from '@/components/account/ChoiceGroup';
-import SiretField from '@/components/account/SiretField';
-import CompanyPrefillCard from '@/components/account/CompanyPrefillCard';
 import BuyerProfileFields from '@/components/account/BuyerProfileFields';
 import ScoreMeter from '@/components/account/ScoreMeter';
 import { apiErrorMessage } from '@/components/account/errors';
-import { useCompanyLookup, cleanSiret } from '@/components/account/siret';
 import { computeProfileScore, buyerProfilePayload, EMPTY_BUYER_PROFILE } from '@/components/account/profileScore';
 
-// Inscription (SPEC §4.1, API.md §1) : ?role=seller|buyer présélectionne le profil.
-// Cédant : prénom, nom, e-mail, mot de passe, téléphone, SIRET facultatif (préremplissage open data, « vérification
-// différée » si indisponible). Repreneur : un seul écran avec le profil de projet et le score de complétude.
+// Inscription (SPEC §4, API.md §1) : ?role=seller|buyer présélectionne le profil.
+// Vendeur : prénom, nom, e-mail, mot de passe, téléphone (le SIRET n'est demandé que dans l'annonce, si le bien
+// appartient à une société). Acquéreur : un seul écran avec le profil d'investisseur et le score de complétude.
 // Après inscription : « Vérifiez votre boîte mail » (double opt-in), puis accès à l'espace.
 
 const ACQUISITION_SOURCES = [
   { value: 'google', label: 'Recherche Google' },
   { value: 'linkedin', label: 'LinkedIn' },
   { value: 'bouche_a_oreille', label: 'Bouche-à-oreille' },
-  { value: 'federation_pro', label: 'Fédération ou syndicat professionnel' },
-  { value: 'comptable_avocat', label: 'Expert-comptable ou avocat' },
+  { value: 'notaire_conseil', label: 'Notaire, conseiller en gestion de patrimoine' },
+  { value: 'forum_investisseurs', label: 'Forum ou réseau d\'investisseurs' },
   { value: 'presse', label: 'Presse' },
   { value: 'autre', label: 'Autre' },
 ];
 
 const ROLE_OPTIONS = [
-  { value: 'seller', label: 'Je vends mon entreprise', hint: 'Annonce anonyme, rien à payer avant la vente, mandat simple résiliable à tout moment.' },
-  { value: 'buyer', label: 'Je cherche une entreprise à reprendre', hint: 'Contact gratuit avec votre projet ; identité vérifiée seulement avant l\'accord de confidentialité.' },
+  { value: 'seller', label: 'Je vends un bien loué', hint: 'Annonce sans adresse exacte, rien à payer avant l\'acte chez le notaire, mandat simple résiliable à tout moment.' },
+  { value: 'buyer', label: 'Je cherche un investissement locatif', hint: 'Contact gratuit ; identité vérifiée seulement avant l\'engagement de confidentialité.' },
 ];
 
 // France (0X XX XX XX XX ou +33) ; Belgique, Suisse et Luxembourg au format international (+32, +41, +352)
@@ -88,20 +85,17 @@ const RegisterPage = ({ setUser }) => {
     email: searchParams.get('email') || '',
     password: '',
     phone: '',
-    company_name: estimate?.property?.name || '',
-    siret: cleanSiret(estimate?.siret || ''),
     source: '',
   });
   const [profile, setProfile] = useState(EMPTY_BUYER_PROFILE);
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [created, setCreated] = useState(null); // {user} après inscription
-  const lookup = useCompanyLookup();
   const startedRef = useRef(false);
 
   useSeo(`Créer un compte – ${BRAND.name}`, OFFER.metaSignup, { robots: NOINDEX });
 
-  // Déjà connecté en arrivant (lien « Vendre mon entreprise » suivi depuis un compte repreneur, par exemple) : retour à
+  // Déjà connecté en arrivant (lien « Déposer mon annonce » suivi depuis un compte acquéreur, par exemple) : retour à
   // son espace, sans formulaire qui remplacerait la session en cours par un nouveau compte
   useEffect(() => {
     const signedIn = storedSessionUser();
@@ -127,12 +121,6 @@ const RegisterPage = ({ setUser }) => {
     if (errors[key]) setErrors((e) => ({ ...e, [key]: undefined }));
   };
 
-  // Préremplissage du nom de l'entreprise depuis l'open data (le cédant garde la main)
-  useEffect(() => {
-    const name = lookup.result?.property?.found ? lookup.result.property.name : '';
-    if (name) setForm((f) => (f.company_name ? f : { ...f, company_name: name }));
-  }, [lookup.result]);
-
   const score = useMemo(() => computeProfileScore(profile, form.phone), [profile, form.phone]);
 
   const validate = () => {
@@ -143,7 +131,6 @@ const RegisterPage = ({ setUser }) => {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(form.email.trim())) next.email = 'Indiquez une adresse e-mail valide.';
     if (form.password.length < 8) next.password = 'Le mot de passe doit contenir au moins 8 caractères.';
     if (!PHONE_RE.test(form.phone.trim())) next.phone = 'Indiquez un numéro de téléphone (10 chiffres en France, ou +32, +41, +352).';
-    if (role === 'seller' && form.siret && cleanSiret(form.siret).length !== 14) next.siret = 'Un SIRET compte 14 chiffres (ou laissez le champ vide).';
     if (role === 'buyer') {
       if (!profile.project_type) next.project_type = 'Indiquez le type de votre projet.';
       if (!(Number(profile.budget_max) > 0)) next.budget_max = 'Indiquez un budget maximum.';
@@ -168,10 +155,7 @@ const RegisterPage = ({ setUser }) => {
       phone: form.phone.trim(),
     };
     if (form.source) payload.source = form.source;
-    if (role === 'seller') {
-      if (form.company_name.trim()) payload.company_name = form.company_name.trim();
-      if (form.siret) payload.siret = cleanSiret(form.siret);
-    } else {
+    if (role === 'buyer') {
       payload.buyer_profile = buyerProfilePayload(profile);
       if (payload.buyer_profile.company_name) payload.company_name = payload.buyer_profile.company_name;
     }
@@ -208,11 +192,11 @@ const RegisterPage = ({ setUser }) => {
           {role === 'buyer' && <ScoreMeter score={finalScore} missing={score.missing} className="text-left" />}
           {role === 'seller' && estimate && (
             <p className="text-sm text-gray-700 rounded-xl bg-brand-surface border border-brand-line p-3">
-              Votre estimation est conservée : elle préremplit votre annonce anonyme.
+              Votre estimation est conservée : elle préremplit votre annonce.
             </p>
           )}
           <button type="button" onClick={() => navigate(next)} className="btn-primary w-full py-3.5 text-base" data-testid="register-continue">
-            {role === 'seller' && estimate && !redirect ? 'Déposer mon annonce anonyme' : 'Accéder à mon espace'}
+            {role === 'seller' && estimate && !redirect ? 'Déposer mon annonce' : 'Accéder à mon espace'}
           </button>
         </div>
       </AuthShell>
@@ -220,10 +204,10 @@ const RegisterPage = ({ setUser }) => {
   }
 
   const subtitle = role === 'seller'
-    ? 'Votre annonce reste anonyme : votre nom n\'apparaît jamais sans accord de confidentialité signé.'
+    ? 'L\'adresse exacte du bien et votre nom ne sont révélés qu\'aux acquéreurs vérifiés qui ont signé un engagement de confidentialité.'
     : role === 'buyer'
-      ? 'Un seul écran : vos coordonnées et votre projet. C\'est ce projet que les cédants verront, sans votre nom.'
-      : `Vendez ou reprenez une entreprise du bâtiment sur ${BRAND.name}.`;
+      ? 'Un seul écran : vos coordonnées et votre projet d\'investissement. C\'est ce projet que les vendeurs verront, sans votre nom.'
+      : `Vendez votre bien loué ou investissez dans un bien déjà loué sur ${BRAND.name}.`;
 
   return (
     <AuthShell
@@ -278,7 +262,7 @@ const RegisterPage = ({ setUser }) => {
                 </Field>
               </div>
               <div className="grid sm:grid-cols-2 gap-4">
-                <Field id="phone" label="Téléphone" icon={Phone} required hint={role === 'buyer' ? 'Jamais affiché avant l\'accord de confidentialité ; compte pour 10 % du profil.' : 'Jamais affiché sur l\'annonce.'}>
+                <Field id="phone" label="Téléphone" icon={Phone} required hint={role === 'buyer' ? 'Jamais affiché avant l\'engagement de confidentialité ; compte pour 10 % du profil.' : 'Jamais affiché sur l\'annonce.'}>
                   <input id="phone" type="tel" data-testid="register-phone-input" autoComplete="tel" placeholder="06 12 34 56 78" value={form.phone} onChange={(e) => setField('phone', e.target.value)} required className={inputClass} aria-invalid={!!errors.phone} />
                   {errors.phone && <p role="alert" className="text-sm text-red-700 mt-1">{errors.phone}</p>}
                 </Field>
@@ -292,25 +276,15 @@ const RegisterPage = ({ setUser }) => {
             </section>
 
             {role === 'seller' && (
-              <section aria-labelledby="register-property-title" className="space-y-4">
-                <h2 id="register-property-title" className="font-display text-lg font-bold text-brand-navy">Votre entreprise</h2>
-                <SiretField
-                  value={form.siret}
-                  onChange={(v) => setField('siret', v)}
-                  lookup={lookup}
-                  hint="Facultatif à l'inscription : il charge les données publiques et vos qualifications RGE. Il devient obligatoire à la publication de l'annonce."
-                  testId="register-siret-input"
-                />
-                {errors.siret && <p role="alert" className="text-sm text-red-700">{errors.siret}</p>}
-                {lookup.result && (lookup.status === 'found' || lookup.status === 'unavailable' || lookup.status === 'not_found') && (
-                  <CompanyPrefillCard result={lookup.result} />
-                )}
-                <Field id="company_name" label="Nom de l'entreprise" icon={Building2} hint="Jamais publié : l'annonce est anonyme.">
-                  <input id="company_name" data-testid="register-property-input" autoComplete="organization" value={form.company_name} onChange={(e) => setField('company_name', e.target.value)} className={inputClass} />
-                </Field>
+              <section aria-labelledby="register-seller-title" className="space-y-3" data-testid="register-seller-info">
+                <h2 id="register-seller-title" className="font-display text-lg font-bold text-brand-navy">Votre bien</h2>
+                <p className="text-sm text-gray-700 leading-relaxed">
+                  Vous décrirez le bien et sa location juste après l'inscription. Si le bien appartient à une SCI ou à une société,
+                  sa dénomination et son SIRET vous seront demandés dans l'annonce ; ils restent confidentiels.
+                </p>
                 {estimate && (estimate.low || estimate.high) && (
                   <p className="text-sm text-gray-700 rounded-xl bg-brand-surface border border-brand-line p-3">
-                    Votre estimation (fourchette de {Number(estimate.low).toLocaleString('fr-FR')} € à {Number(estimate.high).toLocaleString('fr-FR')} €) sera reprise dans votre annonce.
+                    Votre estimation (de {Number(estimate.low).toLocaleString('fr-FR')} € à {Number(estimate.high).toLocaleString('fr-FR')} €) sera reprise dans votre annonce.
                   </p>
                 )}
                 <p className="text-sm text-gray-600 leading-relaxed" data-testid="register-seller-offer">{OFFER.sellerRegisterNote}</p>
@@ -320,13 +294,12 @@ const RegisterPage = ({ setUser }) => {
             {role === 'buyer' && (
               <section aria-labelledby="register-project-title" className="space-y-5">
                 <div>
-                  <h2 id="register-project-title" className="font-display text-lg font-bold text-brand-navy">Votre projet de reprise</h2>
+                  <h2 id="register-project-title" className="font-display text-lg font-bold text-brand-navy">Votre projet d'investissement</h2>
                   <p className="text-sm text-gray-600 mt-1 leading-relaxed">
-                    Les cédants voient une carte repreneur pseudonymisée : projet, budget, financement, zones, horizon. Plus elle est complète, plus vite ils répondent.
+                    Les vendeurs voient une carte acquéreur sans votre nom : type d'achat, budget, financement, biens et zones recherchés, rendement visé, horizon. Plus elle est complète, plus vite ils répondent.
                   </p>
                 </div>
                 <BuyerProfileFields value={profile} onChange={(p) => { markStarted(); setProfile(p); setErrors((e) => ({ ...e, project_type: undefined, budget_max: undefined })); }} errors={errors} />
-                {errors.budget_max && <p role="alert" className="text-sm text-red-700">{errors.budget_max}</p>}
                 <ScoreMeter score={score.score} missing={score.missing} />
               </section>
             )}

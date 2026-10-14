@@ -1,26 +1,28 @@
 """
-Étape de vente, facture et relances (SPEC §4.5), module nouveau.
+Étape de vente, facture et relances (docs/venteloc/SPEC.md §7.4, API.md §7).
 
-- Un `closing` est créé à l'acceptation d'une offre (`create_closing_for_offer`, appelée par server.py, ou
+- Un `closing` est créé à l'acceptation d'une offre d'achat (`create_closing_for_offer`, appelée par server.py, ou
   `POST /closing/from-offer/{offer_id}` pour une offre déjà acceptée) : {property_id, buyer_id, seller_id, offer_id,
-  sale_object, expected_date, redacteur, status} ; ou sans offre acceptée, par le cédant, pour un repreneur présenté
-  (`POST /closing/direct {property_id, buyer_id}`, SPEC §6 de l'API : `buyer_id` dans `presented_buyers`). Les deux parties reçoivent une checklist et peuvent renseigner le
-  rédacteur d'acte (`PUT /closing/{id}/redacteur`).
+  sale_object (bien | parts), expected_date, avant_contrat_on, redacteur (notaire), status} ; ou sans offre acceptée, par
+  le vendeur, pour un acquéreur présenté (`POST /closing/direct {property_id, buyer_id}` : `buyer_id` dans
+  `presented_buyers`). Les deux parties reçoivent une checklist, renseignent le notaire en charge de la vente
+  (`PUT /closing/{id}/redacteur`) et la date de l'avant-contrat (`PUT /closing/{id}/avant-contrat`).
 - Relances J+30 / J+60 / J+90 (tâche quotidienne) avec trois réponses en un clic par lien signé
   (`GET /closing/{id}/status/{token}?answer=en_cours|signe|abandonne`).
-- Déclaration de la vente par l'une des parties (`POST /closing/{id}/declare`), confirmation par l'autre
-  (`POST /closing/{id}/confirm`) ou contestation (`POST /closing/{id}/dispute`) ; confirmation automatique après
-  7 jours sans contestation (tâche quotidienne) pour une déclaration du cédant ou de l'admin seulement ; une déclaration
-  du repreneur attend l'accord du cédant ou l'arbitrage admin (ligne « À faire » à l'échéance).
+- Déclaration de la vente = acte authentique signé, par l'une des parties (`POST /closing/{id}/declare`), confirmation par
+  l'autre (`POST /closing/{id}/confirm`) ou contestation (`POST /closing/{id}/dispute`) ; confirmation automatique après
+  7 jours sans contestation (tâche quotidienne) pour une déclaration du vendeur ou de l'admin seulement ; une déclaration
+  de l'acquéreur attend l'accord du vendeur ou l'arbitrage admin (ligne « À faire » à l'échéance).
 - Mode test (MODE-TEST-ET-APP.md §B.2.6) : étape de vente rattachée à une donnée de test → `is_test`, facture
   TEST-FAC-AAAA-NNNNN (compteur `invoice_test`, avoir TEST-AV-… sur `credit_note_test`), mention « DOCUMENT DE TEST —
   SANS VALEUR JURIDIQUE » sur la facture, l'avoir, l'ordre de paiement et la mise en demeure ; le compteur réel n'avance pas.
-- À la confirmation : facture FAC-AAAA-NNNNN (compteur continu `next_sequence("invoice")`), débiteur = cédant,
-  montant par `business_model.calculate_commission` (seule source du barème), échéance +30 j (titres) ou +180 j (fonds),
-  mentions L441-9, PDF (`GET /invoices/{id}/pdf`), e-mail au cédant, ordre de paiement PDF au rédacteur d'acte
-  (`GET /closing/{id}/payment-order.pdf`, envoyé par e-mail s'il a une adresse).
-- Relances de facture J+15/30/45 (titres) ou J+90/120/150 (fonds) ; après la troisième, et une fois l'échéance passée,
-  modèle de mise en demeure (`GET /admin/invoices/{id}/mise-en-demeure.pdf`) et ligne « À faire » (db.todos).
+- À la confirmation : facture FAC-AAAA-NNNNN (compteur continu `next_sequence("invoice")`), débiteur = vendeur,
+  « Honoraires de négociation — mandat n° … — vente de {titre} », montant par `business_model.calculate_commission`
+  (seule source du barème), échéance acte + 30 jours (et au moins facture + 15 jours), mentions L441-9, PDF
+  (`GET /invoices/{id}/pdf`), e-mail au vendeur, ordre de paiement PDF au notaire (`GET /closing/{id}/payment-order.pdf`,
+  envoyé par e-mail s'il a une adresse).
+- Relances de facture J+15/30/45 ; après la troisième, et une fois l'échéance passée, modèle de mise en demeure
+  (`GET /admin/invoices/{id}/mise-en-demeure.pdf`) et ligne « À faire » (db.todos).
 - Admin : GET /admin/invoices, PUT /admin/invoices/{id}/paid, PUT /admin/invoices/{id}/cancel, GET /admin/closings,
   PUT /admin/closings/{id}/resolve, GET /admin/todos, PUT /admin/todos/{id}/done.
 
@@ -75,44 +77,37 @@ CLOSING_STATUS_LABELS = {
     STATUS_ABANDONED: "Vente abandonnée",
 }
 
-REDACTEUR_TYPES = ("notaire", "avocat", "expert-comptable", "autre")
-REDACTEUR_LABELS = {"notaire": "Notaire", "avocat": "Avocat", "expert-comptable": "Expert-comptable", "autre": "Autre rédacteur"}
+REDACTEUR_TYPES = ("notaire", "autre")
+REDACTEUR_LABELS = {"notaire": "Notaire en charge de la vente", "autre": "Autre notaire"}
 
-SALE_OBJECTS = ("titres", "fonds")
-SALE_OBJECT_LABELS = {"titres": "cession de titres", "fonds": "cession de fonds de commerce"}
+SALE_OBJECTS = ("bien", "parts")
+SALE_OBJECT_LABELS = {"bien": "vente du bien", "parts": "cession des parts de la société propriétaire"}
 
 FOLLOWUP_DAYS = (30, 60, 90)                      # relances après l'acceptation de l'offre
 FOLLOWUP_ANSWERS = {"en_cours": "Toujours en cours", "signe": "Acte signé", "abandonne": "Vente abandonnée"}
 CONFIRMATION_DAYS = 7                             # confirmation automatique de la déclaration
 
-# Échéance de la facture, en jours à compter de la signature de l'acte (mandat, art. 6.3) ; une facture émise
-# tardivement laisse toujours au moins INVOICE_MIN_DELAY_DAYS jours après sa date. Relances : en jours après la date de
-# facture, rapprochées de l'échéance quand celle-ci est proche (voir _reminder_thresholds). La mise en demeure est
-# proposée après la troisième relance, une fois l'échéance passée.
+# Échéance de la facture : acte authentique + 30 jours, et au moins INVOICE_MIN_DELAY_DAYS jours après la date de facture,
+# quel que soit l'objet de la vente (SPEC §7.4) ; le notaire règle les honoraires sur le prix (ordre irrévocable du mandat).
+# Relances : en jours après la date de facture, rapprochées de l'échéance quand celle-ci est proche (_reminder_thresholds).
+# La mise en demeure est proposée après la troisième relance, une fois l'échéance passée.
 INVOICE_MIN_DELAY_DAYS = 15
-INVOICE_TERMS = {
-    "titres": {"due_days": 30, "reminders": (15, 30, 45),
-               "text": "Paiement par virement sous 30 jours à compter de la signature de l'acte (mandat, art. 6.3), et au plus tôt "
-                       f"{INVOICE_MIN_DELAY_DAYS} jours après la date de facture "
-                       "(cession de titres : règlement par le rédacteur de l'acte sur le prix, ou par le cédant)."},
-    "fonds": {"due_days": 180, "reminders": (90, 120, 150),
-              "text": "Payable par le séquestre à la libération du prix de cession, avant toute distribution au cédant, "
-                      "et au plus tard 180 jours après la signature de l'acte (mandat, art. 6.3), sans être exigible moins de "
-                      f"{INVOICE_MIN_DELAY_DAYS} jours après la date de facture (cession de fonds de commerce)."},
-}
+INVOICE_DUE_DAYS = 30
+INVOICE_REMINDER_DAYS = (15, 30, 45)
+INVOICE_PAYMENT_TEXT = ("Payable par virement au plus tard 30 jours après la signature de l'acte authentique (mandat, art. 9), et au "
+                        f"plus tôt {INVOICE_MIN_DELAY_DAYS} jours après la date de facture : réglée par le notaire en charge de la "
+                        "vente sur le prix, en exécution de l'ordre irrévocable donné par le vendeur, ou à défaut par le vendeur.")
 
 
-def invoice_due_on(signed_on: date, issued_on: date, sale_object: str) -> date:
-    """Échéance contractuelle : acte + 30 j (titres) ou + 180 j (fonds), jamais moins de 15 j après la date de facture"""
-    terms = INVOICE_TERMS.get(sale_object, INVOICE_TERMS["titres"])
-    return max(signed_on + timedelta(days=terms["due_days"]), issued_on + timedelta(days=INVOICE_MIN_DELAY_DAYS))
+def invoice_due_on(signed_on: date, issued_on: date, sale_object: Optional[str] = None) -> date:
+    """Échéance contractuelle : acte authentique + 30 jours, jamais moins de 15 jours après la date de facture"""
+    return max(signed_on + timedelta(days=INVOICE_DUE_DAYS), issued_on + timedelta(days=INVOICE_MIN_DELAY_DAYS))
 
 
 def _reminder_thresholds(invoice: dict, issued: date, due: date) -> List[int]:
     """Jours après la facture : barème habituel, ramené à échéance, +15 j, +30 j quand l'échéance est plus proche"""
-    terms = INVOICE_TERMS.get(invoice.get("sale_object"), INVOICE_TERMS["titres"])
     to_due = (due - issued).days
-    return [min(offset, to_due + 15 * k) for k, offset in enumerate(terms["reminders"])]
+    return [min(offset, to_due + 15 * k) for k, offset in enumerate(INVOICE_REMINDER_DAYS)]
 REMINDER_LABELS = ("Premier rappel", "Deuxième rappel", "Dernier rappel avant mise en demeure")
 
 INVOICE_ISSUED = "issued"
@@ -128,7 +123,7 @@ TODO_CLOSING_DISPUTED = "closing_disputed"
 TODO_INVOICE_ADDRESS = "invoice_debtor_address"
 TODO_PAYMENT_ORDER = "payment_order_to_confirm"
 TODO_DECLARATION_UNCONFIRMED = "closing_declaration_unconfirmed"
-# Seule une déclaration du cédant (débiteur des honoraires) ou de l'admin est confirmée automatiquement après 7 jours
+# Seule une déclaration du vendeur (débiteur des honoraires) ou de l'admin est confirmée automatiquement après 7 jours
 AUTO_CONFIRM_DECLARANTS = ("seller", "admin")
 
 LATE_PENALTY_TEXT = ("Pénalités de retard : trois fois le taux d'intérêt légal en vigueur, exigibles de plein droit le jour "
@@ -141,18 +136,18 @@ LATE_PENALTY_TEXT = ("Pénalités de retard : trois fois le taux d'intérêt lé
 # Gabarits d'e-mail (ajoutés sans modifier les entrées existantes de business_model)
 
 EMAIL_TEMPLATES.setdefault("closing_checklist", {
-    "subject": "Offre acceptée : les prochaines étapes jusqu'à l'acte",
+    "subject": "Offre acceptée : les prochaines étapes jusqu'à l'acte authentique",
     "html": """
-    <h2>L'offre est acceptée, place à la signature</h2>
+    <h2>L'offre d'achat est acceptée : direction le notaire</h2>
     <p>Bonjour {name},</p>
-    <p>L'offre de <strong>{amount}</strong> sur l'entreprise {property_label} est acceptée. Voici les étapes qui mènent à l'acte de cession :</p>
+    <p>L'offre d'achat de <strong>{amount}</strong> pour le bien {property_label} est acceptée. Elle n'emporte pas encore vente : voici les étapes qui mènent à l'acte authentique.</p>
     <ol>
-      <li><strong>Financement</strong> : accord de prêt ou justificatif des fonds du repreneur.</li>
-      <li><strong>Audit</strong> : vérification des comptes, des contrats, des qualifications et de l'assurance décennale.</li>
-      <li><strong>Rédacteur de l'acte</strong> : notaire, avocat ou expert-comptable choisi par les parties. Renseignez ses coordonnées depuis votre espace : nous lui transmettrons l'ordre de paiement des honoraires prévu au mandat.</li>
-      <li><strong>Acte de cession</strong> : à la signature, déclarez la vente depuis votre espace (date, prix, objet) ; l'autre partie confirme et la facture d'honoraires est émise au cédant.</li>
+      <li><strong>Notaire</strong> : choisissez le notaire en charge de la vente (chaque partie peut avoir le sien) et renseignez ses coordonnées depuis votre espace : nous lui transmettrons l'ordre de paiement des honoraires prévu au mandat.</li>
+      <li><strong>Avant-contrat</strong> : promesse ou compromis de vente signé chez le notaire, avec les conditions suspensives (prêt…), le transfert du bail et du dépôt de garantie. Indiquez sa date dans votre espace.</li>
+      <li><strong>Financement</strong> : demande et accord de prêt de l'acquéreur dans les délais de l'avant-contrat.</li>
+      <li><strong>Acte authentique</strong> : à la signature chez le notaire, déclarez la vente depuis votre espace (date, prix, objet) ; l'autre partie confirme et la facture d'honoraires est émise au vendeur.</li>
     </ol>
-    <p>{site_name} ne négocie pas et ne rédige pas les actes : faites-vous accompagner par vos conseils. Nous vous demanderons des nouvelles tous les 30 jours, avec une réponse en un clic.</p>
+    <p>{site_name} ne négocie pas et ne rédige pas les actes : le notaire et vos conseils vous accompagnent. Nous vous demanderons des nouvelles tous les 30 jours, avec une réponse en un clic.</p>
     <p>Cordialement,<br>L'équipe {site_name}</p>
     """,
 })
@@ -162,24 +157,35 @@ EMAIL_TEMPLATES.setdefault("closing_followup", {
     "html": """
     <h2>Où en est la vente ?</h2>
     <p>Bonjour {name},</p>
-    <p>L'offre sur l'entreprise {property_label} a été acceptée il y a {days} jours. Où en êtes-vous ? Un seul clic suffit :</p>
+    <p>L'offre d'achat pour le bien {property_label} a été acceptée il y a {days} jours. Où en êtes-vous ? Un seul clic suffit :</p>
     <p>
       <a href="{link_en_cours}">Toujours en cours</a><br>
-      <a href="{link_signe}">L'acte est signé</a><br>
+      <a href="{link_signe}">L'acte authentique est signé</a><br>
       <a href="{link_abandonne}">La vente est abandonnée</a>
     </p>
-    <p>Si l'acte est signé, pensez à déclarer la vente depuis votre espace (date, prix) : l'autre partie la confirme et la facture d'honoraires est établie.</p>
+    <p>Si l'acte authentique est signé, pensez à déclarer la vente depuis votre espace (date, prix) : l'autre partie la confirme et la facture d'honoraires est établie.</p>
     <p>Merci,<br>L'équipe {site_name}</p>
     """,
 })
 
 EMAIL_TEMPLATES.setdefault("closing_redacteur_set", {
-    "subject": "Rédacteur de l'acte renseigné pour {property_label}",
+    "subject": "Notaire en charge de la vente renseigné pour {property_label}",
     "html": """
-    <h2>Rédacteur de l'acte</h2>
+    <h2>Notaire en charge de la vente</h2>
     <p>Bonjour {name},</p>
-    <p>{by_label} a renseigné le rédacteur de l'acte de cession de {property_label} : <strong>{redacteur}</strong>.</p>
-    <p>Vous pouvez corriger ces coordonnées depuis votre espace. À la confirmation de la vente, l'ordre de paiement des honoraires est adressé au rédacteur renseigné ou confirmé par le cédant.</p>
+    <p>{by_label} a renseigné le notaire en charge de la vente de {property_label} : <strong>{redacteur}</strong>.</p>
+    <p>Vous pouvez corriger ces coordonnées depuis votre espace. À la confirmation de la vente, l'ordre de paiement des honoraires est adressé au notaire renseigné ou confirmé par le vendeur.</p>
+    <p>Cordialement,<br>L'équipe {site_name}</p>
+    """,
+})
+
+EMAIL_TEMPLATES.setdefault("closing_avant_contrat", {
+    "subject": "Avant-contrat signé pour {property_label}",
+    "html": """
+    <h2>Avant-contrat enregistré</h2>
+    <p>Bonjour {name},</p>
+    <p>{by_label} indique que l'avant-contrat (promesse ou compromis de vente) de {property_label} a été signé le <strong>{avant_contrat_on}</strong>.</p>
+    <p>Prochaine étape : la signature de l'acte authentique chez le notaire, à déclarer ensuite depuis votre espace.</p>
     <p>Cordialement,<br>L'équipe {site_name}</p>
     """,
 })
@@ -189,21 +195,21 @@ EMAIL_TEMPLATES.setdefault("closing_declared_to_confirm", {
     "html": """
     <h2>Une vente a été déclarée</h2>
     <p>Bonjour {name},</p>
-    <p>{by_label} a déclaré la vente de l'entreprise {property_label} : acte signé le <strong>{signed_on}</strong>, prix de <strong>{final_price}</strong>, {sale_object}.</p>
+    <p>{by_label} a déclaré la vente du bien {property_label} : acte authentique signé le <strong>{signed_on}</strong>, prix de <strong>{final_price}</strong>, {sale_object}.</p>
     <p>Merci de confirmer ou de contester cette déclaration depuis votre espace. Sans réponse de votre part, elle sera considérée comme confirmée le {deadline}.</p>
-    <p>À la confirmation, la facture d'honoraires de {site_name} est émise au cédant conformément au mandat.</p>
+    <p>À la confirmation, la facture d'honoraires de {site_name} est émise au vendeur conformément au mandat.</p>
     <p>Cordialement,<br>L'équipe {site_name}</p>
     """,
 })
 
 EMAIL_TEMPLATES.setdefault("closing_declared_by_buyer", {
-    "subject": "Vente déclarée par le repreneur : merci de confirmer",
+    "subject": "Vente déclarée par l'acquéreur : merci de confirmer",
     "html": """
     <h2>Une vente a été déclarée</h2>
     <p>Bonjour {name},</p>
-    <p>{by_label} a déclaré la vente de l'entreprise {property_label} : acte signé le <strong>{signed_on}</strong>, prix de <strong>{final_price}</strong>, {sale_object}.</p>
+    <p>{by_label} a déclaré la vente du bien {property_label} : acte authentique signé le <strong>{signed_on}</strong>, prix de <strong>{final_price}</strong>, {sale_object}.</p>
     <p>Merci de confirmer ou de contester cette déclaration depuis votre espace, de préférence avant le {deadline}. Rien n'est facturé ni retiré tant que vous ne l'avez pas confirmée : sans réponse, notre équipe reprendra contact avec vous.</p>
-    <p>À la confirmation, la facture d'honoraires de {site_name} est émise au cédant conformément au mandat.</p>
+    <p>À la confirmation, la facture d'honoraires de {site_name} est émise au vendeur conformément au mandat.</p>
     <p>Cordialement,<br>L'équipe {site_name}</p>
     """,
 })
@@ -212,8 +218,8 @@ EMAIL_TEMPLATES.setdefault("closing_declared_admin", {
     "subject": "Vente déclarée : {property_label}",
     "html": """
     <h2>Vente déclarée</h2>
-    <p>{by_label} a déclaré la vente de {property_label} (annonce {property_id}) : acte signé le {signed_on}, prix {final_price}, {sale_object}.</p>
-    <p>Confirmation attendue de l'autre partie avant le {deadline} (automatique ensuite pour une déclaration du cédant ; une déclaration du repreneur attend l'accord du cédant ou votre arbitrage). Honoraires estimés : {commission_ht} HT.</p>
+    <p>{by_label} a déclaré la vente de {property_label} (annonce {property_id}) : acte authentique signé le {signed_on}, prix {final_price}, {sale_object}.</p>
+    <p>Confirmation attendue de l'autre partie avant le {deadline} (automatique ensuite pour une déclaration du vendeur ; une déclaration de l'acquéreur attend l'accord du vendeur ou votre arbitrage). Honoraires estimés : {commission_ht} HT.</p>
     """,
 })
 
@@ -233,7 +239,7 @@ EMAIL_TEMPLATES.setdefault("closing_disputed_admin", {
     "subject": "Contestation d'une vente déclarée : {property_label}",
     "html": """
     <h2>Déclaration de vente contestée</h2>
-    <p>{by_label} conteste la déclaration de vente de {property_label} (annonce {property_id}) : acte déclaré signé le {signed_on}, prix {final_price}.</p>
+    <p>{by_label} conteste la déclaration de vente de {property_label} (annonce {property_id}) : acte authentique déclaré signé le {signed_on}, prix {final_price}.</p>
     <p>Motif : <em>{reason}</em></p>
     <p>La ligne est dans « À faire » : confirmer la vente ou annuler la déclaration depuis l'administration.</p>
     """,
@@ -242,10 +248,10 @@ EMAIL_TEMPLATES.setdefault("closing_disputed_admin", {
 EMAIL_TEMPLATES.setdefault("closing_confirmed_buyer", {
     "subject": "Vente confirmée : {property_label}",
     "html": """
-    <h2>Félicitations pour cette reprise</h2>
+    <h2>Félicitations pour cette acquisition</h2>
     <p>Bonjour {name},</p>
-    <p>La vente de l'entreprise {property_label} est confirmée (acte signé le {signed_on}). Nous vous souhaitons une belle réussite.</p>
-    <p>Pensez à notifier le changement de dirigeant aux organismes de qualification et à votre assureur décennale ; le diagnostic de transmissibilité reste consultable depuis votre espace.</p>
+    <p>La vente du bien {property_label} est confirmée (acte authentique signé le {signed_on}). Vous êtes désormais le bailleur : le bail en cours continue avec vous.</p>
+    <p>Pensez à informer le locataire du changement de bailleur et des nouvelles modalités de paiement du loyer, à souscrire votre assurance propriétaire non occupant et, le cas échéant, à prévenir le syndic de copropriété. La fiche de reprise du bail reste consultable depuis votre espace.</p>
     <p>Cordialement,<br>L'équipe {site_name}</p>
     """,
 })
@@ -255,10 +261,10 @@ EMAIL_TEMPLATES.setdefault("invoice_issued", {
     "html": """
     <h2>Facture d'honoraires</h2>
     <p>Bonjour {name},</p>
-    <p>La vente de {property_label} est confirmée. Conformément au mandat n° {registry_number}, voici la facture d'honoraires de {site_name} :</p>
+    <p>La vente de {property_label} est confirmée. Conformément au mandat n° {registry_number}, voici la facture d'honoraires de négociation de {site_name} :</p>
     <ul>
       <li>Facture n° <strong>{number}</strong> du {issued_on}</li>
-      <li>Montant : <strong>{total_ht} HT</strong>, TVA {vat}, soit <strong>{total_ttc} TTC</strong></li>
+      <li>Montant : <strong>{total_ttc} TTC</strong> ({total_ht} HT, TVA {vat})</li>
       <li>Échéance : <strong>{due_on}</strong></li>
     </ul>
     <p>{payment_terms}</p>
@@ -320,11 +326,11 @@ EMAIL_TEMPLATES.setdefault("invoice_partial_payment", {
 })
 
 EMAIL_TEMPLATES.setdefault("payment_order_redacteur", {
-    "subject": "Ordre de paiement des honoraires — cession de {property_label}",
+    "subject": "Ordre de paiement des honoraires — vente de {property_label}",
     "html": """
-    <h2>Ordre de paiement des honoraires d'intermédiation</h2>
+    <h2>Ordre de paiement des honoraires de négociation</h2>
     <p>Bonjour {name},</p>
-    <p>Vous êtes désigné comme rédacteur de l'acte de cession de la société {property_label}. Dans le cadre du mandat de vente n° {registry_number} conclu avec {site_name} (AlterEgo SAS, carte professionnelle T), le cédant a donné ordre irrévocable de régler nos honoraires sur le prix de cession.</p>
+    <p>Vous êtes désigné comme notaire en charge de la vente de {property_label}. Dans le cadre du mandat de vente n° {registry_number} conclu avec {site_name} (AlterEgo SAS, carte professionnelle T), le vendeur a donné ordre irrévocable de régler nos honoraires sur le prix de vente.</p>
     <ul>
       <li>Facture n° <strong>{number}</strong> du {issued_on} : <strong>{total_ttc} TTC</strong> ({total_ht} HT)</li>
       <li>Échéance : {due_on}</li>
@@ -390,7 +396,8 @@ def property_siren(property: dict) -> str:
 
 
 def property_label(property: dict) -> str:
-    return property.get("company_name") or property.get("title") or f"annonce {str(property.get('id', ''))[:8]}"
+    """Désignation du bien dans les e-mails, factures et ordres de paiement : titre généré (jamais l'adresse)"""
+    return property.get("title") or f"annonce {str(property.get('id', ''))[:8]}"
 
 
 def vat_number() -> str:
@@ -426,7 +433,7 @@ def bank_text() -> str:
 def entity_lines() -> List[str]:
     """Identité complète de l'entité émettrice (en-tête des PDF)"""
     legal = LEGAL_ENTITY
-    rc_pro = os.environ.get("LEGAL_RC_PRO", "").strip() or "RC professionnelle souscrite conformément à la loi Hoguet"
+    rc_pro = os.environ.get("LEGAL_RC_PRO", "").strip() or "RC professionnelle souscrite conformément à la loi n° 70-9 du 2 janvier 1970"
     lines = [
         f"{legal.get('denomination', 'AlterEgo')} SAS — {legal.get('forme_juridique', '')} au capital de {fmt_eur_fr(legal.get('capital') or 0)}",
         f"{legal.get('adresse', '')} — RCS {legal.get('rcs_ville', '')} {fmt_siren(legal.get('siren', ''))}",
@@ -443,7 +450,7 @@ def entity_lines() -> List[str]:
 
 
 def party_label(role: str) -> str:
-    return "Le cédant" if role == "seller" else ("Le repreneur" if role == "buyer" else "L'administrateur")
+    return "Le vendeur" if role == "seller" else ("L'acquéreur" if role == "buyer" else "L'administrateur")
 
 
 def closing_role(closing: dict, user: dict) -> Optional[str]:
@@ -556,6 +563,7 @@ async def _new_closing(property: dict, buyer_id: str, seller_id: str, sale_objec
         "offer_amount": float(amount or 0),
         "sale_object": sale_object,
         "expected_date": expected.isoformat() if expected else None,
+        "avant_contrat_on": None,
         "redacteur": None,
         "status": STATUS_IN_PROGRESS,
         "accepted_at": accepted_at or _iso(now),
@@ -584,7 +592,7 @@ async def _new_closing(property: dict, buyer_id: str, seller_id: str, sale_objec
 
 async def create_closing_for_offer(offer: dict, property: dict, notify: bool = True) -> dict:
     """Crée (une seule fois) l'étape de vente d'une offre acceptée et envoie la checklist aux deux parties.
-    Appelée par server.py à l'acceptation d'une offre (contre-signature du cédant ou acceptation d'une contre-proposition)."""
+    Appelée par server.py à l'acceptation d'une offre (contre-signature du vendeur ou acceptation d'une contre-proposition)."""
     existing = await db.closings.find_one({"offer_id": offer["id"]}, {"_id": 0})
     if existing:
         return existing
@@ -596,8 +604,8 @@ async def create_closing_for_offer(offer: dict, property: dict, notify: bool = T
 
 
 async def create_closing_direct(property: dict, buyer_id: str, notify: bool = True) -> dict:
-    """Vente via la plateforme sans offre acceptée : étape de vente ouverte par le cédant pour un repreneur présenté
-    (une seule étape en cours par couple annonce / repreneur)."""
+    """Vente via la plateforme sans offre acceptée : étape de vente ouverte par le vendeur pour un acquéreur présenté
+    (une seule étape en cours par couple annonce / acquéreur)."""
     existing = await db.closings.find_one({"property_id": property["id"], "buyer_id": buyer_id,
                                            "status": {"$in": [STATUS_IN_PROGRESS, STATUS_DECLARED, STATUS_DISPUTED]}}, {"_id": 0})
     if existing:
@@ -611,16 +619,20 @@ async def create_closing_direct(property: dict, buyer_id: str, notify: bool = Tr
 
 
 class RedacteurInput(BaseModel):
-    type: str = Field("autre", description="notaire | avocat | expert-comptable | autre")
+    type: str = Field("notaire", description="notaire | autre")
     name: str = Field(..., min_length=2, max_length=200)
     email: Optional[str] = Field(None, max_length=200)
     phone: Optional[str] = Field(None, max_length=40)
 
 
 class DeclareInput(BaseModel):
-    signed_on: str = Field(..., description="Date de signature de l'acte (AAAA-MM-JJ)")
+    signed_on: str = Field(..., description="Date de signature de l'acte authentique (AAAA-MM-JJ)")
     final_price: float = Field(..., gt=0)
-    sale_object: str = Field(..., description="titres | fonds")
+    sale_object: str = Field(..., description="bien | parts")
+
+
+class AvantContratInput(BaseModel):
+    avant_contrat_on: Optional[str] = Field(None, description="Date de signature de la promesse ou du compromis (AAAA-MM-JJ) ; vide pour effacer")
 
 
 class DisputeInput(BaseModel):
@@ -671,10 +683,10 @@ async def _closing_view(closing: dict, user: dict) -> dict:
     doc["role"] = closing_role(closing, user)
     doc["followup_links"] = None
     if not doc.get("property_title"):
-        property = await db.properties.find_one({"id": closing.get("property_id")}, {"_id": 0, "title": 1, "company_name": 1, "id": 1})
+        property = await db.properties.find_one({"id": closing.get("property_id")}, {"_id": 0, "title": 1, "id": 1})
         doc["property_title"] = (property or {}).get("title") or closing.get("property_label") or ""
-    # Facture et commission : cédant (débiteur) et admin uniquement. Le repreneur ne voit ni l'adresse, ni l'e-mail,
-    # ni le SIREN du cédant (bloc débiteur), ni le montant des honoraires.
+    # Facture et honoraires : vendeur (débiteur) et admin uniquement. L'acquéreur ne voit ni l'adresse, ni l'e-mail,
+    # ni le SIREN du vendeur (bloc débiteur), ni le montant des honoraires.
     seller_side = doc["role"] in ("seller", "admin")
     if closing.get("invoice_id") and seller_side:
         invoice = await db.invoices.find_one({"id": closing["invoice_id"]}, {"_id": 0, "access_token": 0})
@@ -689,13 +701,15 @@ async def _closing_view(closing: dict, user: dict) -> dict:
     buyer = await db.users.find_one({"id": closing.get("buyer_id")}, {"_id": 0, "first_name": 1, "last_name": 1, "company_name": 1})
     doc["seller_name"] = display_name(seller)
     doc["buyer_name"] = display_name(buyer)
+    doc.setdefault("avant_contrat_on", None)
+    doc["redacteur_label"] = REDACTEUR_LABELS.get((closing.get("redacteur") or {}).get("type") or "notaire")
     doc["commission_preview"] = business_model.calculate_commission(
         (closing.get("declaration") or {}).get("final_price") or closing.get("offer_amount") or 0) if seller_side else None
     return doc
 
 
 # ----------------------------------------------------------------------------------------------
-# Routes : création, consultation, rédacteur
+# Routes : création, consultation, notaire, avant-contrat
 
 
 @router.post("/closing/from-offer/{offer_id}")
@@ -710,23 +724,23 @@ async def closing_from_offer(offer_id: str, current_user: dict = Depends(get_cur
         raise HTTPException(status_code=400, detail="Seule une offre acceptée ouvre une étape de vente")
     property = await db.properties.find_one({"id": offer["property_id"]}, {"_id": 0})
     if not property:
-        raise HTTPException(status_code=404, detail="Entreprise introuvable")
+        raise HTTPException(status_code=404, detail="Annonce introuvable")
     closing = await create_closing_for_offer(offer, property)
     return await _closing_view(closing, current_user)
 
 
 @router.post("/closing/direct")
 async def closing_direct(data: DirectClosingInput, current_user: dict = Depends(get_current_user)):
-    """Cédant : ouvre l'étape de vente avec un repreneur présenté (NDA signé) sans offre acceptée sur la plateforme ;
-    la déclaration de vente (§7) suit. Le repreneur doit figurer dans `presented_buyers` de l'annonce."""
+    """Vendeur : ouvre l'étape de vente avec un acquéreur présenté (engagement de confidentialité signé) sans offre acceptée
+    sur la plateforme ; la déclaration de vente suit. L'acquéreur doit figurer dans `presented_buyers` de l'annonce."""
     property = await db.properties.find_one({"id": data.property_id}, {"_id": 0})
     if not property:
-        raise HTTPException(status_code=404, detail="Entreprise introuvable")
-    if current_user.get("role") != "admin" and current_user["id"] not in (property.get("seller_id"), property.get("president_id")):
-        raise HTTPException(status_code=403, detail={"code": "not_allowed", "message": "Seul le cédant peut ouvrir une étape de vente"})
+        raise HTTPException(status_code=404, detail="Annonce introuvable")
+    if current_user.get("role") != "admin" and current_user["id"] != property.get("seller_id"):
+        raise HTTPException(status_code=403, detail={"code": "not_allowed", "message": "Seul le vendeur peut ouvrir une étape de vente"})
     presented = {p.get("buyer_id") for p in (property.get("presented_buyers") or [])}
     if data.buyer_id not in presented:
-        raise HTTPException(status_code=400, detail={"code": "validation", "message": "Ce repreneur ne figure pas sur la liste des repreneurs présentés (accord de confidentialité signé)",
+        raise HTTPException(status_code=400, detail={"code": "validation", "message": "Cet acquéreur ne figure pas sur la liste des acquéreurs présentés (engagement de confidentialité signé)",
                                                      "missing": ["buyer_id"]})
     closing = await create_closing_direct(property, data.buyer_id)
     return await _closing_view(closing, current_user)
@@ -734,7 +748,7 @@ async def closing_direct(data: DirectClosingInput, current_user: dict = Depends(
 
 @router.get("/closing/my")
 async def my_closings(current_user: dict = Depends(get_current_user)):
-    """Étapes de vente de l'utilisateur (cédant ou repreneur), les plus récentes d'abord"""
+    """Étapes de vente de l'utilisateur (vendeur ou acquéreur), les plus récentes d'abord"""
     query = {"$or": [{"seller_id": current_user["id"]}, {"buyer_id": current_user["id"]}]}
     closings = await db.closings.find(query, {"_id": 0}).sort("created_at", -1).to_list(200)
     return {"closings": [await _closing_view(c, current_user) for c in closings]}
@@ -748,21 +762,21 @@ async def get_closing(closing_id: str, current_user: dict = Depends(get_current_
 
 @router.put("/closing/{closing_id}/redacteur")
 async def set_redacteur(closing_id: str, data: RedacteurInput, current_user: dict = Depends(get_current_user)):
-    """Les deux parties peuvent renseigner (ou corriger) le rédacteur de l'acte ; l'autre partie est prévenue.
-    L'ordre de paiement (qui reprend la facture du cédant) n'est adressé qu'à un rédacteur renseigné ou confirmé par le
-    cédant (ou l'admin) : après confirmation de la vente, seul le cédant ou l'admin peut encore le renseigner, et l'ordre
+    """Les deux parties peuvent renseigner (ou corriger) le notaire en charge de la vente ; l'autre partie est prévenue.
+    L'ordre de paiement (qui reprend la facture du vendeur) n'est adressé qu'à un notaire renseigné ou confirmé par le
+    vendeur (ou l'admin) : après confirmation de la vente, seul le vendeur ou l'admin peut encore le renseigner, et l'ordre
     de paiement part alors s'il n'a pas encore été envoyé."""
     closing, role = await _load_closing(closing_id, current_user)
     late_seller_update = (closing["status"] == STATUS_CONFIRMED and role in ("seller", "admin")
                           and not closing.get("payment_order_sent_at"))
     if closing["status"] == STATUS_ABANDONED or (closing["status"] == STATUS_CONFIRMED and not late_seller_update):
         raise HTTPException(status_code=400, detail="Cette étape de vente est close")
-    rtype = (data.type or "autre").strip().lower()
+    rtype = (data.type or "notaire").strip().lower()
     if rtype not in REDACTEUR_TYPES:
-        raise HTTPException(status_code=400, detail="Type de rédacteur invalide (notaire, avocat, expert-comptable, autre)")
+        raise HTTPException(status_code=400, detail={"code": "validation", "message": "Type invalide (notaire ou autre)"})
     email = (data.email or "").strip().lower() or None
     if email and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
-        raise HTTPException(status_code=400, detail="Adresse e-mail du rédacteur invalide")
+        raise HTTPException(status_code=400, detail={"code": "validation", "message": "Adresse e-mail du notaire invalide"})
     redacteur = {"type": rtype, "name": data.name.strip(), "email": email, "phone": (data.phone or "").strip() or None,
                  "set_by": role, "set_at": _iso(_now())}
     await db.closings.update_one({"id": closing_id}, {"$set": {"redacteur": redacteur, "updated_at": _iso(_now())}})
@@ -770,12 +784,39 @@ async def set_redacteur(closing_id: str, data: RedacteurInput, current_user: dic
     if late_seller_update and closing.get("invoice_id"):
         invoice = await db.invoices.find_one({"id": closing["invoice_id"]}, {"_id": 0})
         if invoice and await send_payment_order(closing, invoice):
-            await close_todos(TODO_PAYMENT_ORDER, closing_id, "Rédacteur confirmé par le cédant")
+            await close_todos(TODO_PAYMENT_ORDER, closing_id, "Notaire confirmé par le vendeur")
             closing = await db.closings.find_one({"id": closing_id}, {"_id": 0}) or closing
     if role in ("seller", "buyer"):
         other_id = closing.get(f"{_other_role(role)}_id")
         await email_user(other_id, "closing_redacteur_set", property_label=closing["property_label"],
                          by_label=party_label(role), redacteur=_redacteur_text(redacteur))
+    return await _closing_view(closing, current_user)
+
+
+@router.put("/closing/{closing_id}/avant-contrat")
+async def set_avant_contrat(closing_id: str, data: AvantContratInput, current_user: dict = Depends(get_current_user)):
+    """Date de signature de l'avant-contrat (promesse ou compromis), renseignée par l'une ou l'autre partie (ou l'admin)
+    avant la déclaration de la vente ; l'autre partie est prévenue. `null` efface la date."""
+    closing, role = await _load_closing(closing_id, current_user)
+    if closing["status"] != STATUS_IN_PROGRESS:
+        raise HTTPException(status_code=400, detail={"code": "validation", "message":
+                            "La date de l'avant-contrat se renseigne avant la déclaration de la vente"})
+    value = None
+    if data.avant_contrat_on:
+        parsed = _parse_date(data.avant_contrat_on)
+        if not parsed:
+            raise HTTPException(status_code=400, detail={"code": "validation", "message": "Date invalide (format AAAA-MM-JJ)"})
+        if parsed > _now().date():
+            raise HTTPException(status_code=400, detail={"code": "validation", "message": "La date de l'avant-contrat ne peut pas être dans le futur"})
+        value = parsed.isoformat()
+    now = _now()
+    await db.closings.update_one({"id": closing_id}, {"$set": {"avant_contrat_on": value, "avant_contrat_set_by": role,
+                                                                "updated_at": _iso(now)},
+                                                       "$push": {"progress": {"at": _iso(now), "by": role, "avant_contrat_on": value}}})
+    closing.update({"avant_contrat_on": value, "avant_contrat_set_by": role})
+    if value and role in ("seller", "buyer"):
+        await email_user(closing.get(f"{_other_role(role)}_id"), "closing_avant_contrat", property_label=closing["property_label"],
+                         by_label=party_label(role), avant_contrat_on=fmt_date_fr(value))
     return await _closing_view(closing, current_user)
 
 
@@ -807,8 +848,8 @@ h1{{font-size:22px;margin:0 0 12px}}p{{line-height:1.5}}.btn{{display:inline-blo
 
 FOLLOWUP_CONFIRM_TEXTS = {
     "en_cours": "Confirmez que la vente est toujours en cours : nous reprendrons des nouvelles dans 30 jours.",
-    "signe": "Confirmez que l'acte de cession est signé : vous pourrez ensuite déclarer la vente depuis votre espace.",
-    "abandonne": "Confirmez que la vente avec ce repreneur est abandonnée : les relances s'arrêtent et l'annonce reste en ligne.",
+    "signe": "Confirmez que l'acte authentique est signé : vous pourrez ensuite déclarer la vente depuis votre espace.",
+    "abandonne": "Confirmez que la vente avec cet acquéreur est abandonnée : les relances s'arrêtent et l'annonce reste en ligne.",
 }
 
 
@@ -858,10 +899,10 @@ async def answer_followup(closing_id: str, token: str, request: Request, answer:
     await db.closings.update_one({"id": closing_id}, update)
     label = FOLLOWUP_ANSWERS[answer]
     texts = {
-        "en_cours": "Merci, nous reprendrons des nouvelles dans 30 jours. Bonne continuation jusqu'à l'acte.",
+        "en_cours": "Merci, nous reprendrons des nouvelles dans 30 jours. Bonne continuation jusqu'à l'acte authentique.",
         "signe": "Merci. Pour établir la facture d'honoraires prévue au mandat, déclarez la vente depuis votre espace "
-                 "(date de l'acte, prix, objet) : l'autre partie la confirmera.",
-        "abandonne": "Merci de nous l'avoir indiqué. L'annonce reste en ligne et vous pouvez poursuivre avec un autre repreneur. "
+                 "(date de l'acte authentique, prix, objet) : l'autre partie la confirmera.",
+        "abandonne": "Merci de nous l'avoir indiqué. L'annonce reste en ligne et vous pouvez poursuivre avec un autre acquéreur. "
                      "Si la vente reprend, répondez « Toujours en cours » depuis le même e-mail.",
     }
     if _wants_html(request):
@@ -875,7 +916,7 @@ async def answer_followup(closing_id: str, token: str, request: Request, answer:
 
 @router.post("/closing/{closing_id}/declare")
 async def declare_sale(closing_id: str, data: DeclareInput, current_user: dict = Depends(get_current_user)):
-    """Déclaration de la vente par l'une des parties : l'autre reçoit une demande de confirmation (7 jours)"""
+    """Déclaration de la vente (acte authentique signé) par l'une des parties : l'autre reçoit une demande de confirmation (7 jours)"""
     closing, role = await _load_closing(closing_id, current_user)
     if closing["status"] == STATUS_CONFIRMED:
         raise HTTPException(status_code=400, detail="Cette vente est déjà confirmée")
@@ -886,7 +927,7 @@ async def declare_sale(closing_id: str, data: DeclareInput, current_user: dict =
         raise HTTPException(status_code=400, detail={"code": "disputed", "message": "Déclaration contestée : l'administrateur tranche. "
                                                      "Vous serez informé de sa décision par e-mail."})
     if closing["status"] == STATUS_ABANDONED and role == "buyer":
-        raise HTTPException(status_code=400, detail="Cette étape de vente a été abandonnée : seul le cédant peut déclarer la vente")
+        raise HTTPException(status_code=400, detail="Cette étape de vente a été abandonnée : seul le vendeur peut déclarer la vente")
     signed_on = _parse_date(data.signed_on)
     if not signed_on:
         raise HTTPException(status_code=400, detail="Date de signature invalide (format AAAA-MM-JJ)")
@@ -897,7 +938,7 @@ async def declare_sale(closing_id: str, data: DeclareInput, current_user: dict =
         raise HTTPException(status_code=400, detail="Date de signature trop ancienne")
     sale_object = (data.sale_object or "").strip().lower()
     if sale_object not in SALE_OBJECTS:
-        raise HTTPException(status_code=400, detail="Objet de la cession invalide (titres ou fonds)")
+        raise HTTPException(status_code=400, detail={"code": "validation", "message": "Objet de la vente invalide (bien ou parts)"})
     now = _now()
     deadline = now + timedelta(days=CONFIRMATION_DAYS)
     declaration = {
@@ -912,9 +953,7 @@ async def declare_sale(closing_id: str, data: DeclareInput, current_user: dict =
         "$set": {"declaration": declaration, "status": STATUS_DECLARED, "sale_object": sale_object, "dispute": None,
                  "updated_at": _iso(now)},
         "$push": push})
-    # Le SIREN n'est plus à surveiller (veille BODACC) : incidents clos, vente notée sur l'annonce
-    await db.incidents.update_many({"property_id": closing["property_id"], "status": "open"},
-                                   {"$set": {"status": "closed", "closed_at": _iso(now), "note": "Vente déclarée"}})
+    # Vente notée sur l'annonce
     await db.properties.update_one({"id": closing["property_id"]}, {"$set": {"sale_declared_at": _iso(now), "closing_id": closing_id}})
     commission = business_model.calculate_commission(declaration["final_price"])
     values = {"property_label": closing["property_label"], "property_id": closing["property_id"], "by_label": party_label(role),
@@ -925,7 +964,7 @@ async def declare_sale(closing_id: str, data: DeclareInput, current_user: dict =
         for user_id in (closing.get("seller_id"), closing.get("buyer_id")):
             await email_user(user_id, "closing_declared_to_confirm", **values)
     elif role == "buyer":
-        # Déclaration du repreneur : jamais confirmée automatiquement (facture et retrait de l'annonce sur accord du cédant)
+        # Déclaration de l'acquéreur : jamais confirmée automatiquement (facture et retrait de l'annonce sur accord du vendeur)
         await email_user(closing.get("seller_id"), "closing_declared_by_buyer", **values)
     else:
         await email_user(closing.get(f"{_other_role(role)}_id"), "closing_declared_to_confirm", **values)
@@ -1004,7 +1043,7 @@ async def dispute_sale(closing_id: str, data: DisputeInput, current_user: dict =
 
 
 async def build_debtor(closing: dict, property: dict, mandate: Optional[dict]) -> dict:
-    """Débiteur : toujours le cédant — nom, adresse postale du mandat (sinon profil), société, SIREN"""
+    """Débiteur : toujours le vendeur — nom, adresse postale du mandat (sinon profil), société propriétaire et SIREN le cas échéant"""
     seller = await db.users.find_one({"id": closing["seller_id"]}, {"_id": 0, "password_hash": 0}) or {}
     address = ((mandate or {}).get("mandant_address") or seller.get("address") or seller.get("company_address") or "").strip()
     return {
@@ -1015,34 +1054,31 @@ async def build_debtor(closing: dict, property: dict, mandate: Optional[dict]) -
         "address_source": "mandat" if (mandate or {}).get("mandant_address") else ("profil" if address else ""),
         "company_name": property.get("company_name") or "",
         "siren": property_siren(property),
-        "legal_structure": property.get("legal_structure") or "",
+        "owner_type": property.get("owner_type") or "",
     }
 
 
-def invoice_lines(commission: dict, sale_object: str, mandate_number: str, company_name: str) -> List[dict]:
+def invoice_lines(commission: dict, sale_object: str, mandate_number: str, property_title: str) -> List[dict]:
     """Lignes de la facture à partir du détail renvoyé par calculate_commission (aucun montant en dur)"""
-    designation = f"Honoraires d'intermédiation — mandat n° {mandate_number} — {SALE_OBJECT_LABELS[sale_object]} de la société {company_name}"
+    object_text = "cession des parts de la société propriétaire de" if sale_object == "parts" else "vente de"
+    designation = f"Honoraires de négociation — mandat n° {mandate_number} — {object_text} {property_title}"
     lines = []
     for part in commission.get("breakdown") or []:
         rate_pct = f"{round(part['rate'] * 100, 2):g}".replace(".", ",")
-        if part.get("to"):
-            label = f"Part du prix jusqu'à {fmt_eur_fr(part['to'])} ({rate_pct} % HT)"
-        else:
-            label = f"Part du prix au-delà de {fmt_eur_fr(part['from'])} ({rate_pct} % HT)"
-        lines.append({"label": label, "base": part["base"], "rate": part["rate"], "amount_ht": part["amount_ht"]})
+        lines.append({"label": f"Prix de vente × {rate_pct} % HT", "base": part["base"], "rate": part["rate"], "amount_ht": part["amount_ht"]})
     if commission.get("applied_minimum"):
         adjustment = round(commission["final_commission_ht"] - commission["calculated_commission"], 2)
         lines.append({"label": f"Ajustement au minimum contractuel ({fmt_eur_fr(commission['minimum_fee'])} HT)",
                       "base": None, "rate": None, "amount_ht": adjustment})
     if not lines:
-        lines.append({"label": "Honoraires d'intermédiation", "base": commission.get("sale_amount"), "rate": None,
+        lines.append({"label": "Honoraires de négociation", "base": commission.get("sale_amount"), "rate": None,
                       "amount_ht": commission["final_commission_ht"]})
     return [{"designation": designation, **lines[0]}] + lines[1:]
 
 
 async def issue_invoice(closing: dict, now: Optional[datetime] = None) -> dict:
-    """Facture d'honoraires au cédant à la confirmation (une seule par closing) : numéro continu, mentions L441-9,
-    e-mail au cédant, ordre de paiement au rédacteur d'acte."""
+    """Facture d'honoraires au vendeur à la confirmation (une seule par closing) : numéro continu, mentions L441-9,
+    e-mail au vendeur, ordre de paiement au notaire."""
     now = now or _now()
     if closing.get("invoice_id"):
         existing = await db.invoices.find_one({"id": closing["invoice_id"]}, {"_id": 0})
@@ -1058,7 +1094,6 @@ async def issue_invoice(closing: dict, now: Optional[datetime] = None) -> dict:
     mandate = await _mandate_for(property)
     debtor = await build_debtor(closing, property, mandate)
     commission = business_model.calculate_commission(declaration["final_price"])
-    terms = INVOICE_TERMS[sale_object]
     issued_on = now.date()
     due_on = invoice_due_on(_parse_date(declaration["signed_on"]) or issued_on, issued_on, sale_object)
     test = bool(closing.get("is_test")) or await _is_test_closing(property, closing.get("buyer_id"), closing.get("seller_id"))
@@ -1089,15 +1124,15 @@ async def issue_invoice(closing: dict, now: Optional[datetime] = None) -> dict:
         "signed_on": declaration["signed_on"],
         "final_price": declaration["final_price"],
         "debtor": debtor,
-        "lines": invoice_lines(commission, sale_object, mandate_number, debtor["company_name"] or closing.get("property_label", "")),
+        "lines": invoice_lines(commission, sale_object, mandate_number, closing.get("property_label") or property_label(property)),
         "commission": commission,
         "total_ht": commission["final_commission_ht"],
         "vat_rate": commission["vat_rate"],
         "vat": commission["vat"],
         "total_ttc": commission["final_commission_ttc"],
         "due_on": due_on.isoformat(),
-        "due_days": terms["due_days"],
-        "payment_terms": terms["text"],
+        "due_days": INVOICE_DUE_DAYS,
+        "payment_terms": INVOICE_PAYMENT_TEXT,
         "late_penalties": LATE_PENALTY_TEXT,
         "bank": bank_details(),
         "issuer": {"denomination": f"{LEGAL_ENTITY.get('denomination', 'AlterEgo')} SAS", "siren": LEGAL_ENTITY.get("siren"),
@@ -1128,21 +1163,21 @@ async def issue_invoice(closing: dict, now: Optional[datetime] = None) -> dict:
     closing["invoice_id"] = invoice["id"]
     if not debtor["address"]:
         await add_todo(TODO_INVOICE_ADDRESS, invoice["id"],
-                       f"Facture n° {number} : adresse postale du cédant absente du mandat et du profil",
+                       f"Facture n° {number} : adresse postale du vendeur absente du mandat et du profil",
                        ref={"invoice_id": invoice["id"], "closing_id": closing["id"], "property_id": closing["property_id"]})
-    # E-mail au cédant (lien vers le PDF, authentifié ou par jeton du lien)
+    # E-mail au vendeur (lien vers le PDF, authentifié ou par jeton du lien)
     redacteur = closing.get("redacteur") or {}
     if redacteur.get("email") and redacteur_trusted(redacteur):
-        redacteur_line = f"L'ordre de paiement prévu au mandat a été adressé à votre rédacteur d'acte ({_redacteur_text(redacteur)})."
+        redacteur_line = f"L'ordre de paiement prévu au mandat a été adressé au notaire en charge de la vente ({_redacteur_text(redacteur)})."
     elif redacteur.get("email"):
-        redacteur_line = (f"Le rédacteur de l'acte a été indiqué par le repreneur ({_redacteur_text(redacteur)}) : confirmez-le "
-                          "depuis votre espace pour que nous lui adressions l'ordre de paiement prévu au mandat.")
+        redacteur_line = (f"Le notaire a été indiqué par l'acquéreur ({_redacteur_text(redacteur)}) : confirmez-le depuis votre "
+                          "espace pour que nous lui adressions l'ordre de paiement prévu au mandat.")
     else:
-        redacteur_line = "Renseignez le rédacteur de l'acte depuis votre espace pour que nous lui adressions l'ordre de paiement prévu au mandat."
+        redacteur_line = "Renseignez le notaire en charge de la vente depuis votre espace pour que nous lui adressions l'ordre de paiement prévu au mandat."
     await email_user(debtor["user_id"], "invoice_issued", number=number, property_label=invoice["property_label"],
                      registry_number=mandate_number, issued_on=fmt_date_fr(issued_on), total_ht=fmt_eur_cents(invoice["total_ht"]),
                      vat=fmt_eur_cents(invoice["vat"]), total_ttc=fmt_eur_cents(invoice["total_ttc"]), due_on=fmt_date_fr(due_on),
-                     payment_terms=terms["text"], link=invoice_link(invoice), redacteur_line=redacteur_line)
+                     payment_terms=INVOICE_PAYMENT_TEXT, link=invoice_link(invoice), redacteur_line=redacteur_line)
     await send_payment_order(closing, invoice)
     return invoice
 
@@ -1156,19 +1191,19 @@ def credit_note_link(invoice: dict) -> str:
 
 
 def redacteur_trusted(redacteur: dict) -> bool:
-    """Rédacteur renseigné par le cédant (débiteur de la facture) ou l'admin : seul destinataire possible de l'ordre de paiement"""
+    """Notaire renseigné par le vendeur (débiteur de la facture) ou l'admin : seul destinataire possible de l'ordre de paiement"""
     return (redacteur or {}).get("set_by") in ("seller", "admin")
 
 
 async def send_payment_order(closing: dict, invoice: dict) -> bool:
-    """Ordre de paiement envoyé au rédacteur d'acte s'il a une adresse e-mail (lien signé vers le PDF). Un rédacteur
-    indiqué par le repreneur doit d'abord être confirmé par le cédant : sinon ligne « À faire » admin, rien n'est envoyé."""
+    """Ordre de paiement envoyé au notaire s'il a une adresse e-mail (lien signé vers le PDF). Un notaire indiqué par
+    l'acquéreur doit d'abord être confirmé par le vendeur : sinon ligne « À faire » admin, rien n'est envoyé."""
     redacteur = closing.get("redacteur") or {}
     if not redacteur.get("email"):
         return False
     if not redacteur_trusted(redacteur):
         await add_todo(TODO_PAYMENT_ORDER, closing["id"],
-                       f"Ordre de paiement {invoice.get('number', '')} : rédacteur indiqué par le repreneur, à confirmer par le cédant",
+                       f"Ordre de paiement {invoice.get('number', '')} : notaire indiqué par l'acquéreur, à confirmer par le vendeur",
                        ref={"closing_id": closing["id"], "invoice_id": invoice.get("id"), "property_id": closing.get("property_id")})
         return False
     link = site_url(f"/api/closing/{closing['id']}/payment-order.pdf?token={closing.get('payment_order_token', '')}")
@@ -1302,14 +1337,13 @@ def invoice_pdf(invoice: dict) -> bytes:
                                          _p(f"Date de facture : {fmt_date_fr(invoice['issued_on'])}", st["cell"]),
                                          _p(f"Date d'échéance : {fmt_date_fr(invoice['due_on'])}", st["cellb"]),
                                          _p(f"Mandat de vente n° {invoice.get('mandate_number', '')}", st["cell"]),
-                                         _p(f"Acte de cession signé le {fmt_date_fr(invoice.get('signed_on'))}", st["cell"])]),
+                                         _p(f"Acte authentique de vente signé le {fmt_date_fr(invoice.get('signed_on'))}", st["cell"])]),
         Spacer(1, 10),
         _two_columns(_debtor_block(invoice["debtor"], st), [
             _p("Opération", st["cellb"]),
-            _p(f"{SALE_OBJECT_LABELS.get(invoice['sale_object'], '').capitalize()} de la société "
-               f"{invoice['debtor'].get('company_name') or invoice.get('property_label', '')}", st["cell"]),
-            _p(f"Prix de cession : {fmt_eur_cents(invoice['final_price'])}", st["cell"]),
-            _p("Nature : prestation de services (intermédiation, loi Hoguet)", st["cell"]),
+            _p(f"{SALE_OBJECT_LABELS.get(invoice['sale_object'], 'vente du bien').capitalize()} : {invoice.get('property_label', '')}", st["cell"]),
+            _p(f"Prix de vente : {fmt_eur_cents(invoice['final_price'])}", st["cell"]),
+            _p("Nature : prestation de services (négociation immobilière, loi n° 70-9 du 2 janvier 1970)", st["cell"]),
         ]),
         Spacer(1, 12),
         _lines_table(invoice, st),
@@ -1320,13 +1354,13 @@ def invoice_pdf(invoice: dict) -> bytes:
         _p(invoice.get("late_penalties") or LATE_PENALTY_TEXT, st["p"]),
     ]
     if invoice.get("redacteur") and invoice["redacteur"].get("name"):
-        elements.append(_p(f"Rédacteur de l'acte : {_redacteur_text(invoice['redacteur'])}", st["p"]))
+        elements.append(_p(f"Notaire en charge de la vente : {_redacteur_text(invoice['redacteur'])}", st["p"]))
     if status_note:
         elements += [Spacer(1, 6), _p(status_note, st["cellb"])]
     elements += [Spacer(1, 14),
-                 _p("Honoraires dus en exécution du mandat de vente simple conclu avec le cédant (rémunération de l'intermédiaire, "
-                    "art. 6 de la loi n° 70-9 du 2 janvier 1970), exigibles à la signature de l'acte définitif de cession. "
-                    "TVA sur les encaissements.", st["small"]),
+                 _p("Honoraires de négociation dus en exécution du mandat de vente simple conclu avec le vendeur (rémunération de "
+                    "l'intermédiaire, art. 6 de la loi n° 70-9 du 2 janvier 1970), exigibles à la signature de l'acte authentique "
+                    "de vente et réglés par le notaire sur le prix. TVA sur les encaissements.", st["small"]),
                  _p(f"Document généré par {site_name()} le {fmt_date_fr(invoice.get('issued_on'))}.", st["small"])]
     return _build(elements, bool(invoice.get("is_test")))
 
@@ -1344,7 +1378,7 @@ def credit_note_pdf(invoice: dict) -> bytes:
         _two_columns(_debtor_block(invoice["debtor"], st), [
             _p("Motif", st["cellb"]), _p(credit.get("reason") or invoice.get("cancelled_reason") or "", st["cell"])]),
         Spacer(1, 12),
-        _kv_table([("Désignation", f"Annulation totale de la facture n° {invoice['number']} (honoraires d'intermédiation)"),
+        _kv_table([("Désignation", f"Annulation totale de la facture n° {invoice['number']} (honoraires de négociation)"),
                    ("Montant HT", fmt_eur_cents(credit.get("total_ht"))),
                    (f"TVA {round(float(invoice.get('vat_rate') or 0) * 100):g} %", fmt_eur_cents(credit.get("vat"))),
                    ("Montant TTC", fmt_eur_cents(credit.get("total_ttc")))], st),
@@ -1358,38 +1392,36 @@ def credit_note_pdf(invoice: dict) -> bytes:
 
 
 def payment_order_pdf(closing: dict, invoice: dict, seller: dict) -> bytes:
-    """Ordre de paiement adressé au rédacteur d'acte : instruction irrévocable prévue au mandat + rappel de la facture"""
+    """Ordre de paiement adressé au notaire en charge de la vente : instruction irrévocable prévue au mandat + rappel de la facture"""
     st = _styles()
     redacteur = closing.get("redacteur") or {}
-    terms = INVOICE_TERMS.get(invoice["sale_object"], INVOICE_TERMS["titres"])
-    target = ("sur le prix de cession lors de son paiement" if invoice["sale_object"] == "titres"
-              else "par prélèvement sur le séquestre du prix lors de sa libération, avant toute distribution au cédant")
     debtor = invoice["debtor"]
     elements = [
         _two_columns(_entity_block(st), [_p("ORDRE DE PAIEMENT", st["title"]),
-                                         _p(f"Honoraires d'intermédiation — facture n° {invoice['number']}", st["cellb"]),
+                                         _p(f"Honoraires de négociation — facture n° {invoice['number']}", st["cellb"]),
                                          _p(f"Établi le {fmt_date_fr(invoice['issued_on'])}", st["cell"])]),
         Spacer(1, 10),
-        _two_columns([_p("Destinataire (rédacteur de l'acte)", st["cellb"]),
-                      _p(f"{REDACTEUR_LABELS.get(redacteur.get('type'), 'Rédacteur')} : {redacteur.get('name') or 'à désigner par les parties'}", st["cell"]),
+        _two_columns([_p("Destinataire (notaire en charge de la vente)", st["cellb"]),
+                      _p(f"{REDACTEUR_LABELS.get(redacteur.get('type'), 'Notaire en charge de la vente')} : "
+                         f"{redacteur.get('name') or 'à désigner par les parties'}", st["cell"]),
                       _p(redacteur.get("email") or "", st["cell"]), _p(redacteur.get("phone") or "", st["cell"])],
-                     _debtor_block(debtor, st, heading="Donneur d'ordre (cédant, débiteur des honoraires)")),
+                     _debtor_block(debtor, st, heading="Donneur d'ordre (vendeur, débiteur des honoraires)")),
         Spacer(1, 12),
         _p("Objet", st["h"]),
-        _p(f"Cession de la société {debtor.get('company_name') or closing.get('property_label', '')} "
-           f"({SALE_OBJECT_LABELS.get(invoice['sale_object'], '')}), acte signé le {fmt_date_fr(invoice.get('signed_on'))}, "
-           f"prix de {fmt_eur_cents(invoice['final_price'])}, repreneur présenté par {site_name()} dans le cadre du mandat de vente "
-           f"n° {invoice.get('mandate_number', '')}.", st["p"]),
+        _p(f"{SALE_OBJECT_LABELS.get(invoice['sale_object'], 'vente du bien').capitalize()} : {closing.get('property_label', '')}, "
+           f"acte authentique signé le {fmt_date_fr(invoice.get('signed_on'))}, prix de {fmt_eur_cents(invoice['final_price'])}, "
+           f"acquéreur présenté par {site_name()} dans le cadre du mandat de vente n° {invoice.get('mandate_number', '')}.", st["p"]),
         _p("Instruction", st["h"]),
-        _p(f"Conformément au mandat de vente simple conclu avec AlterEgo SAS ({site_name()}), le cédant a donné ordre irrévocable au "
-           f"rédacteur de l'acte de régler la rémunération du mandataire {target}. Nous vous remercions de bien vouloir procéder "
-           f"au règlement de la facture ci-dessous, par virement, et de nous confirmer la date de paiement.", st["p"]),
+        _p(f"Conformément au mandat de vente simple conclu avec AlterEgo SAS ({site_name()}), le vendeur a donné ordre irrévocable au "
+           f"notaire chargé de la vente de prélever la rémunération du mandataire sur le prix de vente et de la lui verser. Nous vous "
+           f"remercions de bien vouloir procéder au règlement de la facture ci-dessous, par virement, et de nous confirmer la date "
+           f"de paiement.", st["p"]),
         Spacer(1, 6),
         _kv_table([("Facture", f"n° {invoice['number']} du {fmt_date_fr(invoice['issued_on'])}"),
                    ("Montant HT", fmt_eur_cents(invoice["total_ht"])),
                    (f"TVA {round(float(invoice['vat_rate']) * 100):g} %", fmt_eur_cents(invoice["vat"])),
                    ("Montant TTC à régler", fmt_eur_cents(invoice["total_ttc"])),
-                   ("Échéance", f"{fmt_date_fr(invoice['due_on'])} — {terms['text']}"),
+                   ("Échéance", f"{fmt_date_fr(invoice['due_on'])} — {INVOICE_PAYMENT_TEXT}"),
                    ("Bénéficiaire", f"{LEGAL_ENTITY.get('denomination', 'AlterEgo')} SAS — {bank_text()}")], st),
         Spacer(1, 10),
         _p("Rappel", st["h"]),
@@ -1398,7 +1430,7 @@ def payment_order_pdf(closing: dict, invoice: dict, seller: dict) -> bytes:
            "instruction de règlement d'honoraires sur le prix et ne constitue pas un séquestre.", st["p"]),
         _p(LATE_PENALTY_TEXT, st["small"]),
         Spacer(1, 10),
-        _p(f"Pour le cédant (donneur d'ordre) : {debtor.get('name', '')}, ordre consenti dans le mandat n° {invoice.get('mandate_number', '')}.",
+        _p(f"Pour le vendeur (donneur d'ordre) : {debtor.get('name', '')}, ordre consenti dans le mandat n° {invoice.get('mandate_number', '')}.",
            st["cell"]),
         _p(f"Pour AlterEgo SAS : {LEGAL_ENTITY.get('representant', '')}, Présidente.", st["cell"]),
         Spacer(1, 10),
@@ -1429,8 +1461,8 @@ def formal_notice_pdf(invoice: dict, today: Optional[date] = None) -> bytes:
         _p(f"Madame, Monsieur {debtor.get('name', '')},", st["p"]),
         _p(f"En exécution du mandat de vente n° {invoice.get('mandate_number', '')}, nous vous avons adressé la facture d'honoraires "
            f"n° {invoice['number']} d'un montant de {fmt_eur_cents(invoice['total_ttc'])} TTC ({fmt_eur_cents(invoice['total_ht'])} HT), "
-           f"relative à la {SALE_OBJECT_LABELS.get(invoice['sale_object'], 'cession')} de la société "
-           f"{debtor.get('company_name') or invoice.get('property_label', '')}, dont l'acte a été signé le {fmt_date_fr(invoice.get('signed_on'))}.", st["p"]),
+           f"relative à la {SALE_OBJECT_LABELS.get(invoice['sale_object'], 'vente du bien')} « {invoice.get('property_label', '')} », "
+           f"dont l'acte authentique a été signé le {fmt_date_fr(invoice.get('signed_on'))}.", st["p"]),
         _p(f"Cette facture, échue le {fmt_date_fr(invoice['due_on'])} (soit depuis {overdue_days} jours), demeure impayée malgré nos rappels "
            f"des {reminder_dates}.", st["p"]),
         _p((f"Compte tenu des acomptes reçus ({fmt_eur_cents(invoice.get('paid_amount'))} TTC), le solde restant dû s'élève à "
@@ -1481,7 +1513,7 @@ async def _invoice_for(invoice_id: str, user: Optional[dict], token: Optional[st
 
 @router.get("/invoices/my")
 async def my_invoices(current_user: dict = Depends(get_current_user)):
-    """Factures dont l'utilisateur est le débiteur (cédant)"""
+    """Factures dont l'utilisateur est le débiteur (vendeur)"""
     invoices = await db.invoices.find({"debtor.user_id": current_user["id"]}, {"_id": 0, "access_token": 0}).sort("issued_at", -1).to_list(200)
     return {"invoices": invoices}
 
@@ -1494,7 +1526,7 @@ async def get_invoice(invoice_id: str, current_user: dict = Depends(get_current_
 
 @router.get("/invoices/{invoice_id}/pdf")
 async def invoice_pdf_route(invoice_id: str, token: Optional[str] = None, current_user: Optional[dict] = Depends(get_current_user_optional)):
-    """PDF de la facture : cédant débiteur ou admin (jeton Bearer), ou lien signé de l'e-mail (?token=)"""
+    """PDF de la facture : vendeur débiteur ou admin (jeton Bearer), ou lien signé de l'e-mail (?token=)"""
     invoice = await _invoice_for(invoice_id, current_user, token)
     if not invoice.get("lines") or not invoice.get("debtor"):
         raise HTTPException(status_code=400, detail="Facture d'un ancien format (avant la refonte) : PDF non disponible, détail dans l'administration")
@@ -1504,7 +1536,7 @@ async def invoice_pdf_route(invoice_id: str, token: Optional[str] = None, curren
 
 @router.get("/invoices/{invoice_id}/avoir.pdf")
 async def credit_note_pdf_route(invoice_id: str, token: Optional[str] = None, current_user: Optional[dict] = Depends(get_current_user_optional)):
-    """PDF de l'avoir d'une facture annulée : cédant débiteur ou admin, ou lien signé de l'e-mail (?token=)"""
+    """PDF de l'avoir d'une facture annulée : vendeur débiteur ou admin, ou lien signé de l'e-mail (?token=)"""
     invoice = await _invoice_for(invoice_id, current_user, token)
     if not (invoice.get("credit_note") or {}).get("number"):
         raise HTTPException(status_code=404, detail="Aucun avoir pour cette facture")
@@ -1514,11 +1546,11 @@ async def credit_note_pdf_route(invoice_id: str, token: Optional[str] = None, cu
 
 @router.get("/closing/{closing_id}/payment-order.pdf")
 async def payment_order_route(closing_id: str, token: Optional[str] = None, current_user: Optional[dict] = Depends(get_current_user_optional)):
-    """Ordre de paiement au rédacteur d'acte (cédant, admin, ou lien signé envoyé au rédacteur)"""
+    """Ordre de paiement au notaire (vendeur, admin, ou lien signé envoyé au notaire)"""
     closing = await db.closings.find_one({"id": closing_id}, {"_id": 0})
     if not closing:
         raise HTTPException(status_code=404, detail="Étape de vente introuvable")
-    # Le PDF reprend la facture du cédant (donneur d'ordre : nom, adresse, SIREN) : jamais pour le repreneur
+    # Le PDF reprend la facture du vendeur (donneur d'ordre : nom, adresse, SIREN) : jamais pour l'acquéreur
     allowed = bool(current_user and closing_role(closing, current_user) in ("seller", "admin"))
     if not allowed and token and closing.get("payment_order_token"):
         allowed = secrets.compare_digest(closing["payment_order_token"], token)
@@ -1617,7 +1649,7 @@ async def admin_invoice_paid(invoice_id: str, data: PaidInput, current_user: dic
 @router.put("/admin/invoices/{invoice_id}/cancel")
 async def admin_invoice_cancel(invoice_id: str, data: CancelInput, current_user: dict = Depends(require_admin)):
     """Annulation motivée d'une facture émise : avoir AV-AAAA-NNNNN (compteur continu) qui l'annule en totalité, e-mail au
-    cédant ; la vente reste confirmée mais sans facture active : l'admin corrige la déclaration
+    vendeur ; la vente reste confirmée mais sans facture active : l'admin corrige la déclaration
     (PUT /admin/closings/{id}/declaration) et une nouvelle facture est émise sous le numéro suivant."""
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not invoice:
@@ -1666,7 +1698,7 @@ async def admin_invoice_cancel(invoice_id: str, data: CancelInput, current_user:
 class DeclarationCorrection(BaseModel):
     signed_on: str = Field(..., description="Date de signature de l'acte (AAAA-MM-JJ)")
     final_price: float = Field(..., gt=0)
-    sale_object: str = Field(..., description="titres | fonds")
+    sale_object: str = Field(..., description="bien | parts")
     note: Optional[str] = Field(None, max_length=2000)
 
 
@@ -1688,7 +1720,7 @@ async def admin_correct_declaration(closing_id: str, data: DeclarationCorrection
         raise HTTPException(status_code=400, detail="Date de signature invalide (format AAAA-MM-JJ, pas dans le futur)")
     sale_object = (data.sale_object or "").strip().lower()
     if sale_object not in SALE_OBJECTS:
-        raise HTTPException(status_code=400, detail="Objet de la cession invalide (titres ou fonds)")
+        raise HTTPException(status_code=400, detail={"code": "validation", "message": "Objet de la vente invalide (bien ou parts)"})
     now = _now()
     declaration = {**(closing.get("declaration") or {}), "signed_on": signed_on.isoformat(), "final_price": round(float(data.final_price), 2),
                    "sale_object": sale_object, "corrected_by_admin": current_user["id"], "corrected_at": _iso(now),
@@ -1797,9 +1829,9 @@ async def _auto_confirm(now: datetime) -> int:
         if not deadline or deadline > now:
             continue
         if declaration.get("declared_by") not in AUTO_CONFIRM_DECLARANTS:
-            # Déclaration du repreneur restée sans réponse : arbitrage admin (aucune facture sans accord du cédant)
+            # Déclaration de l'acquéreur restée sans réponse : arbitrage admin (aucune facture sans accord du vendeur)
             await add_todo(TODO_DECLARATION_UNCONFIRMED, closing["id"],
-                           f"Vente déclarée par le repreneur sans confirmation du cédant : {closing.get('property_label', '')}",
+                           f"Vente déclarée par l'acquéreur sans confirmation du vendeur : {closing.get('property_label', '')}",
                            ref={"closing_id": closing["id"], "property_id": closing.get("property_id")},
                            action=f"/api/admin/closings/{closing['id']}/resolve")
             continue
@@ -1818,7 +1850,6 @@ async def _invoice_reminders(now: datetime) -> int:
         due = _parse_date(invoice.get("due_on"))
         if not issued or not due:
             continue
-        terms = INVOICE_TERMS.get(invoice.get("sale_object"), INVOICE_TERMS["titres"])
         thresholds = _reminder_thresholds(invoice, issued, due)
         elapsed = (today - issued).days
         step = int(invoice.get("reminder_count") or 0)
@@ -1830,7 +1861,7 @@ async def _invoice_reminders(now: datetime) -> int:
                                if overdue else
                                f"{REMINDER_LABELS[step]} : la facture ci-dessous arrive à échéance le {fmt_date_fr(due)}.")
                 closing_line = ("Sans règlement après ce dernier rappel, une mise en demeure vous sera adressée."
-                                if step == len(terms["reminders"]) - 1 else "")
+                                if step == len(INVOICE_REMINDER_DAYS) - 1 else "")
                 amount_text = fmt_eur_cents(invoice["total_ttc"])
                 if invoice.get("payments"):
                     amount_text += f" (reste dû après acompte : {fmt_eur_cents(invoice_balance(invoice))})"
@@ -1844,7 +1875,7 @@ async def _invoice_reminders(now: datetime) -> int:
                 step += 1
                 actions += 1
         # Mise en demeure : après la 3e relance, une fois l'échéance passée
-        if step >= len(terms["reminders"]) and today > due and not invoice.get("formal_notice_at"):
+        if step >= len(INVOICE_REMINDER_DAYS) and today > due and not invoice.get("formal_notice_at"):
             if await claim_once("invoice_formal_notice", invoice["id"]):
                 await db.invoices.update_one({"id": invoice["id"]}, {"$set": {"formal_notice_at": _iso(now), "updated_at": _iso(now)}})
                 debtor = invoice.get("debtor") or {}
@@ -1872,4 +1903,4 @@ async def daily_job(now: Optional[datetime] = None) -> int:
 
 
 __all__ = ["router", "daily_job", "create_closing_for_offer", "confirm_closing", "issue_invoice", "invoice_pdf", "credit_note_pdf",
-           "payment_order_pdf", "formal_notice_pdf", "INVOICE_TERMS", "FOLLOWUP_DAYS", "CONFIRMATION_DAYS"]
+           "payment_order_pdf", "formal_notice_pdf", "INVOICE_DUE_DAYS", "INVOICE_REMINDER_DAYS", "FOLLOWUP_DAYS", "CONFIRMATION_DAYS"]

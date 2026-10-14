@@ -5,7 +5,7 @@
 
 const CTX = 'https://schema.org';
 
-const FALLBACK_BRAND = { name: 'CessionBâtiment', legalName: 'AlterEgo SAS', contactEmail: '' };
+const FALLBACK_BRAND = { name: 'VenteLoc', legalName: 'AlterEgo SAS', contactEmail: '' };
 const FALLBACK_LEGAL = {
   denomination: 'AlterEgo SAS',
   sirenDigits: '952180230',
@@ -39,7 +39,7 @@ export const organizationLd = (site, brand, legal) => {
     legalName: l.denomination,
     url: `${site}/`,
     logo: `${site}/logo-512.png`,
-    description: `Plateforme de cession d'entreprises du bâtiment opérée par ${l.denomination}, titulaire de la carte professionnelle T : annonces anonymes, repreneurs vérifiés, documents signés en ligne.`,
+    description: `Place de marché de biens immobiliers déjà loués, de propriétaire à investisseur, opérée par ${l.denomination}, titulaire de la carte professionnelle T : vendeurs et biens vérifiés, acquéreurs qualifiés, engagement de confidentialité et offres d'achat signés en ligne.`,
     ...(b.contactEmail ? { email: b.contactEmail } : {}),
     address: postalAddress(l.adresse),
     areaServed: 'FR',
@@ -53,7 +53,7 @@ export const organizationLd = (site, brand, legal) => {
       credentialCategory: `Carte professionnelle (loi n° 70-9 du 2 janvier 1970) — ${l.carteTActivity}`,
       recognizedBy: { '@type': 'Organization', name: l.carteTIssuer },
     },
-    ...(b.verticalName ? { brand: [{ '@type': 'Brand', name: b.name }, { '@type': 'Brand', name: b.verticalName }] } : {}),
+    brand: { '@type': 'Brand', name: b.name },
   };
 };
 
