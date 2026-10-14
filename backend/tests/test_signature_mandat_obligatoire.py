@@ -16,7 +16,7 @@ def db_call(client, fn, *args, **kwargs):
 
 
 def seller_and_mandate(api, client):
-    seller = api.register(uid("cedant"), "seller")
+    seller = api.register(uid("vendeur"), "seller")
     api.verify_kyc(seller)
     c = client.post("/api/properties", headers=api.h(seller), json=listing()).json()
     m = api.mandate(seller, c["id"])
@@ -79,32 +79,22 @@ def test_preuve_de_signature_conservee(api, client):
 
 # ---------- Mandat obligatoire / rattrapage / registre ----------
 
-def test_rattrapage_des_annonces_sans_mandat(api, client, emails):
-    seller = api.register(uid("ancien"), "seller")
-    legacy_id = str(uuid.uuid4())
-    db_call(client, server.db.properties.insert_one, {**listing(), "id": legacy_id, "seller_id": seller["id"],
-                                                     "status": "published", "created_at": datetime.now(timezone.utc).isoformat()})
-    # La route admin a disparu : la migration s'exécute en ligne de commande (python -m migrations.mandate_backfill)
+def test_annonce_sans_mandat_jamais_publique(api, client, emails):
+    seller = api.register(uid("sansmandat"), "seller")
+    api.verify_kyc(seller)
+    c = client.post("/api/properties", headers=api.h(seller), json=listing()).json()
+    api.ownership(seller, c["id"])
+    stored = db_call(client, server.db.properties.find_one, {"id": c["id"]})
+    assert stored["status"] == "mandat_en_attente" and stored["mandate_pending_since"]
+    assert client.get(f"/api/properties/{c['id']}").status_code == 404
+    assert c["id"] not in [x["id"] for x in client.get("/api/properties", params={"limit": 100}).json()]
+    assert any(e["to"] == seller["email"] and "signez votre mandat" in e["subject"].lower() for e in emails)
+    # Pas de route de rattrapage héritée de l'ancienne plateforme
     assert client.post("/api/admin/migrations/mandate-backfill", headers=api.h(api.admin())).status_code == 404
-    from migrations.mandate_backfill import run_backfill
-    notify = lambda seller_id, property_id: server.email_user(seller_id, "listing_mandate_backfill",  # noqa: E731
-                                                            link=server.site_url(f"/seller/mandat/{property_id}"))
-    dry = db_call(client, run_backfill, server.db, dry_run=True)
-    assert legacy_id in [r["id"] for r in dry["listings"]]
-    assert client.get(f"/api/properties/{legacy_id}").status_code == 200, "le dry-run n'écrit rien"
-
-    applied = db_call(client, run_backfill, server.db, dry_run=False, notify=notify)
-    assert legacy_id in [r["id"] for r in applied["listings"]]
-    assert client.get(f"/api/properties/{legacy_id}").status_code == 404, "retirée des résultats publics, pas supprimée"
-    assert db_call(client, server.db.properties.find_one, {"id": legacy_id})["status"] == "mandat_en_attente"
-    assert any(e["to"] == seller["email"] and "mandat" in e["subject"].lower() for e in emails)
-
-    again = db_call(client, run_backfill, server.db, dry_run=False)
-    assert legacy_id not in [r["id"] for r in again["listings"]], "idempotent"
-
-    back = db_call(client, run_backfill, server.db, dry_run=False, rollback=True)
-    assert legacy_id in [r["id"] for r in back["listings"]]
-    assert client.get(f"/api/properties/{legacy_id}").status_code == 200
+    # Signature du mandat : publication automatique
+    m = api.mandate(seller, c["id"])
+    assert api.sign_mandate(seller, m["contract_id"]).json()["listing_status"] == "published"
+    assert client.get(f"/api/properties/{c['id']}").status_code == 200
 
 
 def test_registre_des_mandats_et_export(api, client):

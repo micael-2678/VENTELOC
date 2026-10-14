@@ -23,11 +23,11 @@ def test_visitor_hash_sans_ip_et_sel_quotidien():
 
 
 def test_normalize_path_retire_identifiants_et_parametres():
-    assert events.normalize_path("/property/0b2f6c1e-7d2a-4c0e-9b1e-2f1a3c4d5e6f?utm=x#frag") == "/property/:id"
+    assert events.normalize_path("/annonce/0b2f6c1e-7d2a-4c0e-9b1e-2f1a3c4d5e6f?utm=x#frag") == "/annonce/:id"
     assert events.normalize_path("/confirmer-email/" + secrets.token_urlsafe(32)) == "/confirmer-email/:id"
-    assert events.normalize_path("/guides/la-qualification-rge-est-elle-transmissible") == "/guides/la-qualification-rge-est-elle-transmissible"
-    assert events.normalize_path("/verifier-entreprise-rge/12345678900011") == "/verifier-entreprise-rge/:id"
-    assert events.normalize_path("entreprises-a-vendre/") == "/entreprises-a-vendre"
+    assert events.normalize_path("/guides/acheter-un-appartement-loue") == "/guides/acheter-un-appartement-loue"
+    assert events.normalize_path("/vente/12345678900011") == "/vente/:id"
+    assert events.normalize_path("annonces/") == "/annonces"
     assert events.normalize_path("") == "/" and events.normalize_path(None) == "/"
     assert len(events.normalize_path("/" + "x" * 500)) == events.MAX_PATH_LENGTH
 

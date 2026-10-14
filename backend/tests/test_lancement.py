@@ -20,7 +20,7 @@ def test_draft_then_mandate_then_auto_publish(api, client, emails):
     c = client.post("/api/properties", headers=api.h(seller), json=listing(siret="55566677700011")).json()
     assert c["status"] == "draft"
     assert any(e["to"] == seller["email"] and "brouillon" in e["subject"] for e in emails)
-    # Identité certifiée par Stripe (simulée) : nom « Dupont » = dirigeant
+    # Identité certifiée par Stripe (simulée) : nom « Dupont » = gérant de la SCI
     db_call(client, server.db.users.update_one, {"id": seller["id"]},
             {"$set": {"verified_first_name": "Paul", "verified_last_name": "Dupont"}})
     api.verify_kyc(seller)
@@ -29,6 +29,7 @@ def test_draft_then_mandate_then_auto_publish(api, client, emails):
     listing_status = db_call(client, server.db.properties.find_one, {"id": c["id"]})["status"]
     assert listing_status == "mandat_en_attente"
     assert any(e["to"] == seller["email"] and "mandat" in e["subject"] for e in emails)
+    api.ownership(seller, c["id"])
     m = api.mandate(seller, c["id"])
     r = api.sign_mandate(seller, m["contract_id"])
     assert r.json()["listing_status"] == "published"
@@ -36,49 +37,54 @@ def test_draft_then_mandate_then_auto_publish(api, client, emails):
     assert any(e["to"] == seller["email"] and "en ligne" in e["subject"] for e in emails)
 
 
-def test_unverified_director_is_published_with_flag_and_reviewed(api, client, emails, db):
-    """SPEC §4.4 : publication sans humain ; la qualité de dirigeant non confirmée est un drapeau (post-modération 48 h),
-    plus une file « en validation » ni d'e-mail admin immédiat ; l'admin peut retirer avec un motif obligatoire."""
+def test_gerant_non_confirme_publie_avec_drapeau_et_relu(api, client, emails, db):
+    """SPEC §5.4 : publication sans humain ; un gérant de SCI différent du vendeur est un drapeau (post-modération 48 h),
+    pas une file « en validation » ni un e-mail admin immédiat ; l'admin peut retirer avec un motif obligatoire."""
     seller = api.register(uid("autre"), "seller", last="Autre")
     api.verify_kyc(seller)
-    c = client.post("/api/properties", headers=api.h(seller), json=listing(siret="66677788800011")).json()
+    c = client.post("/api/properties", headers=api.h(seller), json=listing(siret="66677788800011", postal_code="29200", city="Brest")).json()
     assert c["status"] == "mandat_en_attente"
     # L'admin ne peut pas publier sans mandat
     r = client.put(f"/api/properties/{c['id']}/status", params={"status": "published"}, headers=api.h(api.admin()))
     assert r.status_code == 400
+    api.ownership(seller, c["id"])
     m = api.mandate(seller, c["id"])
     assert api.sign_mandate(seller, m["contract_id"]).json()["listing_status"] == "published"
     assert not any(e["to"] == "admin@test.fr" and "valider" in e["subject"] for e in emails)
     doc = client.get(f"/api/properties/{c['id']}", headers=api.h(seller)).json()
     assert doc["status"] == "published"
-    assert doc["moderation"]["status"] == "pending" and "dirigeant_non_confirme" in doc["moderation"]["flags"]
-    assert doc["property_checks"]["dirigeant_match"] == "no_match" and doc["property_checks"]["siren_active"] is True
-    assert doc["trades"] == ["pac-clim-cvc"] and doc["is_rge"] is True and doc["department"] == "29"
-    assert doc["title"].startswith("Entreprise de ") and "SECRET" not in doc["title"]
+    assert doc["moderation"]["status"] == "pending" and "gerant_mismatch" in doc["moderation"]["flags"]
+    assert doc["property_checks"]["gerant_match"] == "no_match" and doc["property_checks"]["siren_active"] is True
+    assert doc["department"] == "29" and doc["region"] == "Bretagne"
+    assert doc["title"] == "Appartement T2 loué · 42 m² · Brest (29)" and "Tilleuls" not in doc["title"]
     # L'annonce figure dans « À faire » avec ses drapeaux et l'action « Retirer avec motif »
     todo = client.get("/api/admin/todo", headers=api.h(api.admin())).json()
     review = next(s for s in todo["sections"] if s["key"] == "listings_review")
     row = next(r for r in review["rows"] if r["id"] == c["id"])
-    assert "dirigeant_non_confirme" in row["ref"]["flags"] and any(a["label"].startswith("Retirer") for a in row["actions"])
-    # Retrait sans motif refusé ; avec motif : annonce retirée, mandat caduc, e-mail motivé au cédant
+    assert "gerant_mismatch" in row["ref"]["flags"] and any(a["label"].startswith("Retirer") for a in row["actions"])
+    removal = next(a for a in row["actions"] if a["label"].startswith("Retirer"))
+    assert [x["id"] if isinstance(x, dict) else x for x in removal["reasons"]][:1] == ["justificatif"]
+    # Retrait sans motif refusé ; avec motif : annonce retirée, mandat caduc, e-mail motivé au vendeur
     r = client.put(f"/api/properties/{c['id']}/status", params={"status": "removed"}, headers=api.h(api.admin()))
     assert r.status_code == 400
-    r = client.put(f"/api/properties/{c['id']}/status", params={"status": "removed", "reason": "dirigeant", "reason_text": "SIREN d'une holding"},
+    r = client.put(f"/api/properties/{c['id']}/status", params={"status": "removed", "reason": "justificatif",
+                                                                "reason_text": "Le titre de propriété est au nom d'un tiers"},
                    headers=api.h(api.admin()))
     assert r.status_code == 200, r.text
     assert client.get(f"/api/properties/{c['id']}").status_code == 404
     mandate = client.portal.call(server.db.generated_contracts.find_one, {"id": m["contract_id"]})
     e = next(e for e in reversed(emails) if e["to"] == seller["email"] and "retirée" in e["subject"])
-    assert "holding" in e["html"]
+    assert "au nom d" in e["html"] and "tiers" in e["html"]
     assert mandate["status"] == "void"
     # Validation par l'admin d'une autre annonce : relecture close
     seller2 = api.register(uid("dupont"), "seller", first="Paul", last="Dupont")
     api.verify_kyc(seller2)
     c2 = client.post("/api/properties", headers=api.h(seller2), json=listing(siret="66677788900011")).json()
+    api.ownership(seller2, c2["id"])
     m2 = api.mandate(seller2, c2["id"])
     assert api.sign_mandate(seller2, m2["contract_id"]).json()["listing_status"] == "published"
     doc2 = client.get(f"/api/properties/{c2['id']}", headers=api.h(seller2)).json()
-    assert "dirigeant_non_confirme" not in doc2["moderation"]["flags"] and doc2["property_checks"]["dirigeant_match"] == "match_exact"
+    assert "gerant_mismatch" not in doc2["moderation"]["flags"] and doc2["property_checks"]["gerant_match"] == "match_exact"
     r = client.put(f"/api/properties/{c2['id']}/status", params={"status": "published"}, headers=api.h(api.admin()))
     assert r.status_code == 200
     assert client.get(f"/api/properties/{c2['id']}", headers=api.h(seller2)).json()["moderation"]["status"] == "ok"
@@ -106,7 +112,7 @@ def test_scheduled_jobs_reminder_followup_relaunch(api, client, emails):
     old = (datetime.now(timezone.utc) - timedelta(days=31)).isoformat()
     db_call(client, server.db.messages.update_many, {"property_id": c["id"]}, {"$set": {"created_at": old}})
     db_call(client, server.db.contacts.update_many, {"property_id": c["id"]}, {"$set": {"created_at": old}})
-    # Relance du cédant : dernier message du repreneur sans réponse depuis plus de 3 jours (conversation)
+    # Relance du vendeur : dernier message de l'acquéreur sans réponse depuis plus de 3 jours (conversation)
     waiting = (datetime.now(timezone.utc) - timedelta(days=4)).isoformat()
     db_call(client, server.db.conversations.update_many, {"property_id": c["id"]}, {"$set": {"last_at": waiting}})
     db_call(client, server.db.users.update_one, {"id": lazy_seller["id"]}, {"$set": {"created_at": old}})
@@ -117,7 +123,7 @@ def test_scheduled_jobs_reminder_followup_relaunch(api, client, emails):
     subjects = [(e["to"], e["subject"]) for e in emails]
     assert (seller["email"], "Un acquéreur attend votre réponse") in subjects
     assert (buyer["email"], "Où en êtes-vous avec ce vendeur ?") in subjects
-    assert (lazy_seller["email"], "Votre annonce de cession en 10 minutes") in subjects
+    assert (lazy_seller["email"], "Votre annonce de bien loué en 10 minutes") in subjects
 
     # Pas de doublon au passage suivant
     emails.clear()
@@ -126,24 +132,26 @@ def test_scheduled_jobs_reminder_followup_relaunch(api, client, emails):
 
     # Réponse au questionnaire via le lien de l'email
     followup = db_call(client, server.db.followups.find_one, {"buyer_id": buyer["id"]})
-    r = client.post(f"/api/followup/{followup['token']}", json={"answer": "rencontre", "comment": "RDV la semaine prochaine"})
-    assert r.status_code == 200 and r.json()["label"] == "Rencontre prévue ou faite"
+    r = client.post(f"/api/followup/{followup['token']}", json={"answer": "rencontre", "comment": "Visite avec le locataire la semaine prochaine"})
+    assert r.status_code == 200 and r.json()["label"] == "Visite prévue ou faite"
     assert client.post("/api/followup/faux", json={"answer": "accord"}).status_code == 404
 
 
 def test_public_stats_and_sitemap(api, client):
     seller = api.register(uid("seo"), "seller")
     api.verify_kyc(seller)
-    c = client.post("/api/properties", headers=api.h(seller), json=listing(siret="88899900000011", region="Provence-Alpes-Côte d'Azur")).json()
+    c = client.post("/api/properties", headers=api.h(seller), json=listing(property_type="local-commercial", lease_type="commercial",
+                                                                           postal_code="13001", city="Marseille", indexation="ilc")).json()
     api.publish(seller, c["id"])
     stats = client.get("/api/public/listing-stats").json()
-    assert any(r["value"] == "Provence-Alpes-Côte d'Azur" for r in stats["by_region"])
-    assert any(r["value"] == "pac-clim-cvc" and r["count"] >= 1 and r["slug"] == "pac-clim-cvc" for r in stats["by_trade"])
-    assert all(r["count"] > 0 for key in ("by_trade", "by_department", "by_region", "by_rge") for r in stats[key])
+    assert set(stats) == {"total", "by_property_type", "by_lease_type", "by_department", "by_region"} and stats["total"] >= 1
+    assert any(r["value"] == "Provence-Alpes-Côte d'Azur" and r["slug"] == "provence-alpes-cote-d-azur" for r in stats["by_region"])
+    assert any(r["value"] == "local-commercial" and r["count"] >= 1 for r in stats["by_property_type"])
+    assert any(r["value"] == "13" and r["label"] == "Bouches-du-Rhône" for r in stats["by_department"])
+    assert all(r["count"] > 0 for key in ("by_property_type", "by_lease_type", "by_department", "by_region") for r in stats[key])
     xml = client.get("/api/sitemap.xml").text
-    # Plan du site recentré sur l'application (MODE-TEST-ET-APP.md §A) : fiches des annonces publiées, plus aucune
-    # ancienne page marketing (redirigées vers la page des annonces)
-    assert f"https://cessionrge.test/property/{c['id']}</loc>" in xml
+    # Plan du site : fiches des annonces publiées sous /annonce/{id}, plus aucune page de l'ancienne plateforme
+    assert f"https://venteloc.test/annonce/{c['id']}</loc>" in xml and "/property/" not in xml
     for legacy in ("/entreprises-rge-a-vendre", "/entreprises-batiment-a-vendre", "/entreprises-a-vendre</loc>", "/search</loc>", "/guides"):
         assert legacy not in xml
 
@@ -162,6 +170,6 @@ def test_sitemap_matches_prerendered_routes(client):
     # Routes statiques reprises telles quelles, sauf les anciennes pages redirigées (fichier lu tel qu'il est livré)
     for route in backend_copy:
         path = route["path"]
-        listed = f"https://cessionrge.test{path}</loc>" in xml
+        listed = f"https://venteloc.test{path}</loc>" in xml
         assert listed == server.sitemap_static_path(path), path
-    assert "https://cessionrge.test/</loc>" in xml
+    assert "https://venteloc.test/</loc>" in xml and "https://venteloc.test/vendre</loc>" in xml

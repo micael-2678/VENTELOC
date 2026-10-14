@@ -15,13 +15,13 @@ import closing
 import opendata
 import server
 import testmode
-from conftest import listing, sent_emails
+from conftest import Api, listing, sent_emails
 from migrations import purge_test_data as purge_cli
 from test_closing import _declare, _setup
 from test_parcours_v2 import db_call, published_listing, uid, unique_siret
 
 BANNER = business_model.TEST_DOCUMENT_BANNER
-DEMO_EMAILS = {"vendeur": "vendeur.demo@test.local", "repreneur": "repreneur.demo@test.local", "admin": "admin.demo@test.local"}
+DEMO_EMAILS = {"vendeur": "vendeur.demo@test.local", "acquereur": "acquereur.demo@test.local", "admin": "admin.demo@test.local"}
 TEST_ROUTES = [("post", "/api/test/identity/simulate"), ("post", "/api/test/confirm-email"), ("post", "/api/test/seed"),
                ("post", "/api/test/login-as"), ("get", "/api/test/emails"), ("get", "/api/test/emails/inconnu"),
                ("delete", "/api/test/emails")]
@@ -56,8 +56,9 @@ def register(client, role, verify=True, **extra):
     body = {"email": email, "password": "Password1!", "role": role, "first_name": "Jean", "last_name": "Essai",
             "company_name": "Essai SAS", **extra}
     if role == "buyer":
-        body.setdefault("buyer_profile", {"project_type": "reprise-individuelle", "budget_max": 600000, "apport": 150000,
-                                          "financing": "mixte", "zones": ["Bretagne"], "trades": ["pac-clim-cvc"], "horizon": "6-12"})
+        body.setdefault("buyer_profile", {"project_type": "particulier", "budget_max": 600000, "apport": 150000,
+                                          "financing": "mixte", "zones": ["Bretagne"], "property_types": ["appartement"],
+                                          "min_yield": 4, "horizon": "6-12"})
         body.setdefault("phone", "06 12 34 56 78")
     r = client.post("/api/auth/register", json=body)
     assert r.status_code == 200, r.text
@@ -95,9 +96,17 @@ def simulate(client, user, **body):
 
 
 def sign_mandate(client, seller, property_id):
-    """Adresse du mandant, mandat généré puis signé avec le code renvoyé en clair (`test_code`)"""
+    """Justificatif de propriété déposé, adresse et qualité du mandant, mandat généré puis signé avec le code renvoyé en
+    clair (`test_code`)"""
+    property = client.get(f"/api/properties/{property_id}", headers=h(seller)).json()
+    if (property.get("ownership") or {}).get("status") not in ("pending", "verified"):
+        r = client.post(f"/api/properties/{property_id}/ownership-proof", headers=h(seller), data={"doc_type": "titre-propriete"},
+                        files={"file": ("titre.pdf", Api.PDF, "application/pdf")})
+        assert r.status_code == 200, r.text
+    capacity = "gerant" if property.get("owner_type") in ("sci", "societe") else "proprietaire"
     r = client.put(f"/api/properties/{property_id}", headers=h(seller),
-                   json={"mandant_address": {"line1": "3 quai de la Douane", "postal_code": "29200", "city": "Brest"}})
+                   json={"mandant_address": {"line1": "3 quai de la Douane", "postal_code": "29200", "city": "Brest"},
+                         "mandant_capacity": capacity})
     assert r.status_code == 200, r.text
     m = client.post("/api/seller/mandat/generate", params={"property_id": property_id}, headers=h(seller))
     assert m.status_code == 200, m.text
@@ -226,7 +235,7 @@ def test_simulate_identity_submits_draft_then_publishes(api, client, test_mode, 
     _, signed = sign_mandate(client, seller, c["id"])
     assert signed["listing_status"] == "published"
     property = stored(client, "properties", {"id": c["id"]})
-    assert property["status"] == "published" and property["is_test"] is True and property["title"] and property["trades"]
+    assert property["status"] == "published" and property["is_test"] is True and property["title"] and property["gross_yield"]
     # Hors mode test, une identité simulée ne vaut plus rien
     account = stored(client, "users", {"id": seller["id"]})
     assert server.is_user_verified(account) is True
@@ -258,52 +267,45 @@ def _ceased(monkeypatch):
     async def lookup(siren_or_siret):
         siren = re.sub(r"\D", "", str(siren_or_siret))[:9]
         return {"available": True, "found": True, "siren": siren, "siret": siren + "00011", "siren_active": False, "etat": "cessé",
-                "naf": "43.22A", "naf_status": "batiment", "naf_in_building": True, "departement": "29", "region": "Bretagne",
-                "nom_complet": "ENTREPRISE CESSÉE", "dirigeants": []}
+                "departement": "69", "region": "Auvergne-Rhône-Alpes", "nom_complet": "SCI CESSÉE", "dirigeants": []}
     monkeypatch.setattr(opendata, "lookup_siren", lookup)
 
 
 def test_relaxed_publication_checks_in_test_mode(api, client, test_mode, monkeypatch):
-    # SIRET fictif (clé de contrôle fausse) accepté, doublon publié avec un drapeau
+    # SIRET fictif (clé de contrôle fausse) accepté ; même adresse publiée par un autre compte : drapeau
     siret = "99912345600019"
     assert opendata.validate_siret(siret) is None
-    _, first, _, _ = make_test_listing(client, siret=siret)
-    _, second, _, _ = make_test_listing(client, siret=siret)
+    _, first, _, _ = make_test_listing(client, siret=siret, address="4 rue de l'Essai")
+    _, second, _, _ = make_test_listing(client, siret=siret, address="4 rue de l'Essai")
     property = stored(client, "properties", {"id": second["id"]})
-    assert property["status"] == "published" and "doublon_siren" in property["moderation"]["flags"] and not property["blocking"]
-    # Entreprise cessée : drapeau, pas de blocage
+    assert property["status"] == "published" and "duplicate_address" in property["moderation"]["flags"] and not property["blocking"]
+    # Société cessée : drapeau en mode test (données de test), pas de blocage
     _ceased(monkeypatch)
     _, ceased, _, _ = make_test_listing(client)
     property = stored(client, "properties", {"id": ceased["id"]})
-    assert property["status"] == "published" and "siren_inactif" in property["moderation"]["flags"]
+    assert property["status"] == "published" and "societe_cessee" in property["moderation"]["flags"]
     todo = client.get("/api/admin/todo", headers=api.h(test_mode)).json()
     review = next(s for s in todo["sections"] if s["key"] == "listings_review")
     assert any("mode test : non bloquant" in r["detail"] for r in review["rows"] if r["id"] == ceased["id"])
-    # Les autres motifs restent bloquants : prix manquant
+    # Les autres motifs restent bloquants : DPE manquant
     seller = register(client, "seller")
     simulate(client, seller)
-    c = client.post("/api/properties", headers=h(seller), json=listing(siret=unique_siret(), asking_price=0, sale_object="titres")).json()
+    c = client.post("/api/properties", headers=h(seller), json=listing(siret=unique_siret(), dpe_class=None)).json()
     sign_mandate(client, seller, c["id"])
     property = stored(client, "properties", {"id": c["id"]})
-    assert property["status"] == "draft" and property["blocking"] == ["prix_manquant"]
+    assert property["status"] == "draft" and [b["code"] for b in property["blocking"]] == ["dpe"]
 
 
 def test_strict_publication_checks_outside_test_mode(api, client, admin, monkeypatch):
-    seller, c = published_listing(api, client)
-    other = api.register(uid("doublon-reel"), "seller")
-    api.verify_kyc(other)
-    dup = client.post("/api/properties", headers=api.h(other), json=listing(siret=stored(client, "properties", {"id": c["id"]})["siret"])).json()
-    m = api.mandate(other, dup["id"])
-    assert api.sign_mandate(other, m["contract_id"]).status_code == 200
-    property = stored(client, "properties", {"id": dup["id"]})
-    assert property["status"] == "draft" and "doublon_siren" in property["blocking"] and "is_test" not in property
     _ceased(monkeypatch)
     seller2 = api.register(uid("cessee-reelle"), "seller")
     api.verify_kyc(seller2)
     c2 = client.post("/api/properties", headers=api.h(seller2), json=listing(siret=unique_siret())).json()
+    api.ownership(seller2, c2["id"])
     m2 = api.mandate(seller2, c2["id"])
     assert api.sign_mandate(seller2, m2["contract_id"]).status_code == 200
-    assert "siren_inactif" in stored(client, "properties", {"id": c2["id"]})["blocking"]
+    property = stored(client, "properties", {"id": c2["id"]})
+    assert property["status"] == "draft" and "societe_cessee" in [b["code"] for b in property["blocking"]] and "is_test" not in property
 
 
 # ---------- Pas de vrais engagements ----------
@@ -355,8 +357,10 @@ def test_test_offer_and_nda_carry_banner(api, client, test_mode):
     assert client.post(f"/api/contracts/{nda['contract_id']}/sign", headers=h(buyer), json={"otp_code": code}).status_code == 200
     r = client.post(f"/api/dataroom/{c['id']}/funds-declaration", headers=h(buyer), json={"source": "mixte", "amount": 300000})
     assert r.status_code == 200 and r.json()["access_granted"] is True
-    r = client.post("/api/offers", headers=h(buyer), json={"property_id": c["id"], "amount": 450000, "sale_object": "titres",
-                                                            "financing": {"equity": 100000, "loan": 350000}, "target_date": "2027-06-30",
+    r = client.post("/api/offers", headers=h(buyer), json={"property_id": c["id"], "amount": 190000, "sale_object": "bien",
+                                                            "financing": {"equity": 50000, "loan": 140000}, "target_date": "2027-06-30",
+                                                            "loan_condition": {"required": True, "amount": 140000, "max_rate": 4,
+                                                                               "duration_years": 20},
                                                             "validity_days": 15})
     assert r.status_code == 200, r.text
     assert r.json()["content"].startswith(BANNER)
@@ -404,23 +408,35 @@ def test_seed_is_idempotent_and_realistic(api, client, test_mode, monkeypatch):
     assert second["accounts_created"] == 0 and second["listings_created"] == 0 and second["listings_published"] == 8
     users = {p: stored(client, "users", {"email": e}) for p, e in DEMO_EMAILS.items()}
     assert db_call(client, server.db.users.count_documents, {"email": {"$in": list(DEMO_EMAILS.values())}}) == 3
-    assert users["admin"]["role"] == "admin" and users["vendeur"]["role"] == "seller" and users["repreneur"]["role"] == "buyer"
+    assert users["admin"]["role"] == "admin" and users["vendeur"]["role"] == "seller" and users["acquereur"]["role"] == "buyer"
     for user in users.values():
         assert user["is_test"] and user["email_verified"] and user["identity_verified"] and user["kyc_provider"] == "test"
-    assert server.buyer_profile_score(users["repreneur"]) >= 50
+    assert server.buyer_profile_score(users["acquereur"]) >= 50
+    assert users["acquereur"]["buyer_profile"]["property_types"] and users["acquereur"]["buyer_profile"]["min_yield"]
     properties = db_call(client, lambda: server.db.properties.find({"seller_id": users["vendeur"]["id"]}, {"_id": 0}).to_list(50))
     assert len(properties) == 8 and all(c["status"] == "published" and c["is_test"] for c in properties)
     prices = sorted(c["asking_price"] for c in properties)
-    assert prices[0] == 90000 and prices[-1] == 1400000
-    assert len({c["region"] for c in properties}) == 8 and len({t for c in properties for t in c["trades"]}) >= 8
-    assert any(c["rge_types"] for c in properties) and any(not c["rge_types"] and c["other_qualifications"] for c in properties)
+    assert prices[0] == 32000 and prices[-1] == 390000
+    assert len({c["city"] for c in properties}) == 8 and len({c["property_type"] for c in properties}) >= 6
+    assert {"parking", "local-commercial", "immeuble", "residence-geree", "maison", "appartement"} <= {c["property_type"] for c in properties}
+    assert {"personne-physique", "indivision", "sci"} <= {c["owner_type"] for c in properties}
     for c in properties:
         assert c["region"] == server.taxonomy.region_for_departement(c["department"])
-        assert 300 <= len(c["description"]) <= 600 and not server.mask_contacts(c["description"])[1]
-        assert c["title"] and c["property_checks"] and c["moderation"]["status"] in ("pending", "ok")
+        assert 300 <= len(c["description"]) <= 700 and not server.mask_contacts(c["description"])[1]
+        assert c["title"] and c["gross_yield"] and c["net_yield"] and c["ownership"]["status"] == "verified"
+        assert c["address"] not in c["title"] and c["moderation"]["status"] in ("pending", "ok")
         mandate = stored(client, "generated_contracts", {"id": c["mandate_id"]})
         assert mandate["status"] == "signed" and mandate["is_test"] and str(mandate["registry_number"]).startswith("TEST-")
-        assert c["is_rge"] is bool(c["rge_types"])
+        proof = stored(client, "ownership_proofs", {"property_id": c["id"]})
+        assert proof and proof["is_test"] is True
+    # Une annonce reste à relire (SCI au SIRET fictif) ; la maison en DPE F a son échéance de décence énergétique
+    to_review = [c for c in properties if c["moderation"]["status"] == "pending"]
+    assert [c["demo_key"] for c in to_review] == ["immeuble-saint-etienne"] and to_review[0]["mandant_capacity"] == "gerant"
+    todo = client.get("/api/admin/todo", headers=api.h(test_mode)).json()
+    review = next(s for s in todo["sections"] if s["key"] == "listings_review")
+    assert any(r["id"] == to_review[0]["id"] for r in review["rows"])
+    house = next(c for c in properties if c["dpe_class"] == "F")
+    assert house["dpe_rental"] == {"status": "echeance", "date": "2028-01-01"}
     # Visibles du public en mode test ; masquées dès que le mode test est désactivé
     listed = {c["id"] for c in client.get("/api/properties", params={"limit": 100}).json()}
     assert {c["id"] for c in properties} <= listed
@@ -443,13 +459,13 @@ def test_login_as_and_demo_login(api, client, test_mode):
     # Persona inexistant
     assert client.post("/api/test/login-as", json={"persona": "notaire"}).status_code == 422
     # Jamais un vrai compte : l'adresse de démonstration portée par un compte réel est refusée
-    db_call(client, server.db.users.update_one, {"email": DEMO_EMAILS["repreneur"]}, {"$set": {"is_test": False}})
-    r = client.post("/api/test/login-as", json={"persona": "repreneur"})
+    db_call(client, server.db.users.update_one, {"email": DEMO_EMAILS["acquereur"]}, {"$set": {"is_test": False}})
+    r = client.post("/api/test/login-as", json={"persona": "acquereur"})
     assert r.status_code == 403
     assert client.post("/api/test/seed").status_code == 409
-    db_call(client, server.db.users.update_one, {"email": DEMO_EMAILS["repreneur"]}, {"$set": {"is_test": True}})
+    db_call(client, server.db.users.update_one, {"email": DEMO_EMAILS["acquereur"]}, {"$set": {"is_test": True}})
     # Connexion normale avec le mot de passe affiché (adresse @test.local acceptée à la connexion, refusée à l'inscription)
-    r = client.post("/api/auth/login", json={"email": DEMO_EMAILS["repreneur"], "password": "Demo-2026!"})
+    r = client.post("/api/auth/login", json={"email": DEMO_EMAILS["acquereur"], "password": "Demo-2026!"})
     assert r.status_code == 200 and r.json()["token"]
     r = client.post("/api/auth/login", json={"email": DEMO_EMAILS["admin"], "password": "Demo-2026!"})
     assert r.json()["otp_required"] is True and r.json()["test_code"]
@@ -492,16 +508,16 @@ def test_sitemap_never_lists_test_listings(api, client, admin, monkeypatch):
     monkeypatch.setenv("TEST_MODE", "true")
     _, test_property, _, _ = make_test_listing(client)
     xml = client.get("/api/sitemap.xml").text
-    assert f"/property/{real['id']}</loc>" in xml
-    assert f"/property/{test_property['id']}" not in xml
+    assert f"/annonce/{real['id']}</loc>" in xml
+    assert f"/annonce/{test_property['id']}" not in xml
 
 
 def test_purge_removes_test_data_only(api, client, admin, monkeypatch):
-    # Données réelles (hors mode test) : vendeur, annonce publiée, mandat, repreneur
+    # Données réelles (hors mode test) : vendeur, annonce publiée, mandat, acquéreur
     real_seller, real_property = published_listing(api, client)
-    real_buyer = api.register(uid("reel-rep"), "buyer")
+    real_buyer = api.register(uid("reel-acq"), "buyer")
     real_mandate_id = stored(client, "properties", {"id": real_property["id"]})["mandate_id"]
-    # Données de test : annonce avec photo, repreneur de test qui contacte une annonce réelle, alerte sans compte
+    # Données de test : annonce avec photo et justificatif, acquéreur de test qui contacte une annonce réelle, alerte sans compte
     monkeypatch.setenv("TEST_MODE", "true")
     seller, c, mandate, _ = make_test_listing(client)
     png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
@@ -510,7 +526,7 @@ def test_purge_removes_test_data_only(api, client, admin, monkeypatch):
     test_buyer = register(client, "buyer")
     r = client.post(f"/api/properties/{real_property['id']}/contact", headers=h(test_buyer), json={"message": "Bonjour, je suis intéressée"})
     assert r.status_code == 200, r.text
-    assert client.post("/api/alerts/public", json={"email": uid("alerte-essai"), "trades": ["isolation"]}).status_code == 200
+    assert client.post("/api/alerts/public", json={"email": uid("alerte-essai"), "property_types": ["parking"]}).status_code == 200
     client.post("/api/test/seed")
     monkeypatch.delenv("TEST_MODE")
 
@@ -520,7 +536,7 @@ def test_purge_removes_test_data_only(api, client, admin, monkeypatch):
     dry = client.post("/api/admin/test/purge", headers=api.h(admin)).json()
     assert dry["dry_run"] is True and dry["total"] > 0
     for coll in ("users", "properties", "generated_contracts", "property_photos", "conversations", "messages", "test_emails", "counters",
-                 "public_alerts", "documents"):
+                 "public_alerts", "documents", "ownership_proofs"):
         assert dry["counts"].get(coll, 0) > 0, coll
     assert stored(client, "users", {"id": test_buyer["id"]})
     assert client.portal.call(purge_cli.purge_test_data, server.db, True)["counts"] == dry["counts"]
@@ -528,7 +544,7 @@ def test_purge_removes_test_data_only(api, client, admin, monkeypatch):
     done = client.post("/api/admin/test/purge", params={"dry_run": "false"}, headers=api.h(admin)).json()
     assert done["dry_run"] is False and done["counts"] == dry["counts"]
     for coll in ("users", "properties", "generated_contracts", "offers", "closings", "invoices", "alerts", "public_alerts",
-                 "dataroom_access", "conversations", "property_photos", "documents", "events", "estimates"):
+                 "dataroom_access", "conversations", "property_photos", "documents", "events", "estimates", "ownership_proofs"):
         assert db_call(client, getattr(server.db, coll).count_documents, {"is_test": True}) == 0, coll
     assert db_call(client, server.db.test_emails.count_documents, {}) == 0
     assert not db_call(client, server.db.counters.find_one, {"_id": {"$regex": "_test$"}})

@@ -22,12 +22,18 @@ def _property(client, property_id):
     return db_call(client, server.db.properties.find_one, {"id": property_id}, {"_id": 0})
 
 
+def _after_withdrawal_period(client, contract_id):
+    """Délai de rétractation de 14 jours écoulé : une résiliation suit alors le préavis de 15 jours"""
+    db_call(client, server.db.generated_contracts.update_one, {"id": contract_id}, {"$set": {"withdrawal_ends_at": iso(-1)}})
+
+
 # ---------- Mandat : dénonciation puis nouveau mandat pendant le préavis (contrats-argent-01) ----------
 
 def test_nouveau_mandat_pendant_le_preavis_garde_l_annonce_en_ligne(api, client, emails):
     seller, c, m, signed = signed_mandate(api, client)
+    _after_withdrawal_period(client, m["contract_id"])
     assert client.post(f"/api/seller/mandat/{m['contract_id']}/denounce", headers=api.h(seller)).status_code == 200
-    # Le cédant change d'avis pendant le préavis : nouveau mandat signé
+    # Le vendeur change d'avis pendant le préavis : nouveau mandat signé
     m2 = api.mandate(seller, c["id"])
     assert m2["already_signed"] is False and m2["contract_id"] != m["contract_id"]
     r2 = api.sign_mandate(seller, m2["contract_id"])
@@ -53,6 +59,7 @@ def test_nouveau_mandat_pendant_le_preavis_garde_l_annonce_en_ligne(api, client,
 def test_clause_de_suite_comptee_depuis_la_fin_effective(api, client, emails):
     seller, c, m, signed = signed_mandate(api, client)
     presented_buyer(api, client, seller, c["id"])
+    _after_withdrawal_period(client, m["contract_id"])
     r = client.post(f"/api/seller/mandat/{m['contract_id']}/denounce", headers=api.h(seller))
     assert r.status_code == 200, r.text
     effective = datetime.fromisoformat(r.json()["effective_at"])
@@ -62,7 +69,7 @@ def test_clause_de_suite_comptee_depuis_la_fin_effective(api, client, emails):
     status = client.get(f"/api/seller/mandat/status/{c['id']}", headers=api.h(seller)).json()
     assert datetime.fromisoformat(status["mandat"]["tail_ends_at"]) == expected_tail
     assert datetime.fromisoformat(_property(client, c["id"])["mandate_tail_ends_at"]) == expected_tail
-    # E-mail de fin de mandat à la date d'effet : clause de suite = effet + 18 mois
+    # E-mail de fin de mandat à la date d'effet : clause de suite = effet + 12 mois
     db_call(client, server.db.generated_contracts.update_one, {"id": m["contract_id"]}, {"$set": {"effective_at": iso(-1)}})
     emails.clear()
     run_jobs(api, client)
@@ -73,7 +80,7 @@ def test_clause_de_suite_comptee_depuis_la_fin_effective(api, client, emails):
 
 def test_clause_de_suite_du_mandat_caduc(api, client):
     seller, c, m, signed = signed_mandate(api, client)
-    r = client.put(f"/api/properties/{c['id']}/status", params={"status": "removed", "reason": "coordonnees"}, headers=api.h(api.admin()))
+    r = client.put(f"/api/properties/{c['id']}/status", params={"status": "removed", "reason": "contenu-interdit"}, headers=api.h(api.admin()))
     assert r.status_code == 200
     mandat = _mandate(client, m["contract_id"])
     tail = datetime.fromisoformat(mandat["tail_ends_at"])
@@ -86,6 +93,7 @@ def test_clause_de_suite_du_mandat_caduc(api, client):
 
 def test_nouveau_mandat_apres_denonciation_effective_republie(api, client, emails):
     seller, c, m, signed = signed_mandate(api, client)
+    _after_withdrawal_period(client, m["contract_id"])
     client.post(f"/api/seller/mandat/{m['contract_id']}/denounce", headers=api.h(seller))
     db_call(client, server.db.generated_contracts.update_one, {"id": m["contract_id"]}, {"$set": {"effective_at": iso(-1)}})
     assert run_jobs(api, client)["daily:mandate_denounce_effective"] == 1
@@ -103,7 +111,7 @@ def test_retrait_volontaire_pas_republie_par_un_nouveau_mandat(api, client):
     assert client.put(f"/api/properties/{c['id']}/status", params={"status": "withdrawn"}, headers=api.h(seller)).status_code == 200
     db_call(client, server.db.generated_contracts.update_one, {"id": m["contract_id"]}, {"$set": {"ends_at": iso(-1)}})
     run_jobs(api, client)
-    assert _property(client, c["id"])["withdrawn_reason"] == "cedant"
+    assert _property(client, c["id"])["withdrawn_reason"] == "vendeur"
     m2 = api.mandate(seller, c["id"])
     assert api.sign_mandate(seller, m2["contract_id"]).json()["listing_status"] == "withdrawn"
 
@@ -121,18 +129,18 @@ def test_numero_de_registre_sans_doublon(api, client):
 
 # ---------- Offre : preuve de la contre-proposition (contrats-argent-08) ----------
 
-def test_contre_proposition_avec_dossier_de_preuve_du_cedant(api, client, emails):
+def test_contre_proposition_avec_dossier_de_preuve_du_vendeur(api, client, emails):
     seller, c = published(api, client)
     buyer = presented_buyer(api, client, seller, c["id"])
     created = client.post("/api/offers", headers=api.h(buyer), json={"property_id": c["id"], **OFFER}).json()
     offer, contract_id = created["offer"], created["contract_id"]
     api.sign_contract(buyer, contract_id)
-    r = client.put(f"/api/offers/{offer['id']}/respond", headers={**api.h(seller), "User-Agent": "NavigateurCedant/1.0"},
-                   json={"action": "counter", "counter_amount": 520000})
+    r = client.put(f"/api/offers/{offer['id']}/respond", headers={**api.h(seller), "User-Agent": "NavigateurVendeur/1.0"},
+                   json={"action": "counter", "counter_amount": 200000})
     assert r.status_code == 200, r.text
     record = db_call(client, server.db.documents.find_one, {"contract_id": contract_id, "doc_type": "offer_counter_proposal"}, {"_id": 0})
     assert record and record["signer_id"] == seller["id"] and record["signer_role"] == "seller"
-    assert record["evidence"]["user_agent"] == "NavigateurCedant/1.0" and record["evidence"]["method"] == "authenticated_session"
+    assert record["evidence"]["user_agent"] == "NavigateurVendeur/1.0" and record["evidence"]["method"] == "authenticated_session"
     assert record["evidence"]["document_sha256"] == server.hashlib.sha256(record["addendum"].encode()).hexdigest()
     assert db_call(client, server.db.offers.find_one, {"id": offer["id"]})["counter"]["record_id"] == record["id"]
     code = api.request_code(buyer, contract_id)
@@ -140,7 +148,7 @@ def test_contre_proposition_avec_dossier_de_preuve_du_cedant(api, client, emails
     contract = _mandate(client, contract_id)
     assert contract["status"] == "fully_signed" and contract["countersignature_record_id"] == record["id"]
     text = pdf_text(base64.b64decode(client.get(f"/api/offers/{offer['id']}/pdf", headers=api.h(seller)).json()["content"]))
-    assert "contre-proposition du cédant" in text and "Paul Dupont" in text
+    assert "contre-proposition du vendeur" in text and "Paul Dupont" in text
 
 
 # ---------- Offre : validité à compter de la signature (contrats-argent-09) ----------
@@ -150,7 +158,7 @@ def test_validite_de_l_offre_comptee_depuis_la_signature(api, client):
     buyer = presented_buyer(api, client, seller, c["id"])
     created = client.post("/api/offers", headers=api.h(buyer), json={"property_id": c["id"], **OFFER}).json()
     offer, contract_id = created["offer"], created["contract_id"]
-    # Offre déposée il y a 5 jours (échéance initiale : dépôt + 30 j), signée aujourd'hui
+    # Offre déposée il y a 5 jours (échéance initiale : dépôt + 10 j), signée aujourd'hui
     old_expiry = datetime.fromisoformat(offer["expires_at"])
     shifted = old_expiry - timedelta(days=5)
     contract = _mandate(client, contract_id)
@@ -218,7 +226,7 @@ def test_redeclaration_apres_contestation(api, client, emails):
     assert client.post(f"/api/closing/{cid}/dispute", headers=api.h(buyer), json={"reason": "Le prix signé est de 300 000 €"}).status_code == 200
     # Le déclarant contesté ne peut pas effacer la contestation
     r = client.post(f"/api/closing/{cid}/declare", headers=api.h(seller),
-                    json={"signed_on": day(-2), "final_price": 200000, "sale_object": "titres"})
+                    json={"signed_on": day(-2), "final_price": 200000, "sale_object": "bien"})
     assert r.status_code == 400 and r.json()["detail"]["code"] == "disputed"
     c = _closing(client, cid)
     assert c["status"] == "disputed" and c["dispute"]["by"] == "buyer"
@@ -261,7 +269,7 @@ def test_annulation_avoir_et_reemission(api, client, emails):
     reissued = _invoice(client, _closing(client, cid)["invoice_id"])
     assert reissued["sequence"] > inv["sequence"]
     # Correction de la déclaration par l'admin : refusée tant qu'une facture est active, puis nouvelle facture au bon prix
-    payload = {"signed_on": day(-3), "final_price": 350000, "sale_object": "titres", "note": "Prix de l'acte"}
+    payload = {"signed_on": day(-3), "final_price": 350000, "sale_object": "bien", "note": "Prix de l'acte"}
     assert client.put(f"/api/admin/closings/{cid}/declaration", headers=admin, json=payload).status_code == 400
     client.put(f"/api/admin/invoices/{reissued['id']}/cancel", headers=admin, json={"reason": "Prix erroné"})
     assert client.put(f"/api/admin/closings/{cid}/declaration", headers=api.h(seller), json=payload).status_code == 403
@@ -294,8 +302,9 @@ def test_echeance_comptee_depuis_l_acte(api, client, emails):
     db_call(client, closing.daily_job, NOW + timedelta(days=31))
     db_call(client, closing.daily_job, NOW + timedelta(days=46))
     assert _invoice(client, inv["id"])["reminder_count"] == 3 and _invoice(client, inv["id"])["formal_notice_at"]
-    fonds = _setup(api, client, "ech-fonds", amount=300000, sale_object="fonds")
-    _declare(client, api, fonds, "seller", sale_object="fonds", signed_days_ago=10)
-    client.post(f"/api/closing/{fonds['closing']['id']}/confirm", headers=api.h(fonds["buyer"]))
-    inv = _invoice(client, _closing(client, fonds["closing"]["id"])["invoice_id"])
-    assert inv["due_on"] == (datetime.fromisoformat(inv["signed_on"]).date() + timedelta(days=180)).isoformat()
+    # Même règle pour une cession des parts de la société propriétaire
+    parts = _setup(api, client, "ech-parts", amount=300000, sale_object="parts")
+    _declare(client, api, parts, "seller", sale_object="parts", signed_days_ago=10)
+    client.post(f"/api/closing/{parts['closing']['id']}/confirm", headers=api.h(parts["buyer"]))
+    inv = _invoice(client, _closing(client, parts["closing"]["id"])["invoice_id"])
+    assert inv["due_on"] == (datetime.fromisoformat(inv["signed_on"]).date() + timedelta(days=30)).isoformat()

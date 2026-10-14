@@ -20,7 +20,7 @@ def db_call(client, fn, *args, **kwargs):
     return client.portal.call(lambda: fn(*args, **kwargs))
 
 
-# ---------- Stripe Identity : seulement au mandat (cédant) ou au NDA (repreneur) ----------
+# ---------- Stripe Identity : seulement au mandat (vendeur) ou à l'engagement de confidentialité (acquéreur) ----------
 
 def _fake_session(monkeypatch, calls):
     def create(**kwargs):
@@ -208,7 +208,7 @@ def test_e_mail_de_retrait_indique_la_voie_de_contestation():
 
 
 def test_aucun_ancien_domaine_dans_le_code_publie():
-    """L'ancien domaine (cessionrge.alteregopatrimoine.com) ne doit plus apparaître dans le front ni dans le backend"""
+    """L'ancien domaine (sous-domaine de alteregopatrimoine.com) ne doit plus apparaître dans le front ni dans le backend"""
     from pathlib import Path
     root = Path(__file__).resolve().parents[2]
     files = [p for d in ("frontend/public", "frontend/src") for p in (root / d).rglob("*") if p.is_file()]

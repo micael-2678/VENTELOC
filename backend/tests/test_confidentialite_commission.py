@@ -84,7 +84,7 @@ def test_export_rgpd_sans_coordonnees_de_l_autre_partie(api, client):
     export_buyer = client.get("/api/auth/export", headers=api.h(buyer)).json()
     export_seller = client.get("/api/auth/export", headers=api.h(seller)).json()
     assert export_buyer["messages"] and export_seller["messages"] and export_buyer["contracts"]
-    # Le texte intégral des contrats signés (identité du repreneur dans le NDA, consultable en PDF par les parties) reste exporté
+    # Le texte intégral des contrats signés (identité de l'acquéreur dans l'engagement de confidentialité, consultable en PDF par les parties) reste exporté
     for export in (export_buyer, export_seller):
         for contract in export["contracts"]:
             contract.pop("content", None)

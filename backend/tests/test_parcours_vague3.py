@@ -88,7 +88,7 @@ def test_transactional_reminders_reach_opted_out_seller(api, client, emails):
     run_jobs(api, client, emails, reset_gate=True)
     assert len(mails_to(emails, seller["email"], "attend votre réponse depuis 5 jours")) == 1
     # Mandat à signer : « signature » au sens de la page de désinscription
-    lazy = api.register(uid("cedant"), "seller")
+    lazy = api.register(uid("vendeur"), "seller")
     api.verify_kyc(lazy)
     client.put("/api/auth/profile", headers=api.h(lazy), json={"notifications_opt_out": True})
     m = client.post("/api/properties", headers=api.h(lazy), json=listing()).json()

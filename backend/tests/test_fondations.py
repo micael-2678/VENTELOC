@@ -91,7 +91,7 @@ def test_interdictions_tant_que_l_email_n_est_pas_confirme(api, client):
 
 
 def test_publication_impossible_sans_email_confirme(api, client, emails):
-    seller = api.register(uid("cedant"), "seller", verify_email=False)
+    seller = api.register(uid("vendeur"), "seller", verify_email=False)
     api.verify_kyc(seller)
     c = client.post("/api/properties", headers=api.h(seller), json=listing()).json()
     assert c["status"] == "draft" and c["blocked_reason"] == "email_not_verified"
@@ -145,7 +145,7 @@ def test_non_admin_ne_passe_pas_par_le_second_facteur(api, client):
 
 def test_stripe_error_devient_une_400(api, client, monkeypatch):
     user = api.register(uid("kyc"), "buyer")
-    # Identité ouverte au repreneur seulement après acceptation d'une demande de dossier (ops-05)
+    # Identité ouverte à l'acquéreur seulement après acceptation d'une demande de dossier (ops-05)
     db_call(client, server.db.dataroom_access.insert_one, {"id": str(uuid.uuid4()), "buyer_id": user["id"],
                                                             "property_id": "c-kyc", "status": "accepted"})
 
@@ -322,16 +322,27 @@ def test_routes_supprimees(api, client, method, path):
 def test_docs_desactives_en_production():
     from fastapi.testclient import TestClient
     assert TestClient(server.app).get("/openapi.json").status_code == 200, "ouvert hors production"
-    assert server.cors_origins() == ["https://cessionrge.test"] or "https://cessionrge.test" in server.cors_origins()
+    assert "https://venteloc.test" in server.cors_origins()
     assert "*" not in server.cors_origins()
 
 
 def test_marque_dans_les_emails_et_pdf(api, client, emails):
     user = api.register(uid("marque"), "buyer")
     e = last_email(user["email"], "Confirmez")
-    assert "CessionBâtiment" in e["html"] and "CessionRGE" not in e["html"]
-    assert client.get("/api/config").json()["site_name"] == "CessionBâtiment"
-    assert client.get("/api/public/legal-info").json()["marque"] == "CessionBâtiment"
+    assert "VenteLoc" in e["html"] and "Cession" not in e["html"]
+    assert client.get("/api/config").json()["site_name"] == "VenteLoc"
+    assert client.get("/api/public/legal-info").json()["marque"] == "VenteLoc"
+    # Valeurs par défaut sans variable d'environnement : marque VenteLoc, expéditeur contact@venteloc.fr
+    import business_model
+    import os
+    saved = {k: os.environ.pop(k, None) for k in ("SITE_NAME", "SENDER_EMAIL", "SENDER_NAME")}
+    try:
+        assert business_model.site_name() == "VenteLoc" and business_model.sender_email() == "contact@venteloc.fr"
+        assert business_model.sender_name() == "VenteLoc"
+    finally:
+        for k, v in saved.items():
+            if v is not None:
+                os.environ[k] = v
 
 
 # ---------- Sauvegarde vers S3 ----------
@@ -339,20 +350,20 @@ def test_marque_dans_les_emails_et_pdf(api, client, emails):
 def test_backup_envoye_vers_s3(client, monkeypatch, tmp_path):
     moto = pytest.importorskip("moto")
     import boto3
-    archive = tmp_path / "cessionrge-2026-10-10T02-00.archive.gz"
+    archive = tmp_path / "venteloc_prod-2026-10-10T02-00.archive.gz"
     archive.write_bytes(b"\x1f\x8b" + b"x" * 100)
     monkeypatch.setenv("BACKUP_DIR", str(tmp_path))
-    monkeypatch.setenv("S3_BUCKET", "cessionrge-backups")
+    monkeypatch.setenv("S3_BUCKET", "venteloc-backups")
     monkeypatch.setenv("S3_REGION", "eu-west-3")
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
     with moto.mock_aws():
         boto3.client("s3", region_name="eu-west-3").create_bucket(
-            Bucket="cessionrge-backups", CreateBucketConfiguration={"LocationConstraint": "eu-west-3"})
+            Bucket="venteloc-backups", CreateBucketConfiguration={"LocationConstraint": "eu-west-3"})
         now = datetime.now(timezone.utc)
         assert db_call(client, server.job_backup_to_s3, now) == 1
         assert db_call(client, server.job_backup_to_s3, now) == 0, "chaque archive n'est envoyée qu'une fois"
-        keys = [o["Key"] for o in boto3.client("s3", region_name="eu-west-3").list_objects_v2(Bucket="cessionrge-backups")["Contents"]]
-        assert keys == ["backups/cessionrge-2026-10-10T02-00.archive.gz"]
+        keys = [o["Key"] for o in boto3.client("s3", region_name="eu-west-3").list_objects_v2(Bucket="venteloc-backups")["Contents"]]
+        assert keys == ["backups/venteloc_prod-2026-10-10T02-00.archive.gz"]
     monkeypatch.delenv("S3_BUCKET")
     assert db_call(client, server.job_backup_to_s3, datetime.now(timezone.utc)) == 0

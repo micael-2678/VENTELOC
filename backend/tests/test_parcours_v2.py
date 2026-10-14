@@ -544,7 +544,8 @@ def test_account_alert_filters_digest_and_opt_out(api, client, emails):
     mail = mails_to(emails, buyer["email"], "Nouvelle annonce")
     assert len(mail) == 1 and "Ne plus recevoir" in mail[0]["html"]
     published = mails_to(emails, seller["email"], "en ligne")
-    assert published and "envoyée à 1 acquéreur" in published[0]["html"]
+    # Base partagée : d'autres alertes actives peuvent correspondre ; au moins celle-ci, jamais « 0 »
+    assert published and re.search(r"envoyée à [1-9]\d* acquéreurs?", published[0]["html"])
     # Digest hebdomadaire : une fois par semaine et par alerte
     run_jobs(api, client, emails)
     digest = mails_to(emails, buyer["email"], "cette semaine pour votre alerte")

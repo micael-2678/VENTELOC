@@ -2642,7 +2642,7 @@ async def view_dataroom_document(property_id: str, doc_id: str, background_tasks
             raw, content_type = await asyncio.to_thread(apply_watermark, raw, content_type, f"CONFIDENTIEL - {watermark_text}", True)
         except WatermarkError as e:
             watermark_failed = True
-            logging.error(f"Data room {property_id} : document {doc_id} non filigranable, consultation refusée ({e})")
+            logging.error(f"Dossier du bien {property_id} : document {doc_id} non filigranable, consultation refusée ({e})")
     
     # Log access (only for buyers, not sellers viewing their own docs)
     if not is_seller and not is_admin:
@@ -4939,7 +4939,7 @@ async def build_admin_todo(now: Optional[datetime] = None) -> dict:
         if cl["status"] == "in_progress" and (cl.get("accepted_at") or "") <= limit60:
             stale.append(_todo_row("closing_stale", cl["id"], f"Offre acceptée sans vente depuis plus de 60 jours — {label}",
                                    since=cl.get("accepted_at") or "", ref={"closing_id": cl["id"], "property_id": cl.get("property_id")},
-                                   actions=[{"label": "Voir", "method": "GET", "url": f"/api/admin/closings?status=in_progress"}]))
+                                   actions=[{"label": "Voir", "method": "GET", "url": "/api/admin/closings?status=in_progress"}]))
         elif cl["status"] in ("declared", "disputed"):
             title = ("Vente contestée" if cl["status"] == "disputed" else "Vente déclarée, en attente de confirmation") + f" — {label}"
             declared.append(_todo_row("closing_" + cl["status"], cl["id"], title,
@@ -6185,7 +6185,7 @@ Adresse du bien : {{BIEN_ADRESSE}}.
 Vendeur : {{VENDEUR_IDENTITE}}.
 L'Acquéreur reconnaît que ces informations constituent des informations couvertes au sens de l'article 2."""
 
-# Offre d'achat (remplace l'offre indicative de CessionRGE) : signée par l'acquéreur, contresignée par le vendeur à l'acceptation ;
+# Offre d'achat (remplace l'offre indicative de l'ancienne plateforme) : signée par l'acquéreur, contresignée par le vendeur à l'acceptation ;
 # même acceptée, elle n'emporte pas vente (avant-contrat et acte chez le notaire)
 DEFAULT_OFFER_TEMPLATE = """OFFRE D'ACHAT
 

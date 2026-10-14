@@ -11,7 +11,7 @@ import server
 from conftest import listing
 from migrations import purge_test_data as purge_cli
 from test_closing import _declare, _setup
-from test_mode_test import DEMO_EMAILS, admin, h, make_test_listing, relogin, stored, test_mode  # noqa: F401 (fixtures)
+from test_mode_test import DEMO_EMAILS, _ceased, admin, h, make_test_listing, relogin, stored, test_mode  # noqa: F401 (fixtures)
 from test_parcours_v2 import db_call, published_listing, uid, unique_siret
 
 KEY = "cle-du-panneau-2026"
@@ -118,20 +118,22 @@ def test_real_closing_billed_in_test_mode_stays_real(api, client, admin, monkeyp
 # ---------- D3 : contrôles assouplis réservés aux données de test ----------
 
 def test_relaxed_checks_do_not_apply_to_real_listing(api, client, admin, monkeypatch):
-    siret = unique_siret()
-    _, first = published_listing(api, client, siret=siret)
-    seller = api.register(uid("doublon"), "seller")
+    _, first = published_listing(api, client)
+    _ceased(monkeypatch)
+    seller = api.register(uid("cessee"), "seller")
     api.verify_kyc(seller)
-    c = client.post("/api/properties", headers=api.h(seller), json=listing(siret=siret)).json()
+    c = client.post("/api/properties", headers=api.h(seller), json=listing(siret=unique_siret())).json()
+    api.ownership(seller, c["id"])
     m = api.mandate(seller, c["id"])
     assert api.sign_mandate(seller, m["contract_id"]).status_code == 200
     blocked = stored(client, "properties", {"id": c["id"]})
-    assert blocked["status"] == "draft" and "doublon_siren" in blocked["blocking"]
+    assert blocked["status"] == "draft" and "societe_cessee" in [b["code"] for b in blocked["blocking"]]
+    # Mode test activé ensuite : une annonce réelle garde tous ses contrôles
     monkeypatch.setenv("TEST_MODE", "true")
     r = client.put(f"/api/properties/{c['id']}", headers=api.h(seller), json={"description": "Description mise à jour " * 10})
     assert r.status_code == 200, r.text
     after = stored(client, "properties", {"id": c["id"]})
-    assert after["status"] == "draft" and "doublon_siren" in after["blocking"]
+    assert after["status"] == "draft" and "societe_cessee" in [b["code"] for b in after["blocking"]]
     monkeypatch.delenv("TEST_MODE")
     public = {x["id"] for x in client.get("/api/properties", params={"limit": 200}).json()}
     assert c["id"] not in public and first["id"] in public
@@ -219,7 +221,7 @@ def test_test_panel_key(api, client, test_mode, monkeypatch):
     assert cfg["test_panel_access"] is True and cfg["test_panel_admin"] is True
     assert client.post("/api/test/seed").status_code == 403
     assert client.post("/api/test/seed", headers={"X-Test-Key": KEY}).status_code == 200
-    for persona in ("vendeur", "repreneur", "admin"):
+    for persona in ("vendeur", "acquereur", "admin"):
         r = client.post("/api/test/login-as", json={"persona": persona})
         assert r.status_code == 403 and r.json()["detail"]["code"] == "test_key_required", persona
         r = client.post("/api/test/login-as", json={"persona": persona}, headers={"X-Test-Key": "mauvaise-cle"})
@@ -267,12 +269,11 @@ def test_demo_listings_checks_passed_except_one_to_review(api, client, test_mode
     demo = db_call(client, lambda: server.db.properties.find({"seller_id": seller["id"]}, {"_id": 0}).to_list(50))
     assert len(demo) == 8 and all(c["status"] == "published" for c in demo)
     to_review = [c for c in demo if c["moderation"]["status"] == "pending"]
-    assert [c["demo_key"] for c in to_review] == ["couverture-gironde"]
-    verified = [c for c in demo if c["property_checks"].get("in_ademe_list") is True]
-    assert len(verified) == 5 and all(c["rge_types"] for c in verified)
+    assert [c["demo_key"] for c in to_review] == ["immeuble-saint-etienne"]
+    assert all(c["ownership"]["status"] == "verified" and c["property_checks"]["ownership_verified"] is True for c in demo)
     for c in demo:
-        if c["demo_key"] != "couverture-gironde":
-            assert c["moderation"]["flags"] == [] and c["property_checks"]["dirigeant_match"] == "match_exact", c["demo_key"]
+        if c["demo_key"] != "immeuble-saint-etienne":
+            assert c["moderation"]["flags"] == [] and c["moderation"]["status"] == "ok", c["demo_key"]
     admin_tok = client.post("/api/test/login-as", json={"persona": "admin"}).json()
     todo = client.get("/api/admin/todo", headers=h(admin_tok)).json()
     review = next(s for s in todo["sections"] if s["key"] == "listings_review")

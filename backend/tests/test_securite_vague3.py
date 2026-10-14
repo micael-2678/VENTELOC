@@ -1,9 +1,10 @@
-"""Correctifs de sécurité (revue vague 3) : invitation du président, vue NDA, masquage des coordonnées dans les textes
-libres, suppression de compte, proxys open data, filigrane, liens GET sans effet de bord."""
+"""Correctifs de sécurité (revue vague 3) : vue de l'annonce après l'engagement de confidentialité, masquage des
+coordonnées dans les textes libres, suppression de compte, routes publiques limitées, filigrane, liens GET sans effet de
+bord."""
 import uuid
 
 import server
-from conftest import listing, last_email
+from conftest import listing
 
 
 def uid(prefix):
@@ -12,40 +13,6 @@ def uid(prefix):
 
 def db_call(client, fn, *args, **kwargs):
     return client.portal.call(lambda: fn(*args, **kwargs))
-
-
-# ---------- Invitation du président ----------
-
-def _invite(client, api, seller, cid, **overrides):
-    body = {"property_id": cid, "president_firstname": "Paul", "president_lastname": "Dupont",
-            "president_email": overrides.pop("email", uid("president"))}
-    body.update(overrides)
-    return client.post(f"/api/listings/{cid}/invite-president", headers=api.h(seller), json=body)
-
-
-def test_invitation_president_echappe_le_html(api, client, emails):
-    seller = api.register(uid("inv"), "seller")
-    cid = client.post("/api/properties", headers=api.h(seller), json=listing()).json()["id"]
-    victim = uid("victime")
-    r = _invite(client, api, seller, cid, email=victim,
-                president_firstname='<a href="https://evil.example/login">Cliquez ici</a>')
-    assert r.status_code == 200, r.text
-    mail = last_email(victim, "Validation requise")
-    assert mail and "evil.example/login\">" not in mail["html"] and "&lt;a href=" in mail["html"]
-
-
-def test_invitation_president_email_confirme_et_volume_borne(api, client):
-    unverified = api.register(uid("inv-nv"), "seller", verify_email=False)
-    cid = client.post("/api/properties", headers=api.h(unverified), json=listing()).json()["id"]
-    assert _invite(client, api, unverified, cid).status_code == 403
-    seller = api.register(uid("inv-v"), "seller")
-    cid = client.post("/api/properties", headers=api.h(seller), json=listing()).json()["id"]
-    codes = [_invite(client, api, seller, cid).status_code for _ in range(4)]
-    assert codes == [200, 200, 200, 429]
-    # Une seule invitation en attente par annonce
-    pending = db_call(client, server.db.president_invitations.count_documents, {"property_id": cid, "status": "pending"})
-    assert pending == 1
-    assert _invite(client, api, seller, cid, president_firstname="x" * 101).status_code == 422
 
 
 # ---------- Liens d'e-mail sans effet en GET : désinscription en un clic (RFC 8058) ----------
@@ -68,17 +35,17 @@ def test_en_tetes_list_unsubscribe(monkeypatch):
             return type("R", (), {"message_id": "x"})()
 
     monkeypatch.setattr(bm.sib_api_v3_sdk, "TransactionalEmailsApi", FakeApi)
-    bm._send_brevo_email_sync("a@test.fr", "A", "Sujet", "<p>x</p>", "https://cessionrge.test/api/alerts/unsubscribe/tok")
-    assert captured[-1].headers == {"List-Unsubscribe": "<https://cessionrge.test/api/alerts/unsubscribe/tok>",
+    bm._send_brevo_email_sync("a@test.fr", "A", "Sujet", "<p>x</p>", "https://venteloc.test/api/alerts/unsubscribe/tok")
+    assert captured[-1].headers == {"List-Unsubscribe": "<https://venteloc.test/api/alerts/unsubscribe/tok>",
                                     "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"}
     bm._send_brevo_email_sync("a@test.fr", "A", "Sujet", "<p>x</p>")
     assert captured[-1].headers is None
 
 
-# ---------- Vue de l'annonce après NDA ----------
+# ---------- Vue de l'annonce après l'engagement de confidentialité ----------
 
 def _deal(api, client, prefix, **extra):
-    seller, buyer = api.register(uid(f"{prefix}-ced"), "seller"), api.register(uid(f"{prefix}-rep"), "buyer")
+    seller, buyer = api.register(uid(f"{prefix}-vend"), "seller"), api.register(uid(f"{prefix}-acq"), "buyer")
     api.verify_kyc(seller)
     cid = client.post("/api/properties", headers=api.h(seller), json=listing(**extra)).json()["id"]
     api.publish(seller, cid)
@@ -86,32 +53,34 @@ def _deal(api, client, prefix, **extra):
     return seller, buyer, cid
 
 
-def test_vue_nda_sans_coordonnees_du_president(api, client):
-    seller, buyer, cid = _deal(api, client, "ndapres")
-    db_call(client, server.db.properties.update_one, {"id": cid}, {"$set": {
-        "president_email": "president@secret.fr", "president_firstname": "Pierre", "president_lastname": "Secret",
-        "president_invitation_id": "inv-1", "president_invitation_pending": True}})
+def test_vue_apres_engagement_sans_coordonnees_du_vendeur(api, client):
+    seller, buyer, cid = _deal(api, client, "ndavend", siret="73282932000074")
+    before = client.get(f"/api/properties/{cid}", headers=api.h(buyer)).json()
+    for field in ("address", "company_name", "siret", "address_key"):
+        assert field not in before, field
     api.grant_dataroom(seller, buyer, cid)
     view = client.get(f"/api/properties/{cid}", headers=api.h(buyer)).json()
-    assert view["company_name"] == "SECRET ENERGIE SAS" and view.get("siret")
-    for field in ("president_email", "president_firstname", "president_lastname", "president_invitation_id",
-                  "president_invitation_pending", "seller_email", "mandant_address", "seller_id"):
+    assert view["company_name"] == "SCI des Tilleuls" and view["siret"] == "73282932000074" and view["address"].endswith("rue des Lilas")
+    for field in ("seller_email", "mandant_address", "mandant_capacity", "seller_id", "presented_buyers", "address_key",
+                  "company_lookup", "flags", "moderation", "blocking"):
         assert field not in view, field
-    assert "president@secret.fr" not in str(view)
+    assert view["ownership"] == {"status": "pending"}, "jamais le fichier ni la note du justificatif"
+    stored = db_call(client, server.db.users.find_one, {"id": seller["id"]})
+    assert stored["email"] not in str(view)
 
 
 # ---------- Textes libres : coordonnées masquées ----------
 
 def test_description_et_experience_sans_coordonnees(api, client):
     seller = api.register(uid("desc"), "seller")
-    description = ("Entreprise reconnue depuis vingt ans dans l'installation de pompes à chaleur, clientèle fidèle de particuliers "
-                   "et de bailleurs sociaux, équipe autonome et carnet de commandes rempli pour six mois. Appelez le "
-                   "06 12 34 56 78 ou écrivez à patron@maboite.fr pour en savoir plus.")
+    description = ("Appartement lumineux au deuxième étage d'une copropriété bien tenue, loué depuis trois ans à un locataire "
+                   "sérieux qui paie à date. Cuisine refaite en 2022, double vitrage. Appelez le "
+                   "06 12 34 56 78 ou écrivez à proprio@monmail.fr pour en savoir plus.")
     r = client.post("/api/properties", headers=api.h(seller), json=listing(description=description, equipment="Contact : 0612345678"))
     assert r.status_code == 200, r.text
     cid = r.json()["id"]
     stored = db_call(client, server.db.properties.find_one, {"id": cid})
-    assert "06 12 34 56 78" not in stored["description"] and "patron@maboite.fr" not in stored["description"]
+    assert "06 12 34 56 78" not in stored["description"] and "proprio@monmail.fr" not in stored["description"]
     assert "[coordonnées masquées]" in stored["description"] and "0612345678" not in stored["equipment"]
     r = client.put(f"/api/properties/{cid}", headers=api.h(seller), json={"description": description.replace("06 12", "07 12")})
     assert r.status_code == 200, r.text
@@ -119,10 +88,10 @@ def test_description_et_experience_sans_coordonnees(api, client):
 
     buyer = api.register(uid("exp"), "buyer")
     r = client.put("/api/auth/profile", headers=api.h(buyer),
-                   json={"buyer_profile": {**api.BUYER_PROFILE, "experience": "Ancien chef d'agence, joignable au 06 11 22 33 44"}})
+                   json={"buyer_profile": {**api.BUYER_PROFILE, "experience": "Deux studios loués à Lille, joignable au 06 11 22 33 44"}})
     assert r.status_code == 200, r.text
     user = db_call(client, server.db.users.find_one, {"id": buyer["id"]})
-    assert "06 11 22 33 44" not in user["buyer_profile"]["experience"] and "Ancien chef d'agence" in user["buyer_profile"]["experience"]
+    assert "06 11 22 33 44" not in user["buyer_profile"]["experience"] and "Deux studios loués à Lille" in user["buyer_profile"]["experience"]
 
 
 # ---------- Suppression de compte : aucune adresse e-mail résiduelle ----------
@@ -142,11 +111,9 @@ def test_suppression_de_compte_sans_email_residuel(api, client):
     seller, buyer, cid = _deal(api, client, "rgpd2")
     client.post("/api/messages", headers=api.h(buyer), json={"receiver_id": seller["id"], "property_id": cid, "content": "Bonjour"})
     api.grant_dataroom(seller, buyer, cid)
-    # Le repreneur est aussi président invité d'une autre annonce, et abonné à la lettre d'information
-    other = client.post("/api/properties", headers=api.h(seller), json=listing(siret="98765432100019")).json()["id"]
-    r = client.post(f"/api/listings/{other}/invite-president", headers=api.h(seller),
-                    json={"property_id": other, "president_firstname": "Jean", "president_lastname": "Test", "president_email": buyer["email"]})
-    assert r.status_code == 200, r.text
+    # L'acquéreur est aussi abonné à la lettre d'information et a demandé une estimation
+    client.post("/api/estimates", json={"property_type": "appartement", "lease_type": "habitation-vide", "department": "69",
+                                        "rent_monthly": 700, "email": buyer["email"], "consent": True})
     db_call(client, server.db.newsletter_subscribers.insert_one, {"id": "nl-1", "email": buyer["email"]})
     db_call(client, server.db.dataroom_access_logs.insert_one, {"id": str(uuid.uuid4()), "property_id": cid, "viewer_id": buyer["id"],
                                                                 "viewer_email": buyer["email"]})
@@ -165,33 +132,23 @@ def test_suppression_de_compte_sans_email_residuel(api, client):
     assert leftovers == []
 
 
-# ---------- Proxys open data : format validé, limite par IP, cache ----------
+# ---------- Routes publiques : format validé, limite par IP ----------
 
-def test_proxys_open_data_limites(client, monkeypatch):
-    assert client.get("/api/rge/verify/123").status_code == 400
-    assert client.get("/api/rge/property/abc/qualifications").status_code == 400
-    assert client.get("/api/rge/search", params={"q": "ab"}).status_code == 400
-    calls = []
-
-    async def fake_verify(siret):
-        calls.append(siret)
-        return {"verified": False, "siret_recherche": siret}
-
-    monkeypatch.setattr(server, "verify_rge", fake_verify)
-    server._rge_verify_cache.clear()
-    server.limiter.reset()
-    server.limiter.enabled = True
-    try:
-        codes = [client.get("/api/rge/verify/12345678900011").status_code for _ in range(31)]
-        assert codes[:30] == [200] * 30 and codes[30] == 429
-        assert calls == ["12345678900011"], "réponse gardée en cache : un seul appel à l'ADEME"
-        server.limiter.reset()
-        codes = [client.get("/api/property/123456789/dirigeants").status_code for _ in range(31)]
-        assert codes[30] == 429
-    finally:
-        server.limiter.enabled = False
-        server.limiter.reset()
-        server._rge_verify_cache.clear()
+def test_routes_publiques_limitees(client, monkeypatch):
+    import bail
+    import estimator
+    assert client.get("/api/rge/verify/12345678900011").status_code == 404, "proxys de l'ancienne plateforme retirés"
+    r = client.get("/api/lease-transfer/rules", params={"lease_type": "bail-inconnu"})
+    assert r.status_code == 400 and r.json()["detail"]["field"] == "lease_type"
+    assert client.get("/api/lease-transfer/rules", params={"lease_type": "commercial", "property_type": "chateau"}).status_code == 400
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "true")
+    monkeypatch.setattr(bail, "public_limiter", bail.SlidingWindowLimiter(60, 60))
+    monkeypatch.setattr(estimator, "limiter", estimator.SlidingWindowLimiter(5, 60))
+    codes = [client.get("/api/lease-transfer/rules", params={"lease_type": "habitation-vide"}).status_code for _ in range(61)]
+    assert codes[:60] == [200] * 60 and codes[60] == 429
+    body = {"property_type": "appartement", "lease_type": "habitation-vide", "department": "69", "rent_monthly": 700}
+    codes = [client.post("/api/estimates", json=body).status_code for _ in range(6)]
+    assert codes[:5] == [200] * 5 and codes[5] == 429
 
 
 # ---------- Filigrane de la data room : jamais de document servi en clair ----------
@@ -222,10 +179,10 @@ def test_filigrane_fail_closed(api, client):
     # Dépôt : PDF protégé par mot de passe ou illisible refusé
     for data in (_pdf_bytes(encrypt_with="secret"), b"%PDF-1.4 illisible"):
         r = client.post(f"/api/dataroom/{cid}/documents", headers=api.h(seller),
-                        files={"file": ("bilan.pdf", data, "application/pdf")}, data={"category": "bilans"})
-        assert r.status_code == 400 and "filigran" in r.json()["detail"]
+                        files={"file": ("bail.pdf", data, "application/pdf")}, data={"category": "bail"})
+        assert r.status_code == 400 and "filigran" in str(r.json()["detail"])
     r = client.post(f"/api/dataroom/{cid}/documents", headers=api.h(seller),
-                    files={"file": ("bilan.pdf", _pdf_bytes(), "application/pdf")}, data={"category": "bilans"})
+                    files={"file": ("bail.pdf", _pdf_bytes(), "application/pdf")}, data={"category": "bail"})
     assert r.status_code == 200, r.text
     doc_id = r.json()["id"]
     api.grant_dataroom(seller, buyer, cid)
@@ -237,5 +194,5 @@ def test_filigrane_fail_closed(api, client):
     assert r.status_code == 409 and "content" not in r.text
     log = db_call(client, lambda: server.db.dataroom_access_logs.find({"document_id": doc_id}).sort("timestamp", -1).to_list(10))
     assert any(entry["watermark_applied"] is False for entry in log)
-    # Le cédant consulte toujours son propre document (sans filigrane)
+    # Le vendeur consulte toujours son propre document (sans filigrane)
     assert client.post(f"/api/dataroom/{cid}/documents/{doc_id}/view", headers=api.h(seller)).status_code == 200

@@ -9,13 +9,13 @@ def test_s3_storage_roundtrip(monkeypatch):
     moto = pytest.importorskip("moto")
     import boto3
     import storage
-    monkeypatch.setenv("S3_BUCKET", "cessionrge-test")
+    monkeypatch.setenv("S3_BUCKET", "venteloc-test")
     monkeypatch.setenv("S3_REGION", "eu-west-3")
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
     with moto.mock_aws():
         boto3.client("s3", region_name="eu-west-3").create_bucket(
-            Bucket="cessionrge-test", CreateBucketConfiguration={"LocationConstraint": "eu-west-3"})
+            Bucket="venteloc-test", CreateBucketConfiguration={"LocationConstraint": "eu-west-3"})
         ref = asyncio.run(storage.save_file(b"%PDF-1.4 test", "application/pdf", "dataroom/abc"))
         assert ref["storage"] == "s3" and "content" not in ref
         assert asyncio.run(storage.load_file(ref)) == b"%PDF-1.4 test"

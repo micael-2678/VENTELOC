@@ -270,7 +270,7 @@ def test_denonciation_preavis_et_job_effet(api, client, emails):
 
 def test_retractation_dans_les_14_jours_effet_immediat(api, client, emails):
     seller, c, m, signed = signed_mandate(api, client)
-    buyer = presented_buyer(api, client, seller, c["id"])
+    presented_buyer(api, client, seller, c["id"])
     other = api.register(uid("en-attente"), "buyer")
     assert client.post(f"/api/dataroom/{c['id']}/request-access", headers=api.h(other)).json()["status"] == "pending"
     emails.clear()
@@ -457,18 +457,18 @@ def test_offre_creation_signature_acceptation_closing(api, client, emails):
     assert "délai de rétractation de dix jours" in text and "L271-1" in text and "Aucune somme n'est versée" in text
     for banned in ("cédant", "repreneur", "entreprise", "titres", "indicative"):
         assert banned not in text.lower(), banned
-    # Le cédant ne peut pas répondre avant la signature ; une seconde offre ouverte est refusée
+    # Le vendeur ne peut pas répondre avant la signature ; une seconde offre ouverte est refusée
     assert client.put(f"/api/offers/{offer['id']}/respond", headers=api.h(seller), json={"action": "accept"}).status_code == 400
     assert client.post("/api/offers", headers=api.h(buyer), json={"property_id": c["id"], **OFFER}).status_code == 400
     assert client.get(f"/api/offers/{offer['id']}/pdf", headers=api.h(buyer)).status_code == 400
-    # Signature du repreneur → pending, e-mail au cédant
+    # Signature de l'acquéreur → pending, e-mail au vendeur
     signed = api.sign_contract(buyer, contract_id).json()
     assert signed["status"] == "pending" and signed["offer_id"] == offer["id"]
     mail = last_email(seller["email"], "Offre d'achat reçue")
     assert mail and "190" in mail["html"] and "Marie Martin" in mail["html"] and "n'emporte pas vente" in mail["html"]
     mine = client.get("/api/offers/my", headers=api.h(buyer)).json()["offers"][0]
     assert mine["status"] == "pending" and mine["loan_condition"]["required"] is True and mine["property"]["title"]
-    # Acceptation : code obligatoire, contre-signature du cédant, étape de vente
+    # Acceptation : code obligatoire, contre-signature du vendeur, étape de vente
     r = client.put(f"/api/offers/{offer['id']}/respond", headers=api.h(seller), json={"action": "accept"})
     assert r.status_code == 400 and "code" in r.json()["detail"].lower()
     code = api.request_code(seller, contract_id)

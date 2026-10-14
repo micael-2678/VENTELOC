@@ -1,7 +1,8 @@
-"""Étape de vente, facture et relances (closing.py, SPEC §4.5) : création à l'acceptation d'une offre, rédacteur, relances
-J+30/60/90 avec réponses par lien signé, déclaration → confirmation → facture (numérotation continue, débiteur = cédant,
-adresse du mandat, barème via calculate_commission), confirmation automatique à 7 jours, échéances titres/fonds, relances
-de facture idempotentes, mise en demeure et « À faire », marquage payé / annulé, PDF."""
+"""Étape de vente, facture et relances (closing.py, SPEC §7.4) : création à l'acceptation d'une offre d'achat, notaire en
+charge de la vente, date de l'avant-contrat, relances J+30/60/90 avec réponses par lien signé, déclaration de l'acte
+authentique → confirmation → facture (numérotation continue, débiteur = vendeur, adresse du mandat, barème via
+calculate_commission), confirmation automatique à 7 jours, échéance (acte + 30 jours, au moins 15 jours après la facture),
+relances de facture idempotentes, mise en demeure et « À faire », marquage payé / annulé, PDF."""
 import io
 import re
 import uuid
@@ -35,10 +36,14 @@ def day(days):
     return (NOW + timedelta(days=days)).date().isoformat()
 
 
-def _property(client, seller, name="SECRET ENERGIE SAS", **extra):
-    doc = {"id": str(uuid.uuid4()), "seller_id": seller["id"], "siret": "73282932000074", "company_name": name,
-           "legal_structure": "SAS", "status": "published", "rge_types": ["Pompes à chaleur air/eau"], "region": "Bretagne",
-           "sale_object": "titres", "asking_price": 500000, "created_at": iso(-100), **extra}
+TITLE = "Appartement T3 loué · 68 m² · Bordeaux (33)"
+
+
+def _property(client, seller, name="SCI des Tilleuls", **extra):
+    doc = {"id": str(uuid.uuid4()), "seller_id": seller["id"], "property_type": "appartement", "title": TITLE,
+           "owner_type": "sci", "siret": "73282932000074", "company_name": name, "status": "published", "city": "Bordeaux",
+           "postal_code": "33000", "department": "33", "region": "Nouvelle-Aquitaine", "lease_type": "habitation-vide",
+           "rent_monthly": 1200, "sale_object": "bien", "asking_price": 500000, "created_at": iso(-100), **extra}
     db_call(client, server.db.properties.insert_one, doc)
     return doc
 
@@ -47,7 +52,7 @@ def _mandat(client, property, address="12 rue de la Mer, 29200 Brest", **extra):
     registry = db_call(client, server.next_sequence, "mandate_registry")
     doc = {"id": str(uuid.uuid4()), "type": "mandat", "contract_number": f"MANDAT-TEST-{registry}", "property_id": property["id"],
            "seller_id": property["seller_id"], "status": "signed", "signed_at": iso(-90), "created_at": iso(-91),
-           "registry_number": registry, "terms_version": "v2", "sale_object": property.get("sale_object", "titres"), **extra}
+           "registry_number": registry, "terms_version": "v1", "sale_object": property.get("sale_object", "bien"), **extra}
     if address is not None:
         doc["mandant_address"] = address
     db_call(client, server.db.generated_contracts.insert_one, doc)
@@ -63,8 +68,8 @@ def _offer(client, property, buyer, amount=500000, status="accepted", **extra):
     return doc
 
 
-def _setup(api, client, prefix, amount=500000, sale_object="titres", address="12 rue de la Mer, 29200 Brest", **property_extra):
-    """Cédant + repreneur + annonce publiée + mandat signé + offre acceptée → closing (sans e-mail de checklist)"""
+def _setup(api, client, prefix, amount=500000, sale_object="bien", address="12 rue de la Mer, 29200 Brest", **property_extra):
+    """Vendeur + acquéreur + annonce publiée + mandat signé + offre acceptée → closing (sans e-mail de checklist)"""
     seller = api.register(uid(f"{prefix}-ced"), "seller", first="Paul", last="Dupont")
     buyer = api.register(uid(f"{prefix}-rep"), "buyer", first="Marie", last="Martin")
     property = _property(client, seller, sale_object=sale_object, **property_extra)
@@ -108,9 +113,14 @@ def test_module_branche_et_gabarits():
     for tpl in ("closing_checklist", "closing_followup", "closing_declared_to_confirm", "invoice_issued", "invoice_reminder",
                 "payment_order_redacteur", "invoice_paid", "closing_disputed_admin"):
         assert tpl in business_model.EMAIL_TEMPLATES
-    # Les statuts « vente déclarée » de la veille BODACC couvrent ceux du module
-    import veille
-    assert closing.STATUS_DECLARED in veille.SALE_DECLARED_STATUSES and closing.STATUS_CONFIRMED in veille.SALE_DECLARED_STATUSES
+    assert "closing_avant_contrat" in business_model.EMAIL_TEMPLATES
+    assert closing.REDACTEUR_TYPES == ("notaire", "autre") and closing.SALE_OBJECTS == ("bien", "parts")
+    # Vocabulaire VenteLoc : aucun terme de la cession d'entreprise dans les gabarits du module
+    for tpl in ("closing_checklist", "closing_followup", "closing_declared_to_confirm", "closing_declared_by_buyer", "closing_confirmed_buyer",
+                "invoice_issued", "payment_order_redacteur", "closing_avant_contrat", "closing_redacteur_set"):
+        text = (business_model.EMAIL_TEMPLATES[tpl]["subject"] + business_model.EMAIL_TEMPLATES[tpl]["html"]).lower()
+        for banned in ("cédant", "repreneur", "titres", "fonds de commerce", "rédacteur"):
+            assert banned not in text, (tpl, banned)
     # Aucun texte « à compléter » dans les gabarits du module
     for tpl in ("closing_checklist", "invoice_issued", "invoice_reminder", "payment_order_redacteur"):
         assert "à compléter" not in business_model.EMAIL_TEMPLATES[tpl]["html"].lower()
@@ -120,8 +130,8 @@ def test_module_branche_et_gabarits():
 # ---------- Création et rédacteur ----------
 
 def test_creation_closing_checklist_et_redacteur(api, client, emails):
-    seller = api.register(uid("crea-ced"), "seller", first="Paul", last="Dupont")
-    buyer = api.register(uid("crea-rep"), "buyer", first="Marie", last="Martin")
+    seller = api.register(uid("crea-vend"), "seller", first="Paul", last="Dupont")
+    buyer = api.register(uid("crea-acq"), "buyer", first="Marie", last="Martin")
     stranger = api.register(uid("crea-autre"), "buyer")
     property = _property(client, seller)
     _mandat(client, property)
@@ -130,20 +140,21 @@ def test_creation_closing_checklist_et_redacteur(api, client, emails):
 
     # Création à l'acceptation (fonction appelée par server.py) : idempotente, checklist aux deux parties
     clo = db_call(client, closing.create_closing_for_offer, offer, property)
-    assert clo["status"] == "in_progress" and clo["offer_id"] == offer["id"] and clo["sale_object"] == "titres"
+    assert clo["status"] == "in_progress" and clo["offer_id"] == offer["id"] and clo["sale_object"] == "bien"
     assert clo["seller_id"] == seller["id"] and clo["buyer_id"] == buyer["id"] and clo["tokens"]["seller"] != clo["tokens"]["buyer"]
     assert db_call(client, closing.create_closing_for_offer, offer, property)["id"] == clo["id"]
     assert db_call(client, server.db.closings.count_documents, {"offer_id": offer["id"]}) == 1
     assert db_call(client, server.db.offers.find_one, {"id": offer["id"]})["closing_id"] == clo["id"]
     for u in (seller, buyer):
         e = last_email(u["email"], "Offre acceptée")
-        assert e and "450 000 €" in e["html"] and "Rédacteur de l'acte" in e["html"] and "Financement" in e["html"]
+        assert e and "450 000 €" in e["html"].replace("\xa0", " ") and "Notaire" in e["html"] and "Avant-contrat" in e["html"] and "Financement" in e["html"]
+        assert "n'emporte pas encore vente" in e["html"].replace("&#x27;", "'")
     assert len([e for e in emails if e["subject"].startswith("Offre acceptée")]) == 2
 
     # Route pour une offre déjà acceptée : idempotente, réservée aux parties, offre acceptée uniquement
     r = client.post(f"/api/closing/from-offer/{offer['id']}", headers=api.h(buyer))
     assert r.status_code == 200 and r.json()["id"] == clo["id"] and "tokens" not in r.json() and r.json()["role"] == "buyer"
-    # Honoraires (facturés au cédant) : jamais dans la vue du repreneur
+    # Honoraires (facturés au vendeur) : jamais dans la vue de l'acquéreur
     assert r.json()["commission_preview"] is None and r.json()["invoice"] is None
     seller_view = client.post(f"/api/closing/from-offer/{offer['id']}", headers=api.h(seller)).json()
     assert seller_view["commission_preview"]["final_commission_ht"] == business_model.calculate_commission(450000)["final_commission_ht"]
@@ -158,15 +169,42 @@ def test_creation_closing_checklist_et_redacteur(api, client, emails):
     assert client.get(f"/api/closing/{clo['id']}", headers=api.h(stranger)).status_code == 403
     assert client.get(f"/api/closing/{clo['id']}", headers=api.h(api.admin())).json()["role"] == "admin"
 
-    # Rédacteur renseigné par le repreneur → le cédant est prévenu ; validation
+    # Notaire renseigné par l'acquéreur → le vendeur est prévenu ; validation
     r = client.put(f"/api/closing/{clo['id']}/redacteur", headers=api.h(buyer),
-                   json={"type": "notaire", "name": "Maître Le Gall", "email": "Etude@LeGall.notaires.fr", "phone": "02 98 00 00 00"})
+                   json={"type": "notaire", "name": "Maître Le Gall", "email": "Etude@LeGall.notaires.fr", "phone": "05 56 00 00 00"})
     assert r.status_code == 200 and r.json()["redacteur"]["email"] == "etude@legall.notaires.fr" and r.json()["redacteur"]["set_by"] == "buyer"
-    e = last_email(seller["email"], "Rédacteur de l'acte renseigné")
-    assert e and "Maître Le Gall" in e["html"] and "Le repreneur" in e["html"]
-    assert client.put(f"/api/closing/{clo['id']}/redacteur", headers=api.h(seller), json={"type": "huissier", "name": "X Y"}).status_code == 400
-    assert client.put(f"/api/closing/{clo['id']}/redacteur", headers=api.h(seller), json={"type": "avocat", "name": "X Y", "email": "pas-un-mail"}).status_code == 400
-    assert client.put(f"/api/closing/{clo['id']}/redacteur", headers=api.h(stranger), json={"type": "avocat", "name": "X Y"}).status_code == 403
+    assert r.json()["redacteur_label"] == "Notaire en charge de la vente"
+    e = last_email(seller["email"], "Notaire en charge de la vente renseigné")
+    assert e and "Maître Le Gall" in e["html"] and "acquéreur" in e["html"]
+    for bad in ({"type": "huissier", "name": "X Y"}, {"type": "avocat", "name": "X Y"}, {"type": "autre", "name": "X Y", "email": "pas-un-mail"}):
+        assert client.put(f"/api/closing/{clo['id']}/redacteur", headers=api.h(seller), json=bad).status_code == 400, bad
+    assert client.put(f"/api/closing/{clo['id']}/redacteur", headers=api.h(stranger), json={"type": "notaire", "name": "X Y"}).status_code == 403
+
+
+# ---------- Date de l'avant-contrat ----------
+
+def test_date_de_l_avant_contrat(api, client, emails):
+    ctx = _setup(api, client, "avc")
+    clo, seller, buyer = ctx["closing"], ctx["seller"], ctx["buyer"]
+    stranger = api.register(uid("avc-autre"), "buyer")
+    view = client.get(f"/api/closing/{clo['id']}", headers=api.h(buyer)).json()
+    assert view["avant_contrat_on"] is None
+    url = f"/api/closing/{clo['id']}/avant-contrat"
+    assert client.put(url, headers=api.h(buyer), json={"avant_contrat_on": day(3)}).status_code == 400, "date future refusée"
+    assert client.put(url, headers=api.h(buyer), json={"avant_contrat_on": "hier"}).status_code in (400, 422)
+    assert client.put(url, headers=api.h(stranger), json={"avant_contrat_on": day(-1)}).status_code == 403
+    emails.clear()
+    r = client.put(url, headers=api.h(buyer), json={"avant_contrat_on": day(-5)})
+    assert r.status_code == 200 and r.json()["avant_contrat_on"] == day(-5) and r.json()["id"] == clo["id"] and r.json()["role"] == "buyer"
+    e = last_email(seller["email"], "Avant-contrat signé")
+    assert e and TITLE.split(" ·")[0] in e["html"] and "acquéreur" in e["html"]
+    assert last_email(buyer["email"], "Avant-contrat signé") is None, "seule l'autre partie est prévenue"
+    assert client.get(f"/api/closing/{clo['id']}", headers=api.h(seller)).json()["avant_contrat_on"] == day(-5)
+    # Effacement (null), puis plus de modification une fois la vente déclarée
+    r = client.put(url, headers=api.h(seller), json={"avant_contrat_on": None})
+    assert r.status_code == 200 and r.json()["avant_contrat_on"] is None
+    _declare(client, api, ctx, "seller")
+    assert client.put(url, headers=api.h(seller), json={"avant_contrat_on": day(-5)}).status_code == 400
 
 
 # ---------- Relances J+30/60/90 et réponses en un clic ----------
@@ -185,16 +223,18 @@ def test_relances_et_reponses_en_un_clic(api, client, emails):
     assert sent() == [30]
     before = len(emails)
     db_call(client, closing.daily_job, NOW + timedelta(days=31))
-    assert sent() == [30] and len(emails) == before, "idempotent (claim_once)"
+    # (base partagée : seuls les e-mails des parties de ce closing comptent, d'autres factures peuvent être relancées)
+    again = [(e["to"], e["subject"]) for e in emails[before:] if e["to"] in (seller["email"], buyer["email"])]
+    assert sent() == [30] and again == [], ("idempotent (claim_once)", again)
     for u in (seller, buyer):
         e = last_email(u["email"], "Où en est la vente")
-        assert e and "30 jours" in e["html"] and "SECRET ENERGIE SAS" in e["html"]
+        assert e and "30 jours" in e["html"] and "Appartement T3 loué" in e["html"] and "acte authentique" in e["html"]
     seller_mail = last_email(seller["email"], "Où en est la vente")
-    links = re.findall(r'href="(https://cessionrge.test/api/closing/[^"]+)"', seller_mail["html"])
+    links = re.findall(r'href="(https://venteloc.test/api/closing/[^"]+)"', seller_mail["html"])
     assert len(links) == 3 and all(f"/status/{clo['tokens']['seller']}" in link for link in links)
 
     # « Toujours en cours » : le lien (GET) n'affiche qu'une page de confirmation, sans effet ; le bouton (POST) enregistre
-    path = links[0].replace("https://cessionrge.test", "").replace("&amp;", "&")
+    path = links[0].replace("https://venteloc.test", "").replace("&amp;", "&")
     r = client.get(path)
     assert r.status_code == 200 and r.json()["confirm_required"] is True and r.json()["status"] == "in_progress"
     r = client.get(path, headers={"Accept": "text/html"})
@@ -241,35 +281,35 @@ def test_declaration_confirmation_facture_pdf_paiement(api, client, emails):
     ctx = _setup(api, client, "vente", amount=500000)
     clo, seller, buyer, property = ctx["closing"], ctx["seller"], ctx["buyer"], ctx["company"]
     client.put(f"/api/closing/{clo['id']}/redacteur", headers=api.h(seller),
-               json={"type": "avocat", "name": "Maître Durand", "email": "durand@avocats.test"})
-    db_call(client, server.db.incidents.insert_one, {"id": "inc-1", "property_id": property["id"], "status": "open", "siren": "732829320", "event": {"id": "inc-1"}})
+               json={"type": "notaire", "name": "Maître Durand", "email": "durand@notaires.test"})
     emails.clear()
 
     # Validation
     cid = clo["id"]
     assert client.post(f"/api/closing/{cid}/declare", headers=api.h(buyer),
-                       json={"signed_on": day(5), "final_price": 480000, "sale_object": "titres"}).status_code == 400
+                       json={"signed_on": day(5), "final_price": 480000, "sale_object": "bien"}).status_code == 400
     assert client.post(f"/api/closing/{cid}/declare", headers=api.h(buyer),
                        json={"signed_on": day(-1), "final_price": 480000, "sale_object": "indifferent"}).status_code == 400
     assert client.post(f"/api/closing/{cid}/declare", headers=api.h(buyer),
-                       json={"signed_on": "hier", "final_price": 480000, "sale_object": "titres"}).status_code == 400
+                       json={"signed_on": "hier", "final_price": 480000, "sale_object": "bien"}).status_code == 400
     assert client.post(f"/api/closing/{cid}/declare", headers=api.h(buyer),
-                       json={"signed_on": day(-1), "final_price": 0, "sale_object": "titres"}).status_code == 422
+                       json={"signed_on": day(-1), "final_price": 480000, "sale_object": "titres"}).status_code == 400
+    assert client.post(f"/api/closing/{cid}/declare", headers=api.h(buyer),
+                       json={"signed_on": day(-1), "final_price": 0, "sale_object": "bien"}).status_code == 422
 
-    # Déclaration par le repreneur : l'autre partie et l'admin sont prévenus, incident BODACC clos
+    # Déclaration par l'acquéreur : l'autre partie et l'admin sont prévenus
     data = _declare(client, api, ctx, "buyer", price=480000)
     assert data["status"] == "declared" and data["declaration"]["declared_by"] == "buyer" and data["declaration"]["final_price"] == 480000
     deadline = server._parse_dt(data["declaration"]["confirm_deadline"])
     assert abs((deadline - datetime.now(timezone.utc)).days - closing.CONFIRMATION_DAYS) <= 1
     e = last_email(seller["email"], "Vente déclarée")
-    assert e and "480 000 €" in e["html"] and "Le repreneur" in e["html"] and deadline.strftime("%d/%m/%Y") in e["html"]
+    assert e and "480 000 €" in e["html"].replace("\xa0", " ") and "acquéreur" in e["html"] and deadline.strftime("%d/%m/%Y") in e["html"]
     a = last_email(ADMIN, "Vente déclarée")
     expected = business_model.calculate_commission(480000)
     assert a and property["id"] in a["html"] and closing.fmt_eur_cents(expected["final_commission_ht"]) in a["html"]
-    assert db_call(client, server.db.incidents.find_one, {"id": "inc-1"})["status"] == "closed"
     assert last_email(buyer["email"], "Vente déclarée") is None
 
-    # Le déclarant ne peut pas confirmer ; un tiers non plus ; le cédant confirme
+    # Le déclarant ne peut pas confirmer ; un tiers non plus ; le vendeur confirme
     assert client.post(f"/api/closing/{cid}/confirm", headers=api.h(buyer)).status_code == 403
     stranger = api.register(uid("vente-tiers"), "seller")
     assert client.post(f"/api/closing/{cid}/confirm", headers=api.h(stranger)).status_code == 403
@@ -279,36 +319,38 @@ def test_declaration_confirmation_facture_pdf_paiement(api, client, emails):
     assert view["status"] == "confirmed" and view["confirmed_by"] == "seller" and view["invoice"]["number"].startswith("FAC-")
     assert client.post(f"/api/closing/{cid}/confirm", headers=api.h(seller)).status_code == 400
 
-    # Facture : numéro, barème via calculate_commission, débiteur = cédant avec l'adresse du mandat, échéance titres +30 j
+    # Facture : numéro, barème via calculate_commission, débiteur = vendeur avec l'adresse du mandat, échéance acte + 30 j
     inv = _invoice(client, view["invoice"]["id"])
     assert re.fullmatch(r"FAC-\d{4}-\d{5}", inv["number"]) and inv["status"] == "issued"
     assert inv["total_ht"] == expected["final_commission_ht"] and inv["vat"] == expected["vat"] and inv["total_ttc"] == expected["final_commission_ttc"]
-    assert inv["final_price"] == 480000 and inv["sale_object"] == "titres" and inv["mandate_number"] == str(ctx["mandat"]["registry_number"])
+    assert inv["final_price"] == 480000 and inv["sale_object"] == "bien" and inv["mandate_number"] == str(ctx["mandat"]["registry_number"])
     assert inv["debtor"] == {"user_id": seller["id"], "name": "Paul Dupont", "email": seller["email"], "address": "12 rue de la Mer, 29200 Brest",
-                             "address_source": "mandat", "company_name": "SECRET ENERGIE SAS", "siren": "732829320", "legal_structure": "SAS"}
+                             "address_source": "mandat", "company_name": "SCI des Tilleuls", "siren": "732829320", "owner_type": "sci"}
+    assert expected["rate_percent"] == 3 and expected["payer"] == "vendeur" and inv["total_ht"] == 14400
     issued = datetime.fromisoformat(inv["issued_on"]).date()
-    # Échéance du mandat (art. 6.3) : 30 jours après l'acte (signé il y a 2 jours), pas après la facture
+    # Échéance du mandat (art. 9) : 30 jours après l'acte (signé il y a 2 jours), pas après la facture
     signed = datetime.fromisoformat(inv["signed_on"]).date()
     assert signed < issued
     assert datetime.fromisoformat(inv["due_on"]).date() == signed + timedelta(days=30) and inv["due_days"] == 30
-    assert "30 jours" in inv["payment_terms"] and "40 €" in inv["late_penalties"]
-    assert inv["lines"][0]["designation"].startswith("Honoraires d'intermédiation — mandat n°") and "cession de titres" in inv["lines"][0]["designation"]
+    assert "30 jours" in inv["payment_terms"] and "notaire" in inv["payment_terms"] and "40 €" in inv["late_penalties"]
+    assert inv["lines"][0]["designation"] == f"Honoraires de négociation — mandat n° {ctx['mandat']['registry_number']} — vente de {TITLE}"
+    assert len(inv["lines"]) == 1 and inv["lines"][0]["rate"] == 0.03
     assert sum(line["amount_ht"] for line in inv["lines"]) == pytest.approx(inv["total_ht"], abs=0.01)
     assert inv["issuer"]["vat_number"] == closing.vat_number() and inv["issuer"]["carte_t"]
     c = _closing(client, cid)
     assert c["invoice_id"] == inv["id"] and c["invoice_number"] == inv["number"]
     assert db_call(client, server.db.properties.find_one, {"id": property["id"]})["status"] == "sold"
 
-    # E-mails : facture au cédant (lien PDF), ordre de paiement au rédacteur, confirmation au repreneur
+    # E-mails : facture au vendeur (lien PDF), ordre de paiement au notaire, confirmation à l'acquéreur
     e = last_email(seller["email"], f"Votre facture n° {inv['number']}")
     assert e and closing.fmt_eur_cents(inv["total_ttc"]) in e["html"] and f"/api/invoices/{inv['id']}/pdf?token=" in e["html"]
     assert "Maître Durand" in e["html"]
-    po = last_email("durand@avocats.test", "Ordre de paiement des honoraires")
+    po = last_email("durand@notaires.test", "Ordre de paiement des honoraires")
     assert po and inv["number"] in po["html"] and f"/api/closing/{cid}/payment-order.pdf?token=" in po["html"]
-    assert last_email(buyer["email"], "Vente confirmée")
-    assert _closing(client, cid)["payment_order_sent_to"] == "durand@avocats.test"
+    assert "bail en cours continue" in last_email(buyer["email"], "Vente confirmée")["html"]
+    assert _closing(client, cid)["payment_order_sent_to"] == "durand@notaires.test"
 
-    # PDF facture : cédant, admin, lien signé ; ni repreneur ni anonyme
+    # PDF facture : vendeur, admin, lien signé ; ni acquéreur ni anonyme
     r = client.get(f"/api/invoices/{inv['id']}/pdf", headers=api.h(seller))
     assert r.status_code == 200 and r.headers["content-type"] == "application/pdf" and r.content.startswith(b"%PDF") and len(r.content) > 1500
     assert client.get(f"/api/invoices/{inv['id']}/pdf", headers=api.h(api.admin())).status_code == 200
@@ -318,18 +360,18 @@ def test_declaration_confirmation_facture_pdf_paiement(api, client, emails):
     token = re.search(r"pdf\?token=([^\"&]+)", e["html"]).group(1)
     assert client.get(f"/api/invoices/{inv['id']}/pdf", params={"token": token}).status_code == 200
     text = pdf_text(r.content)
-    for needle in (inv["number"], "Honoraires", "Paul Dupont", "12 rue de la Mer", "732 829 320", "Total TTC", "40 €",
-                   "Date d'échéance", closing.vat_number(), "ne recevoir ni détenir"):
+    for needle in (inv["number"], "Honoraires", "Paul Dupont", "SCI des Tilleuls", "12 rue de la Mer", "732 829 320", "Total TTC", "40 €",
+                   "Date d'échéance", closing.vat_number(), "ne recevoir ni détenir", "Acte authentique", "Appartement T3"):
         assert needle in text, needle
     assert "à compléter" not in text.lower()
 
-    # Vue du repreneur : ni facture (débiteur : e-mail, adresse, SIREN du cédant), ni honoraires
+    # Vue de l'acquéreur : ni facture (débiteur : e-mail, adresse, SIREN du vendeur), ni honoraires
     buyer_view = client.get(f"/api/closing/{cid}", headers=api.h(buyer)).json()
     assert buyer_view["invoice"] is None and buyer_view["commission_preview"] is None and "invoice_id" not in buyer_view
     assert seller["email"] not in str(buyer_view) and "12 rue de la Mer" not in str(buyer_view)
     assert "12 rue de la Mer" not in str(client.get("/api/closing/my", headers=api.h(buyer)).json())
 
-    # Ordre de paiement : cédant, admin, lien du rédacteur ; jamais le repreneur
+    # Ordre de paiement : vendeur, admin, lien du notaire ; jamais l'acquéreur
     po_token = re.search(r"payment-order\.pdf\?token=([^\"&]+)", po["html"]).group(1)
     assert client.get(f"/api/closing/{cid}/payment-order.pdf", headers=api.h(buyer)).status_code == 403
     for headers, params in ((api.h(seller), {}), (api.h(api.admin()), {}), ({}, {"token": po_token})):
@@ -345,7 +387,7 @@ def test_declaration_confirmation_facture_pdf_paiement(api, client, emails):
     assert client.get(f"/api/invoices/{inv['id']}", headers=api.h(buyer)).status_code == 403
     assert "access_token" not in client.get(f"/api/invoices/{inv['id']}", headers=api.h(seller)).json()
 
-    # Admin : liste, marquage payé (e-mail au cédant), plus d'annulation possible
+    # Admin : liste, marquage payé (e-mail au vendeur), plus d'annulation possible
     r = client.get("/api/admin/invoices", headers=api.h(api.admin()))
     assert r.status_code == 200 and any(i["id"] == inv["id"] and i["overdue"] is False for i in r.json()["invoices"])
     assert client.get("/api/admin/invoices", headers=api.h(seller)).status_code == 403
@@ -387,13 +429,13 @@ def test_confirmation_automatique_apres_7_jours(api, client, emails):
     assert _closing(client, cid)["invoice_id"] == c["invoice_id"]
     # Une vente confirmée ne se redéclare pas
     assert client.post(f"/api/closing/{cid}/declare", headers=api.h(ctx["buyer"]),
-                       json={"signed_on": day(-1), "final_price": 1, "sale_object": "titres"}).status_code == 400
+                       json={"signed_on": day(-1), "final_price": 1, "sale_object": "bien"}).status_code == 400
 
 
 # ---------- Échéances et relances de facture ----------
 
-def test_relances_facture_titres_mise_en_demeure_et_a_faire(api, client, emails):
-    ctx = _setup(api, client, "rel-titres", amount=200000)
+def test_relances_facture_mise_en_demeure_et_a_faire(api, client, emails):
+    ctx = _setup(api, client, "rel-bien", amount=200000)
     cid, seller = ctx["closing"]["id"], ctx["seller"]
     _declare(client, api, ctx, "buyer", price=200000)
     client.post(f"/api/closing/{cid}/confirm", headers=api.h(seller))
@@ -452,37 +494,38 @@ def test_relances_facture_titres_mise_en_demeure_et_a_faire(api, client, emails)
     assert db_call(client, server.db.todos.find_one, {"type": "invoice_overdue", "key": inv["id"]})["status"] == "done"
 
 
-def test_echeance_fonds_180_jours_et_relances(api, client, emails):
-    ctx = _setup(api, client, "rel-fonds", amount=150000, sale_object="fonds")
+def test_cession_de_parts_et_acte_ancien_echeance_minimum_15_jours(api, client, emails):
+    # Parts de la SCI propriétaire, acte signé il y a 40 jours : échéance = facture + 15 jours (jamais moins)
+    ctx = _setup(api, client, "rel-parts", amount=150000, sale_object="parts")
     cid, seller = ctx["closing"]["id"], ctx["seller"]
-    _declare(client, api, ctx, "seller", price=150000, sale_object="fonds")
+    assert client.post(f"/api/closing/{cid}/declare", headers=api.h(seller),
+                       json={"signed_on": day(-1), "final_price": 150000, "sale_object": "titres"}).status_code == 400
+    _declare(client, api, ctx, "seller", price=150000, sale_object="parts", signed_days_ago=40)
     client.post(f"/api/closing/{cid}/confirm", headers=api.h(ctx["buyer"]))
     inv = _invoice(client, _closing(client, cid)["invoice_id"])
-    signed = datetime.fromisoformat(inv["signed_on"]).date()
-    assert datetime.fromisoformat(inv["due_on"]).date() == signed + timedelta(days=180) and inv["due_days"] == 180
-    assert "séquestre" in inv["payment_terms"] and "cession de fonds de commerce" in inv["lines"][0]["designation"]
+    issued = datetime.fromisoformat(inv["issued_on"]).date()
+    assert inv["sale_object"] == "parts" and datetime.fromisoformat(inv["due_on"]).date() == issued + timedelta(days=closing.INVOICE_MIN_DELAY_DAYS)
+    assert "cession des parts de la société propriétaire de" in inv["lines"][0]["designation"]
+    assert closing.invoice_due_on(issued - timedelta(days=2), issued) == issued + timedelta(days=28)
+    assert closing.invoice_due_on(issued - timedelta(days=40), issued, "parts") == issued + timedelta(days=15)
     emails.clear()
 
     def count():
         return _invoice(client, inv["id"])["reminder_count"]
 
-    db_call(client, closing.daily_job, NOW + timedelta(days=60))
+    db_call(client, closing.daily_job, NOW + timedelta(days=10))
     assert count() == 0
-    db_call(client, closing.daily_job, NOW + timedelta(days=91))
-    assert count() == 1 and "arrive à échéance" in last_email(seller["email"], "Rappel d'échéance")["html"]
-    db_call(client, closing.daily_job, NOW + timedelta(days=121))
-    assert count() == 2
-    db_call(client, closing.daily_job, NOW + timedelta(days=151))
-    assert count() == 3 and "Dernier rappel" in last_email(seller["email"], "Rappel d'échéance")["html"]
-    assert _invoice(client, inv["id"])["formal_notice_at"] is None, "pas de mise en demeure avant l'échéance"
-    db_call(client, closing.daily_job, NOW + timedelta(days=170))
+    db_call(client, closing.daily_job, NOW + timedelta(days=16))
+    assert count() == 1 and last_email(seller["email"], "Facture en retard"), "échéance déjà passée : rappel de retard"
     assert _invoice(client, inv["id"])["formal_notice_at"] is None
-    db_call(client, closing.daily_job, NOW + timedelta(days=181))
-    assert _invoice(client, inv["id"])["formal_notice_at"] and count() == 3
+    db_call(client, closing.daily_job, NOW + timedelta(days=31))
+    db_call(client, closing.daily_job, NOW + timedelta(days=46))
+    assert count() == 3 and _invoice(client, inv["id"])["formal_notice_at"]
     assert db_call(client, server.db.todos.count_documents, {"type": "invoice_overdue", "key": inv["id"], "status": "open"}) == 1
-    # PDF de l'ordre de paiement : prélèvement sur le séquestre
+    # PDF de l'ordre de paiement : règlement par le notaire sur le prix (pas un séquestre)
     r = client.get(f"/api/closing/{cid}/payment-order.pdf", headers=api.h(seller))
-    assert "séquestre" in pdf_text(r.content)
+    text = pdf_text(r.content)
+    assert "ORDRE DE PAIEMENT" in text and "notaire" in text.lower()
 
 
 # ---------- Numérotation, minimum, adresse de repli ----------
@@ -504,9 +547,9 @@ def test_numerotation_continue_et_minimum(api, client, emails):
     assert exp_a["applied_minimum"] and inv_a["total_ht"] == exp_a["final_commission_ht"]
     assert any("minimum" in line["label"] for line in inv_a["lines"])
     assert sum(line["amount_ht"] for line in inv_a["lines"]) == pytest.approx(inv_a["total_ht"], abs=0.01)
-    # Au-delà d'un million : deux parts, montant = calculate_commission ; adresse de repli = profil
+    # Taux unique au-delà du minimum, montant = calculate_commission ; adresse de repli = profil
     exp_b = business_model.calculate_commission(1500000)
-    assert inv_b["total_ht"] == exp_b["final_commission_ht"] and len([line for line in inv_b["lines"] if line.get("rate")]) == 2
+    assert inv_b["total_ht"] == exp_b["final_commission_ht"] == 45000 and len([line for line in inv_b["lines"] if line.get("rate")]) == 1
     assert inv_b["debtor"]["address"] == "5 place du Marché, 35000 Rennes" and inv_b["debtor"]["address_source"] == "profil"
     # PDF des deux factures non vides, avec numéro et « Honoraires »
     for inv, ctx in ((inv_a, a), (inv_b, b)):
@@ -568,13 +611,13 @@ def test_contestation_et_arbitrage_admin(api, client, emails):
     assert client.put(f"/api/admin/todos/{extra['id']}/done", headers=api.h(api.admin())).json()["status"] == "done"
 
 
-# ---------- Revue sécurité : déclaration unilatérale et rédacteur indiqué par le repreneur ----------
+# ---------- Revue sécurité : déclaration unilatérale et notaire indiqué par l'acquéreur ----------
 
-def test_declaration_du_repreneur_jamais_confirmee_automatiquement(api, client, emails):
+def test_declaration_de_l_acquereur_jamais_confirmee_automatiquement(api, client, emails):
     ctx = _setup(api, client, "unilat", amount=300000)
     cid = ctx["closing"]["id"]
     _declare(client, api, ctx, "buyer", price=2000000)
-    e = last_email(ctx["seller"]["email"], "Vente déclarée par le repreneur")
+    e = last_email(ctx["seller"]["email"], "Vente déclarée par l'acquéreur")
     assert e and "Rien n'est facturé" in e["html"]
     db_call(client, closing.daily_job, NOW + timedelta(days=8))
     c = _closing(client, cid)
@@ -583,26 +626,26 @@ def test_declaration_du_repreneur_jamais_confirmee_automatiquement(api, client, 
     assert db_call(client, server.db.properties.find_one, {"id": ctx["company"]["id"]})["status"] == "published"
     todo = db_call(client, server.db.todos.find_one, {"type": closing.TODO_DECLARATION_UNCONFIRMED, "key": cid, "status": "open"})
     assert todo, "arbitrage admin à l'échéance"
-    # Le cédant confirme explicitement : facture, ligne « À faire » close
+    # Le vendeur confirme explicitement : facture, ligne « À faire » close
     assert client.post(f"/api/closing/{cid}/confirm", headers=api.h(ctx["seller"])).status_code == 200
     assert db_call(client, server.db.todos.find_one, {"id": todo["id"]})["status"] != "open"
 
 
-def test_repreneur_ne_declare_pas_une_vente_abandonnee(api, client):
+def test_acquereur_ne_declare_pas_une_vente_abandonnee(api, client):
     ctx = _setup(api, client, "aband")
     cid = ctx["closing"]["id"]
     db_call(client, server.db.closings.update_one, {"id": cid}, {"$set": {"status": "abandoned"}})
     r = client.post(f"/api/closing/{cid}/declare", headers=api.h(ctx["buyer"]),
-                    json={"signed_on": day(-1), "final_price": 300000, "sale_object": "titres"})
+                    json={"signed_on": day(-1), "final_price": 300000, "sale_object": "bien"})
     assert r.status_code == 400
     _declare(client, api, ctx, "seller", price=300000)
 
 
-def test_ordre_de_paiement_pas_envoye_au_redacteur_du_repreneur(api, client, emails):
+def test_ordre_de_paiement_pas_envoye_au_notaire_de_l_acquereur(api, client, emails):
     ctx = _setup(api, client, "redac", amount=300000)
     cid = ctx["closing"]["id"]
     r = client.put(f"/api/closing/{cid}/redacteur", headers=api.h(ctx["buyer"]),
-                   json={"type": "avocat", "name": "Maître Faux", "email": "complice@exemple.test"})
+                   json={"type": "autre", "name": "Maître Faux", "email": "complice@exemple.test"})
     assert r.status_code == 200
     _declare(client, api, ctx, "seller", price=300000)
     assert client.post(f"/api/closing/{cid}/confirm", headers=api.h(ctx["buyer"])).status_code == 200
@@ -610,16 +653,16 @@ def test_ordre_de_paiement_pas_envoye_au_redacteur_du_repreneur(api, client, ema
     assert not _closing(client, cid).get("payment_order_sent_at")
     assert db_call(client, server.db.todos.find_one, {"type": closing.TODO_PAYMENT_ORDER, "key": cid, "status": "open"})
     inv_mail = last_email(ctx["seller"]["email"], "Votre facture")
-    assert inv_mail and "indiqué par le repreneur" in inv_mail["html"]
-    # Le repreneur ne peut plus modifier le rédacteur ; le cédant le confirme : l'ordre de paiement part
+    assert inv_mail and "Le notaire a été indiqué par" in inv_mail["html"] and "acquéreur" in inv_mail["html"]
+    # L'acquéreur ne peut plus modifier le notaire ; le vendeur le confirme : l'ordre de paiement part
     assert client.put(f"/api/closing/{cid}/redacteur", headers=api.h(ctx["buyer"]),
-                      json={"type": "avocat", "name": "Maître Faux", "email": "complice@exemple.test"}).status_code == 400
+                      json={"type": "autre", "name": "Maître Faux", "email": "complice@exemple.test"}).status_code == 400
     r = client.put(f"/api/closing/{cid}/redacteur", headers=api.h(ctx["seller"]),
-                   json={"type": "avocat", "name": "Maître Durand", "email": "durand@avocats.test"})
+                   json={"type": "notaire", "name": "Maître Durand", "email": "durand@notaires.test"})
     assert r.status_code == 200, r.text
-    assert last_email("durand@avocats.test", "Ordre de paiement")
-    assert _closing(client, cid)["payment_order_sent_to"] == "durand@avocats.test"
+    assert last_email("durand@notaires.test", "Ordre de paiement")
+    assert _closing(client, cid)["payment_order_sent_to"] == "durand@notaires.test"
     assert not db_call(client, server.db.todos.find_one, {"type": closing.TODO_PAYMENT_ORDER, "key": cid, "status": "open"})
     # Ordre envoyé : le rédacteur n'est plus modifiable
     assert client.put(f"/api/closing/{cid}/redacteur", headers=api.h(ctx["seller"]),
-                      json={"type": "avocat", "name": "Autre", "email": "autre@avocats.test"}).status_code == 400
+                      json={"type": "notaire", "name": "Autre", "email": "autre@notaires.test"}).status_code == 400
