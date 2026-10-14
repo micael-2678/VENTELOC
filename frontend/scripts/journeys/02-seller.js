@@ -1,150 +1,168 @@
-// Parcours cédant : estimateur → inscription vendeur → confirmation d'e-mail (lien reçu) → annonce en 3 écrans →
-// identité (PUT /admin/kyc) → mandat v2 (adresse, qualité, objet, signature par code) → publication immédiate →
-// tableau de bord ; création d'annonce à 390 px sans débordement.
+// Parcours vendeur VenteLoc (docs/venteloc/SPEC.md §5.2) : estimateur par le rendement → inscription vendeur →
+// confirmation d'e-mail (lien reçu) → annonce en 3 écrans (le bien, la location, la vente ; code postal → ville, DPE,
+// copropriété, rendements en direct, aperçu sans adresse) → justificatif de propriété → identité (simulation /test/set-user)
+// → mandat (qualité, rétractation 14 jours, honoraires TTC, signature par code) → publication automatique → tableau de
+// bord (justificatif, rétractation) ; création d'annonce à 390 px sans débordement.
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const L = require('./lib');
 
 const EMAIL = `vendeur.ui.${Date.now().toString(36)}@test.fr`;
-const SIRET = ('555' + String(Date.now()).slice(-9) + '19').slice(0, 14); // unique par exécution (doublon de SIREN bloquant)
-const DESCRIPTION = 'Entreprise de plomberie et de chauffage installée depuis vingt ans sur le bassin brestois, spécialisée dans '
-  + 'la rénovation énergétique de maisons individuelles : pompes à chaleur, chaudières à condensation, salles de bains. Équipe stable '
-  + 'de cinq personnes dont un référent technique, clientèle de particuliers fidèles, contrats d\'entretien récurrents.';
+const ADDRESS = `${Math.floor(Math.random() * 90) + 10} rue des Parcours`;
+const DESCRIPTION = 'Appartement de deux pièces au troisième étage avec ascenseur, traversant et lumineux, à cinq minutes du métro et '
+  + 'des commerces. Loué depuis 2019 à un locataire stable, loyers payés à l\'échéance, révision annuelle selon l\'IRL. Copropriété '
+  + 'bien tenue de vingt-quatre lots, ravalement réalisé en 2021, aucun travaux votés. Cave en sous-sol.';
 
 (async () => {
   const browser = await L.launch();
   const errors = [];
-  const s = L.seed();
   const p = await L.makePage(browser, { errors });
 
   // ---- Estimateur
   await p.goto(L.FRONT + '/estimer', { waitUntil: 'networkidle' });
-  L.check('estimateur : H1', /Estimer|Combien vaut/i.test(await p.locator('h1').first().innerText()));
-  await p.getByTestId('estimate-siret-input').fill(SIRET);
-  await p.waitForFunction(() => { const b = document.querySelector('[data-testid=estimate-siret-continue]'); return b && !b.disabled; }, null, { timeout: 10000 });
-  const prefill = await L.text(p);
-  L.check('estimateur : fiche open data préchargée', /SECRET ENERGIE/.test(prefill), prefill.slice(0, 300));
-  await p.getByTestId('estimate-siret-continue').click();
-  await p.getByTestId('estimate-step-figures').waitFor();
-  await p.getByTestId('estimate-ca-input').fill('600000');
-  await p.getByTestId('estimate-ebe-input').fill('90000');
-  const staffVal = await p.getByTestId('estimate-staff-input').inputValue();
-  L.check('estimateur : effectif prérempli depuis l\'open data', staffVal !== '', staffVal);
+  L.check('estimateur : H1', /Estimer mon bien loué/.test(await p.locator('h1').first().innerText()));
+  await p.getByTestId('estimate-type-select').selectOption('appartement');
+  L.check('estimateur : bail proposé selon le type', (await p.getByTestId('estimate-lease-select').inputValue()) === 'habitation-vide');
+  await p.getByTestId('estimate-department-select').selectOption('69');
+  await p.getByTestId('estimate-surface-input').fill('42');
+  await p.getByTestId('estimate-rent-input').fill('780');
+  await p.getByTestId('estimate-tax-input').fill('900');
+  await p.getByTestId('estimate-price-input').fill('180000');
   await p.getByTestId('estimate-submit').click();
   await p.getByTestId('estimate-result').waitFor({ timeout: 10000 });
   let t = await L.text(p);
-  L.check('estimateur : fourchette affichée', /€/.test(await p.getByTestId('estimate-result').innerText()) && /Fourchette indicative/i.test(t));
+  L.check('estimateur : fourchette, rendements, avertissement', /€/.test(await p.getByTestId('estimate-range').innerText()) && /%/.test(await p.getByTestId('estimate-yields').innerText()) && /Fourchette indicative/i.test(t));
   await p.getByTestId('estimate-deposit-btn').click();
   await p.waitForURL(/\/register\?role=seller/);
   L.check('estimateur → inscription vendeur', true);
 
-  // ---- Inscription vendeur
+  // ---- Inscription vendeur (plus de SIRET à l'inscription : il est demandé dans l'annonce si le bien appartient à une société)
   await p.waitForSelector('[data-testid=register-form]');
-  L.check('inscription : profil cédant présélectionné', await p.getByTestId('register-role-seller').isChecked());
+  L.check('inscription : profil vendeur présélectionné', await p.getByTestId('register-role-seller').isChecked());
   await p.getByTestId('register-first-name-input').fill('Paul');
   await p.getByTestId('register-last-name-input').fill('Dupont');
   await p.getByTestId('register-email-input').fill(EMAIL);
   await p.getByTestId('register-password-input').fill('Test1234!');
   await p.getByTestId('register-phone-input').fill('06 12 34 56 78');
-  await p.getByTestId('register-source-select').selectOption('comptable_avocat');
-  const siretField = await p.getByTestId('register-siret-input').inputValue();
-  L.check('inscription : SIRET repris de l\'estimateur', siretField.replace(/\s/g, '') === SIRET, siretField);
   const since = L.emailCount();
   await p.getByTestId('register-submit-btn').click();
   await p.getByTestId('register-done').waitFor({ timeout: 15000 });
-  t = await L.text(p);
-  L.check('inscription : écran « Vérifiez votre boîte mail »', /Vérifiez votre boîte mail/.test(t));
+  L.check('inscription : écran « Vérifiez votre boîte mail »', /Vérifiez votre boîte mail/.test(await L.text(p)));
   const mail = await L.waitEmail(EMAIL, /Confirmez votre adresse/i, since);
   const link = L.linkIn(mail.html, /\/confirmer-email\//);
   L.check('inscription : e-mail de confirmation avec lien', !!link, mail.subject);
-  await p.getByTestId('register-continue').click();
-  await p.waitForURL(/\/seller\/create/);
-  L.check('inscription : « Déposer mon annonce anonyme » → /seller/create', true);
 
   // ---- Confirmation d'e-mail par le lien reçu
   const token = link.split('/confirmer-email/')[1].split(/[?#]/)[0];
   await p.goto(L.FRONT + '/confirmer-email/' + token, { waitUntil: 'networkidle' });
   await p.getByTestId('confirm-email-continue').waitFor({ timeout: 10000 });
   L.check('confirmation : adresse confirmée', /Adresse confirmée/.test(await L.text(p)));
-  const u = await L.api('GET', '/test/user'.replace('/test/user', '/auth/profile'), { token: await p.evaluate(() => localStorage.getItem('token')) });
-  L.check('confirmation : email_verified côté serveur', u.data && u.data.email_verified === true, JSON.stringify(u.data).slice(0, 200));
   const sellerToken = await p.evaluate(() => localStorage.getItem('token'));
-  const sellerId = u.data.id;
+  const u = await L.api('GET', '/auth/profile', { token: sellerToken });
+  L.check('confirmation : email_verified côté serveur', u.data && u.data.email_verified === true, JSON.stringify(u.data).slice(0, 200));
 
-  // ---- Annonce en 3 écrans
+  // ---- Annonce, écran 1 : le bien
   await p.goto(L.FRONT + '/seller/create', { waitUntil: 'networkidle' });
   await p.getByTestId('create-listing-form').waitFor();
-  await L.sleep(800); // préremplissage open data (estimate en session)
-  t = await L.text(p);
-  L.check('annonce écran 1 : SIRET et dénomination préremplis', (await p.getByTestId('siret-input').inputValue()).replace(/\s/g, '') === SIRET && /SECRET ENERGIE/.test(await p.getByTestId('property-name-input').inputValue()));
-  // Métiers : s'assurer que « PAC, climatisation » est coché (principal) et pas plus de 4
-  const tradeInput = (id) => p.locator(`[data-testid=trade-${id}] input`);
-  if (!(await tradeInput('plomberie-chauffage').isChecked())) await p.getByTestId('trade-plomberie-chauffage').click();
-  if (!(await tradeInput('pac-clim-cvc').isChecked())) await p.getByTestId('trade-pac-clim-cvc').click();
-  L.check('annonce écran 1 : compteur de métiers', /[1-4] \/ 4/.test(await p.getByTestId('trade-count').innerText()));
-  if (!(await p.getByTestId('region-select').inputValue())) await p.getByTestId('region-select').selectOption('Bretagne');
-  await L.sleep(200);
-  if (!(await p.getByTestId('department-select').inputValue())) await p.getByTestId('department-select').selectOption('29');
-  if (!(await p.getByTestId('staff-count-input').inputValue())) await p.getByTestId('staff-count-input').fill('5');
-  await p.getByTestId('legal-structure-select').selectOption('SAS').catch(() => {});
   await p.getByTestId('next-step').click();
-  await p.waitForSelector('[data-testid=ca-n-input]', { timeout: 15000 });
-  L.check('annonce écran 1 → écran 2 (brouillon POST /properties)', true);
-  const propertyId = (await L.api('GET', '/properties', { token: sellerToken })).data.find((c) => c.seller_id === sellerId)?.id;
-  L.check('annonce : brouillon créé côté serveur (statut draft, non soumis)', !!propertyId, JSON.stringify((await L.api('GET', '/properties', { token: sellerToken })).data).slice(0, 200));
-  L.check('annonce écran 2 : CA prérempli depuis l\'estimateur', (await p.getByTestId('ca-n-input').inputValue()) === '600000', await p.getByTestId('ca-n-input').inputValue());
-  await p.getByTestId('ca-n1-input').fill('560000');
-  await p.getByTestId('ca-n2-input').fill('520000');
-  await p.getByTestId('margin-input').fill('32');
-  await p.getByTestId('debt-input').fill('40000');
-  await p.getByTestId('pipeline-input').fill('120000');
-  await p.getByTestId('charges-salaries-input').fill('210000');
-  await p.getByTestId('charges-rent-input').fill('18000');
+  L.check('écran 1 : champs obligatoires signalés', /Indiquez à qui appartient le bien/.test(await L.text(p)));
+  L.check('écran 1 : type de bien prérempli depuis l\'estimateur', await p.locator('[data-testid=property-type-appartement] input').isChecked());
+  await p.getByTestId('owner-type-personne-physique').click();
+  await p.getByTestId('address-input').fill(ADDRESS);
+  await p.getByTestId('postal-code-input').fill('69007');
+  await p.waitForFunction(() => { const el = document.querySelector('[data-testid=city-input], [data-testid=city-select]'); return el && el.value; }, null, { timeout: 5000 })
+    .catch(() => p.getByTestId('city-input').fill('Lyon'));
+  L.check('écran 1 : ville remplie depuis le code postal (ou saisie)', /Lyon/.test(await p.locator('[data-testid=city-input], [data-testid=city-select]').first().inputValue()));
+  L.check('écran 1 : adresse confidentielle expliquée', /révélée seulement après l'engagement de confidentialité/.test(await L.text(p)));
+  if (!(await p.getByTestId('surface-input').inputValue())) await p.getByTestId('surface-input').fill('42');
+  await p.getByTestId('rooms-input').fill('2');
+  await p.getByTestId('floor-input').fill('3');
+  await p.getByTestId('elevator-oui').click();
+  await p.getByTestId('copro-oui').click();
+  await p.getByTestId('copro-lots-input').fill('24');
+  await p.getByTestId('copro-charges-input').fill('960');
+  await p.getByTestId('copro-procedure-non').click();
+  await p.getByTestId('dpe-D').click();
+  await p.getByTestId('energy-min-input').fill('900');
+  await p.getByTestId('energy-max-input').fill('1300');
   await p.getByTestId('next-step').click();
-  await p.waitForSelector('[data-testid=asking-price-input]', { timeout: 15000 });
-  L.check('annonce écran 2 → écran 3', true);
-  await p.getByTestId('asking-price-input').fill('300000');
-  await p.getByTestId('sale-reason-select').selectOption('retraite');
-  await p.getByTestId('sale-object-titres').click();
-  await p.getByTestId('handover-select').selectOption('6').catch(() => {});
-  await p.getByTestId('reassure-has_maintenance_contracts').click();
+  await p.getByTestId('tenant-warning').waitFor({ timeout: 15000 });
+  L.check('écran 1 → écran 2 (brouillon POST /properties)', true);
+  const mine = (await L.api('GET', '/properties/seller/mine', { token: sellerToken })).data || [];
+  const propertyId = (mine.find((x) => x.address === ADDRESS) || mine[0] || {}).id;
+  L.check('annonce : brouillon créé côté serveur', !!propertyId, JSON.stringify(mine).slice(0, 200));
+
+  // ---- Écran 2 : la location
+  L.check('écran 2 : rappel « aucun nom ni coordonnée du locataire »', /Ne saisissez aucun nom ni coordonnée du locataire/.test(await p.getByTestId('tenant-warning').innerText()));
+  L.check('écran 2 : loyer prérempli depuis l\'estimateur', (await p.getByTestId('rent-input').inputValue()) === '780', await p.getByTestId('rent-input').inputValue());
+  await p.getByTestId('lease-start-input').fill('2019-03-01');
+  await p.getByTestId('deposit-input').fill('780');
+  await p.getByTestId('indexation-select').selectOption('irl');
+  await p.getByTestId('tenant-payment-a-jour').click();
+  await p.getByTestId('gli-non').click();
+  await p.getByTestId('non-recoverable-input').fill('450');
+  L.check('écran 2 : rendement en direct', /%/.test(await p.getByTestId('live-gross').innerText()), await p.getByTestId('live-gross').innerText());
+  await p.getByTestId('next-step').click();
+  await p.getByTestId('asking-price-input').waitFor({ timeout: 15000 });
+
+  // ---- Écran 3 : la vente
+  await p.getByTestId('asking-price-input').fill('30000');
+  L.check('écran 3 : alerte si le rendement brut dépasse 15 %', (await p.getByTestId('yield-alert').count()) === 1);
+  await p.getByTestId('asking-price-input').fill('180000');
+  L.check('écran 3 : honoraires TTC d\'abord et montant perçu', /€ TTC/.test(await p.getByTestId('price-fees').innerText()) && /percevez/.test(await p.getByTestId('price-fees').innerText()));
+  L.check('écran 3 : vente des parts non proposée (nom propre)', (await p.getByTestId('sale-object-parts').count()) === 0 && await p.locator('[data-testid=sale-object-bien] input').isChecked());
+  await p.getByTestId('sale-reason-select').selectOption('arbitrage');
   await p.getByTestId('description-input').fill(DESCRIPTION + ' Contact : 06 00 00 00 00');
   await L.sleep(200);
-  L.check('annonce écran 3 : coordonnées détectées dans la description', /Coordonnées détectées/.test(await p.getByTestId('description-contacts').innerText()));
+  L.check('écran 3 : coordonnées détectées dans la description', /Coordonnées détectées/.test(await p.getByTestId('description-contacts').innerText()));
   await p.getByTestId('description-input').fill(DESCRIPTION);
-  L.check('annonce écran 3 : aperçu anonyme (carte) sans dénomination', (await p.locator('[data-testid=listing-anonymous-preview] [data-testid=listing-card]').count()) === 1 && !/SECRET ENERGIE/.test(await p.getByTestId('listing-anonymous-preview').innerText()));
-  L.check('annonce écran 3 : alerte prix hors fourchette ou prix dans la fourchette', (await p.getByTestId('price-alert').count()) + (await p.getByTestId('price-ok').count()) >= 1);
+  const preview = await p.getByTestId('listing-preview').innerText();
+  L.check('écran 3 : aperçu de la carte sans adresse', (await p.locator('[data-testid=listing-preview] [data-testid=listing-card]').count()) === 1 && !preview.includes(ADDRESS));
+  // Photo publique (facultative)
+  const png = path.join(os.tmpdir(), 'venteloc-photo.png');
+  fs.writeFileSync(png, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64'));
+  await p.getByTestId('photo-upload-public').setInputFiles(png).catch(() => {});
+  await L.sleep(800);
   await p.getByTestId('next-step').click();
-  await p.getByTestId('go-mandate').waitFor({ timeout: 15000 });
+  await p.getByTestId('publish-checklist').waitFor({ timeout: 15000 });
   t = await L.text(p);
-  L.check('annonce : écran « Plus que deux étapes » (identité → mandat → publication)', /Plus que deux étapes/.test(t) && /Vérifiez votre identité/.test(t));
+  L.check('annonce : étapes avant publication (justificatif → identité → mandat)', /Déposez votre justificatif de propriété/.test(t) && /Vérifiez votre identité/.test(t) && /14 jours pour vous rétracter/.test(t));
   let comp = (await L.api('GET', `/properties/${propertyId}`, { token: sellerToken })).data;
-  L.check('annonce : brouillon complet en attente d\'identité (draft)', comp.status === 'draft' && comp.asking_price === 300000 && comp.sale_object === 'titres', `${comp.status} ${comp.asking_price} ${comp.sale_object}`);
-  L.check('annonce : aucun e-mail « mandat à signer » avant l\'identité', !L.findEmail(EMAIL, /mandat/i, since));
+  L.check('annonce : brouillon complet (prix, loyer, rendement calculé par le serveur)', comp.status === 'draft' && comp.asking_price === 180000 && comp.rent_monthly === 780 && comp.gross_yield > 0, `${comp.status} ${comp.asking_price} ${comp.gross_yield}`);
 
-  // ---- Identité vérifiée (simulation du retour Stripe : PUT /admin/kyc)
-  const kyc = await L.api('PUT', `/admin/kyc/${sellerId}/validate`, { token: s.admin.token, params: { status: 'verified' } });
-  L.check('identité : validée par l\'admin (simulation Stripe)', kyc.status === 200, JSON.stringify(kyc.data));
-  await L.sleep(500);
+  // ---- Justificatif de propriété (dépôt par l'interface)
+  const pdf = path.join(os.tmpdir(), 'venteloc-justificatif.pdf');
+  fs.writeFileSync(pdf, '%PDF-1.4\n% justificatif de test\n');
+  await p.getByTestId('ownership-doc-taxe-fonciere').check();
+  await p.getByTestId('ownership-file').setInputFiles(pdf);
+  await p.getByTestId('ownership-submit').click();
+  await p.getByTestId('ownership-pending').waitFor({ timeout: 10000 });
   comp = (await L.api('GET', `/properties/${propertyId}`, { token: sellerToken })).data;
-  L.check('annonce : soumise à la vérification → mandat_en_attente', comp.status === 'mandat_en_attente', comp.status);
-  L.check('annonce : e-mail « mandat à signer » reçu', !!L.findEmail(EMAIL, /mandat/i, since));
+  L.check('justificatif : déposé, en cours de contrôle', comp.ownership && comp.ownership.status === 'pending', JSON.stringify(comp.ownership));
 
-  // ---- Mandat v2
-  await p.getByTestId('go-mandate').click();
-  await p.waitForURL(new RegExp(`/seller/mandat/${propertyId}`));
+  // ---- Identité vérifiée (simulation de Stripe Identity en mode test)
+  await L.setUser(EMAIL, 'identity_verified', true);
+  L.check('identité : vérifiée (simulation)', true);
+
+  // ---- Mandat
+  await p.goto(L.FRONT + `/seller/mandat/${propertyId}`, { waitUntil: 'networkidle' });
   await p.getByTestId('mandant-form').waitFor({ timeout: 15000 });
-  L.check('mandat : objet repris de l\'annonce (titres)', await p.locator('[data-testid=mandate-object-titres] input').isChecked());
-  await p.getByTestId('address-line1').fill('12 rue des Artisans');
-  await p.getByTestId('address-postal-code').fill('29200');
-  await p.getByTestId('address-city').fill('Brest');
-  await p.getByTestId('capacity-select').selectOption('dirigeant');
+  t = await L.text(p);
+  L.check('mandat : 14 jours de rétractation, 12 mois, rien avant l\'acte', /14 jours pour vous rétracter/.test(t) && /12 mois, sans exclusivité/.test(t) && /Rien avant l'acte/.test(t));
+  L.check('mandat : vente du bien reprise de l\'annonce', await p.locator('[data-testid=mandate-object-bien] input').isChecked());
+  await p.getByTestId('address-line1').fill('3 avenue Foch');
+  await p.getByTestId('address-postal-code').fill('75016');
+  await p.getByTestId('address-city').fill('Paris');
+  await p.getByTestId('capacity-select').selectOption('proprietaire');
   await p.getByTestId('prepare-mandate').click();
   await p.getByTestId('mandate-summary').waitFor({ timeout: 15000 });
   t = await L.text(p);
   L.check('mandat : résumé en 5 points', (await p.locator('[data-testid=mandate-summary] li').count()) === 5, String(await p.locator('[data-testid=mandate-summary] li').count()));
-  L.check('mandat : version datée, 6 % HT, sans exclusivité, résiliable 15 jours', /Version du \d{2}\/\d{2}\/\d{4}/.test(t) && /6 % HT/.test(t) && /15 jours/.test(t));
+  L.check('mandat : honoraires TTC d\'abord, à la charge du vendeur', /€ TTC \([\d\s\u202f\u00a0]+€ HT\)/.test(await p.getByTestId('mandate-fees').innerText()));
   await p.getByTestId('toggle-mandate-text').click();
   t = await L.text(p);
-  L.check('mandat : texte « MANDAT DE VENTE SIMPLE (NON EXCLUSIF) » avec adresse et registre « attribué »', /MANDAT DE VENTE SIMPLE/.test(t) && /12 rue des Artisans/.test(t) && /attribué/.test(t) && !/\{[A-Z_]+\}/.test(t));
+  L.check('mandat : texte complet sans variable vide, adresse du bien', /MANDAT/.test(t) && t.includes(ADDRESS) && !/\{[A-Z_]+\}/.test(t));
   await L.shot(p, 'mandate-desktop.png');
   await p.getByTestId('open-mandate-sign').click();
   await L.otpSign(p, EMAIL);
@@ -153,33 +171,38 @@ const DESCRIPTION = 'Entreprise de plomberie et de chauffage installée depuis v
   const registry = await p.getByTestId('mandate-registry').innerText();
   L.check('mandat : signé, numéro de registre', /\d/.test(registry), registry);
   L.check('mandat : « publiée immédiatement »', /publiée immédiatement/.test(t), t.slice(0, 300));
-  L.check('mandat : dates (mandat en cours jusqu\'au, clause de suite)', /Mandat en cours jusqu'au/i.test(t) && /Clause de suite jusqu'au/i.test(t));
-  const dl = p.waitForEvent('download', { timeout: 10000 }).catch(() => null);
-  await p.getByTestId('mandate-pdf').click();
-  L.check('mandat : PDF téléchargé', !!(await dl));
-  L.check('mandat : e-mail avec lien PDF', !!L.findEmail(EMAIL, /mandat/i, since) && /pdf/i.test((L.readEmails().reverse().find((e) => e.to === EMAIL && /sign/i.test(e.subject)) || {}).html || ''));
+  L.check('mandat : délai de rétractation indiqué', /rétracter sans motif jusqu'au/.test(await p.getByTestId('mandate-withdrawal-info').innerText()));
   comp = (await L.api('GET', `/properties/${propertyId}`)).data;
-  L.check('annonce : publiée (GET public 200, statut published)', comp && comp.status === 'published' && !comp.company_name, JSON.stringify(comp).slice(0, 150));
-  await L.shot(p, 'mandate-signed-desktop.png');
+  L.check('annonce : publiée, adresse jamais renvoyée au public', comp && comp.status === 'published' && !comp.address, JSON.stringify(comp).slice(0, 150));
+
+  // ---- Fiche publique
+  await p.goto(L.FRONT + `/annonce/${propertyId}`, { waitUntil: 'networkidle' });
+  await p.waitForSelector('[data-testid=property-header]');
+  t = await L.text(p);
+  L.check('fiche : copropriété (24 lots), DPE D, rendement', /24 lots/.test(t) && (await p.getByTestId('dpe-scale').count()) === 1 && /%/.test(await p.getByTestId('gross-yield').innerText()));
 
   // ---- Tableau de bord vendeur
   await p.goto(L.FRONT + '/seller/dashboard', { waitUntil: 'networkidle' });
   await p.waitForSelector(`[data-testid=listing-${propertyId}]`, { timeout: 15000 });
   t = await L.text(p);
   L.check('dashboard : annonce « En ligne »', /En ligne/.test(await p.getByTestId(`status-${propertyId}`).first().innerText()), await p.getByTestId(`status-${propertyId}`).first().innerText());
+  L.check('dashboard : justificatif en cours de contrôle', /Justificatif en cours de contrôle/.test(await p.getByTestId(`ownership-badge-${propertyId}`).innerText()));
   L.check('dashboard : aucun compteur à zéro', L.zeroCounters(t).length === 0, L.zeroCounters(t).join(', '));
-  L.check('dashboard : pas de 48 h / LOI / débiteur', !/48 h|\bLOI\b|commission_payer|débiteur/i.test(t));
+  L.check('dashboard : vocabulaire VenteLoc', !/48 h|repreneur|cédant|\bLOI\b/i.test(t));
   await p.getByTestId(`open-${propertyId}`).click().catch(() => {});
   await L.sleep(500);
   await p.getByRole('tab', { name: /Mandat/ }).click();
   await L.sleep(500);
-  t = await p.getByTestId('mandate-panel').innerText();
-  L.check('dashboard : onglet mandat (résilier / prolonger, registre)', (await p.getByTestId('denounce-mandate').count()) === 1 && (await p.getByTestId('renew-mandate').count()) === 1 && /registre|Registre/.test(t), t.slice(0, 200));
+  const panel = await p.getByTestId('mandate-panel').innerText();
+  L.check('dashboard : onglet mandat (se rétracter / prolonger, registre)', (await p.getByTestId('denounce-mandate').innerText()).trim() === 'Me rétracter' && (await p.getByTestId('renew-mandate').count()) === 1 && /Registre/.test(panel), panel.slice(0, 200));
+  await p.getByRole('tab', { name: /Dossier du bien/ }).click();
+  await L.sleep(500);
+  L.check('dashboard : dossier du bien avec avertissement « données du locataire »', /Masquez le nom, les coordonnées et les pièces d'identité du locataire/.test(await p.getByTestId('tenant-data-warning').innerText()));
   await L.shot(p, 'seller-dashboard-desktop.png');
   await p.context().close();
 
   // ---- Mobile 390 : création d'annonce et tableau de bord
-  const sellerUser = { token: sellerToken, user: { ...u.data } };
+  const sellerUser = { token: sellerToken, user: { ...u.data, identity_verified: true } };
   const m = await L.makePage(browser, { errors, viewport: { width: 390, height: 844 }, user: sellerUser });
   await m.goto(L.FRONT + '/seller/create', { waitUntil: 'networkidle' });
   await m.getByTestId('create-listing-form').waitFor();

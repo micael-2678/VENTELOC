@@ -26,7 +26,7 @@ const YIELD_OPTIONS = [
   ...[3, 4, 5, 6, 7, 8].map((n) => ({ value: String(n), label: `${n}\u00a0% brut ou plus` })),
 ];
 
-const typeOptions = () => PROPERTY_TYPES.map((t) => ({ value: t.id, label: t.short }));
+const typeOptions = () => PROPERTY_TYPES.map((t) => ({ value: t.id, label: t.id === 'autre' ? 'Autre bien' : t.short }));
 const regionOptions = () => REGIONS.map((r) => ({ value: r, label: r }));
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -207,7 +207,7 @@ const AlertForm = ({
         </details>
       ) : groups}
 
-      <div className="grid sm:grid-cols-2 gap-4">
+      <div className={cn('grid gap-4', !compact && 'sm:grid-cols-2')}>
         <div className="min-w-0">
           <label htmlFor={priceId} className="block text-sm font-semibold text-brand-navy mb-1">Prix maximum</label>
           <select

@@ -1,6 +1,6 @@
-// Redirections côté client des anciennes URL (MODE-TEST-ET-APP.md §A.1) à travers la table des routes d'App.js :
-// jamais de 404, filtres conservés et convertis, page des annonces sur /, module /embed/annonces sans en-tête.
-// Les mêmes correspondances sont servies en 301 par frontend/nginx.conf (ops/tests/test_nginx.sh).
+// Table des routes d'App.js (docs/venteloc/API.md §10) : annonces sur /, fiche /annonce/:id, page vendeur /vendre,
+// estimateur /estimer, module /embed/annonces sans en-tête, pages connectées derrière la connexion. Nouveau domaine :
+// aucune redirection héritée de CessionRGE (anciennes URL → 404), ni côté client ni dans frontend/nginx.conf.
 // Exécution : cd frontend && CI=true npx craco test --watchAll=false src/pages/__tests__/redirects.test.jsx
 import '@/components/shared/jestEnv';
 import { Suspense, act } from 'react';
@@ -20,6 +20,8 @@ jest.mock('axios', () => {
 jest.mock('@/lib/analytics', () => ({ trackEvent: jest.fn(), trackPageView: jest.fn(), initAnalytics: jest.fn() }));
 jest.mock('sonner', () => ({ toast: { info: jest.fn(), success: jest.fn(), error: jest.fn(), warning: jest.fn() }, Toaster: () => null }));
 
+import fs from 'fs';
+import path from 'path';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { AppRoutes, roleRestrictionMessage } from '@/App';
@@ -63,46 +65,55 @@ afterEach(() => {
   jest.clearAllMocks();
 });
 
-describe('anciennes URL → page des annonces', () => {
-  test.each([
-    ['/entreprises-a-vendre?metiers=isolation&region=Bretagne&max_price=300000', '/?metier=isolation&region=bretagne&prix_max=300000'],
-    ['/search?rge_type=Pompes%20%C3%A0%20chaleur%20air%2Feau', '/?metier=pac-clim-cvc&rge=1'],
-    ['/buyer/search', '/'],
-    ['/entreprises-a-vendre?metier=electricite&utm_source=wp', '/?metier=electricite&utm_source=wp'],
-    ['/entreprises-batiment-a-vendre', '/'],
-    ['/entreprises-batiment-a-vendre/metier/couverture-charpente', '/?metier=couverture-charpente'],
-    ['/entreprises-batiment-a-vendre/region/pays-de-la-loire', '/?region=pays-de-la-loire'],
-    ['/entreprises-rge-a-vendre', '/?rge=1'],
-    ['/entreprises-rge-a-vendre/activite/pompes-a-chaleur-air-eau', '/?metier=pac-clim-cvc&rge=1'],
-    ['/entreprises-rge-a-vendre/region/corse', '/?region=corse&rge=1'],
-    ['/reprendre-une-entreprise-batiment', '/'],
-    ['/reprendre-une-entreprise-rge', '/'],
-    ['/guides', '/'],
-    ['/guides/combien-vaut-entreprise-batiment', '/'],
-    ['/verifier-entreprise-rge', '/'],
-  ])('%s → %s', async (from, to) => {
-    const c = await open(from);
-    expect(here()).toBe(to);
-    // Titre général, ou titre de la recherche ciblée (un métier et/ou une région)
-    expect(c.querySelector('h1').textContent).toMatch(/^Entreprises (du bâtiment|de |d').*à vendre/);
-    expect(c.querySelector('[data-testid="not-found"]')).toBeNull();
-  });
-
-  test.each([
-    ['/vendre-mon-entreprise-batiment'],
-    ['/vendre-mon-entreprise-rge'],
-  ])('%s → /estimer (entrée du parcours cédant, pas la liste des annonces)', async (from) => {
-    const c = await open(from);
-    expect(here()).toBe('/estimer');
-    expect(c.querySelector('[data-testid="not-found"]')).toBeNull();
-  });
-
+describe('routes publiques et connectées', () => {
   test('/ est la page des annonces (pas de redirection), avec l\'en-tête et le pied de page de l\'application', async () => {
     const c = await open('/');
     expect(here()).toBe('/');
+    expect(c.querySelector('h1').textContent).toBe('Biens loués à vendre');
     expect(c.querySelector('[data-testid="app-header"]')).not.toBeNull();
     expect(c.querySelector('[data-testid="app-footer"]')).not.toBeNull();
     expect(c.querySelector('[data-testid="listings-empty"]')).not.toBeNull();
+  });
+
+  test('/annonce/:id : fiche du bien (GET /properties/{id})', async () => {
+    axios.get.mockImplementation((url) => Promise.resolve(String(url).endsWith('/properties/p1')
+      ? { data: { id: 'p1', property_type: 'appartement', city: 'Lyon', department: '69', rent_monthly: 620, asking_price: 145000, status: 'published' } }
+      : { data: [], headers: { 'x-total-count': '0' } }));
+    const c = await open('/annonce/p1');
+    expect(here()).toBe('/annonce/p1');
+    expect(c.querySelector('[data-testid="property-header"]')).not.toBeNull();
+    expect(c.querySelector('h1').textContent).toBe('Appartement loué · Lyon (69)');
+  });
+
+  test.each([
+    ['/vendre', 'Vendez votre bien loué à un investisseur'],
+    ['/estimer', 'Estimer mon bien loué'],
+  ])('%s : page publique', async (url, h1) => {
+    const c = await open(url);
+    expect(here()).toBe(url);
+    expect(c.querySelector('h1').textContent).toBe(h1);
+  });
+
+  test.each([
+    ['/property/p1'],
+    ['/entreprises-a-vendre?metiers=isolation'],
+    ['/entreprises-rge-a-vendre'],
+    ['/vendre-mon-entreprise-batiment'],
+    ['/president/abc'],
+    ['/company/123'],
+    ['/buyer/credits'],
+  ])('ancienne URL de CessionRGE %s : 404, aucune redirection', async (url) => {
+    const c = await open(url);
+    expect(here()).toBe(url);
+    expect(c.querySelector('[data-testid="not-found"]')).not.toBeNull();
+  });
+
+  test('nginx : plus aucune redirection héritée, alias du backend venteloc-api', () => {
+    const conf = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'nginx.conf'), 'utf8');
+    expect(conf).not.toMatch(/return 301 \/(\?|estimer)|entreprises-|vendre-mon-entreprise|\brge\b|cession/i);
+    expect(conf).toContain('http://venteloc-api:8001');
+    expect(conf).toContain('X-Frame-Options "DENY"');
+    expect(conf).toContain('frame-ancestors \'self\' ${EMBED_ALLOWED_ORIGINS}');
   });
 
   test('/embed/annonces : module sans en-tête ni pied de page', async () => {
@@ -117,6 +128,13 @@ describe('anciennes URL → page des annonces', () => {
     expect(here()).toBe(`/login?redirect=${encodeURIComponent('/dataroom/c1?onglet=documents')}`);
     await open('/seller/mandat/c9');
     expect(here()).toBe(`/login?redirect=${encodeURIComponent('/seller/mandat/c9')}`);
+  });
+
+  test('liens à jeton des e-mails : /suivi/:token et /reset-password/:token → ?token=', async () => {
+    await open('/suivi/abc');
+    expect(here()).toBe('/suivi?token=abc');
+    await open('/reset-password/xyz');
+    expect(here()).toBe('/reset-password?token=xyz');
   });
 
   test('page d\'un autre rôle : retour à l\'espace du compte, avec l\'explication', async () => {
@@ -134,8 +152,8 @@ describe('anciennes URL → page des annonces', () => {
     await flush();
     mounted.push({ root, container });
     expect(here()).toBe('/buyer/dashboard');
-    expect(toast.info).toHaveBeenCalledWith('Cette page est réservée aux comptes cédant.', { id: 'role-restriction' });
-    expect(roleRestrictionMessage(['buyer', 'seller'])).toBe('Cette page est réservée aux comptes repreneur ou cédant.');
+    expect(toast.info).toHaveBeenCalledWith('Cette page est réservée aux comptes vendeur.', { id: 'role-restriction' });
+    expect(roleRestrictionMessage(['buyer', 'seller'])).toBe('Cette page est réservée aux comptes acquéreur ou vendeur.');
   });
 
   test('adresse inconnue : 404', async () => {

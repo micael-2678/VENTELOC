@@ -36,7 +36,7 @@ const CheckList = ({ legend, name, options, selected, onToggle, idPrefix, listId
           <li key={o.id}>
             <label htmlFor={id} className="flex items-center gap-2.5 rounded-lg px-1.5 py-1.5 text-sm text-gray-800 cursor-pointer hover:bg-brand-surface">
               <input id={id} type="checkbox" name={name} value={o.id} checked={selected.includes(o.id)} onChange={() => onToggle(o.id)} className={checkboxClass} />
-              <span className="min-w-0 break-words">{o.short}</span>
+              <span className="min-w-0 break-words">{o.id === 'autre' && o.short === 'Bien' ? 'Autre bien' : o.short}</span>
             </label>
           </li>
         );

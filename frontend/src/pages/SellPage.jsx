@@ -121,8 +121,8 @@ const SellPage = ({ user: userProp }) => {
 
   return (
     <AppLayout user={user} className="bg-brand-surface">
-      <section className="bg-white border-b border-brand-line px-4 sm:px-6 pt-8 pb-10">
-        <div className="max-w-5xl mx-auto min-w-0">
+      <section className="bg-white border-b border-brand-line pt-8 pb-10">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 min-w-0">
           <Breadcrumbs items={crumbs} />
           <p className="eyebrow mb-2">Propriétaires bailleurs</p>
           <h1 className="font-display text-3xl sm:text-4xl font-extrabold text-brand-navy leading-tight tracking-tight" data-testid="sell-h1">{page.h1}</h1>

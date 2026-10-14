@@ -1,4 +1,4 @@
-"""Taxonomie du bâtiment : identité back/front, correspondances RGE → métiers, départements, NAF, slugs"""
+"""Référentiels VenteLoc : identité back/front (biens loués, régions, départements), calculs partagés, slugs"""
 import os
 import re
 
@@ -30,25 +30,38 @@ def front():
 
 
 # ---------------------------------------------------------------------------------------------- identité front
-def test_trades_identical_to_front(front):
-    block = _js_block(front, "TRADES")
-    rows = re.findall(r"\{ id: '([^']*)', label: '((?:\\'|[^'])*)', short: '((?:\\'|[^'])*)' \}", block)
-    assert [(r[0], _js_string(r[1]), _js_string(r[2])) for r in rows] == \
-        [(t["id"], t["label"], t["short"]) for t in taxonomy.TRADES]
+def _js_objects(block):
+    """Objets JS { clé: 'valeur', … } d'un tableau → liste de dict (seulement les valeurs chaînes)"""
+    rows = []
+    for obj in re.findall(r"\{([^{}]*)\}", block):
+        rows.append({k: _js_string(v) for k, v in re.findall(r"(\w+): '((?:\\'|[^'])*)'", obj)})
+    return rows
 
 
-def test_rge_categories_identical_to_front(front):
-    block = _js_block(front, "RGE_CATEGORIES")
-    rows = re.findall(r"\{ id: '([^']*)', label: '((?:\\'|[^'])*)' \}", block)
-    assert [(r[0], _js_string(r[1])) for r in rows] == [(c["id"], c["label"]) for c in taxonomy.RGE_CATEGORIES]
-    assert len(taxonomy.RGE_CATEGORIES) == 18
+VENTELOC_TABLES = ("PROPERTY_TYPES", "LEASE_TYPES", "DPE_CLASSES", "TENANT_PAYMENT_STATUSES", "OWNER_TYPES", "SALE_OBJECTS",
+                   "SALE_REASONS", "BUYER_PROJECT_TYPES", "FINANCING_TYPES")
 
 
-def test_other_qualifications_identical_to_front(front):
-    block = _js_block(front, "OTHER_QUALIFICATIONS")
-    rows = re.findall(r"\{ id: '([^']*)', label: '((?:\\'|[^'])*)' \}", block)
-    assert [(r[0], _js_string(r[1])) for r in rows] == \
-        [(q["id"], q["label"]) for q in taxonomy.OTHER_QUALIFICATIONS]
+@pytest.mark.parametrize("name", VENTELOC_TABLES)
+def test_venteloc_tables_identical_to_front(front, name):
+    """Même ordre, mêmes ids, mêmes libellés (et mêmes attributs short, category, regime) des deux côtés"""
+    rows = _js_objects(_js_block(front, name))
+    assert rows == [dict(row) for row in getattr(taxonomy, name)], name
+
+
+def test_dpe_rental_ban_identical_to_front(front):
+    block = _js_block(front, "DPE_RENTAL_BAN")
+    assert dict(re.findall(r"(\w): '(\d{4}-\d{2}-\d{2})'", block)) == taxonomy.DPE_RENTAL_BAN
+
+
+def test_front_exposes_shared_helpers(front):
+    for name in ("propertyTypeLabel", "leaseTypeLabel", "isHousingLease", "dpeRentalStatus", "grossYield", "netYield",
+                 "propertyTitle"):
+        assert f"export const {name} =" in front, name
+    # Même table de titres (début du titre et accord de « loué »)
+    block = re.search(r"const PROPERTY_TITLE_HEADS = \{(.*?)\};", front, re.S).group(1)
+    heads = {k.strip("'"): (a, b) for k, a, b in re.findall(r"('?[\w-]+'?): \['([^']*)', '([^']*)'\]", block)}
+    assert heads == taxonomy.PROPERTY_TITLE_HEADS
 
 
 def test_regions_identical_to_front(front):
@@ -64,89 +77,60 @@ def test_departements_identical_to_front(front):
 
 
 def test_front_paths_and_slug_rules(front):
-    # La page des annonces est « / » (MODE-TEST-ET-APP.md §A.3) ; les anciens hubs n'ont plus de chemin dans le front
+    # La page des annonces est « / »
     assert "export const SEARCH_PATH = '/';" in front
-    assert "BUILDING_HUB_PATH" not in front and "SEO_HUB_PATH" not in front
     # Même traitement des ligatures dans les deux slugify
     assert ".replace(/œ/g, 'oe')" in front
 
 
-# ---------------------------------------------------------------------------------------------- métiers
-def test_trades_shape():
-    assert len(taxonomy.TRADES) == 16
-    ids = [t["id"] for t in taxonomy.TRADES]
-    assert len(set(ids)) == 16
-    for t in taxonomy.TRADES:
-        assert taxonomy.slugify(t["id"]) == t["id"], f"id non slug : {t['id']}"
-        assert t["label"] and t["short"]
-    assert taxonomy.trade_label("plomberie-chauffage") == "Plomberie, chauffage, sanitaire"
-    assert taxonomy.trade_label("plomberie-chauffage", short=True) == "Plomberie-chauffage"
-    assert taxonomy.trade_label("inconnu") == ""
-    assert taxonomy.trade_slug("maconnerie-gros-oeuvre") == "maconnerie-gros-oeuvre"
-    assert taxonomy.trade_by_slug("maconnerie-gros-oeuvre")["id"] == "maconnerie-gros-oeuvre"
-    assert taxonomy.trade_by_slug("maconnerie-gros-oeuvre-")["id"] == "maconnerie-gros-oeuvre"
-    assert taxonomy.trade_by_slug("Électricité générale")["id"] == "electricite"
-    assert taxonomy.trade_by_slug("") is None
+def test_building_tables_removed_from_backend():
+    for name in ("TRADES", "RGE_CATEGORIES", "RGE_TYPES", "OTHER_QUALIFICATIONS", "NAF_LIBELLES", "listing_title", "trades_for_rge",
+                 "naf_in_building", "MIN_TRADES"):
+        assert not hasattr(taxonomy, name), name
 
 
-def test_validate_trades():
-    assert taxonomy.validate_trades(["isolation", "isolation", " menuiserie "]) == ["isolation", "menuiserie"]
-    with pytest.raises(ValueError, match="au moins un métier"):
-        taxonomy.validate_trades([])
-    with pytest.raises(ValueError, match="au moins un métier"):
-        taxonomy.validate_trades(None)
-    with pytest.raises(ValueError, match="au moins un métier"):
-        taxonomy.validate_trades("isolation")
-    with pytest.raises(ValueError, match="Métier inconnu : plomberie"):
-        taxonomy.validate_trades(["plomberie"])
-    with pytest.raises(ValueError, match="au plus 4"):
-        taxonomy.validate_trades(["isolation", "menuiserie", "electricite", "etancheite", "agencement"])
+# ---------------------------------------------------------------------------------------------- biens loués
+def test_ids_are_stable():
+    assert taxonomy.PROPERTY_TYPE_IDS == ["appartement", "maison", "immeuble", "residence-geree", "local-commercial", "bureaux",
+                                          "parking", "autre"]
+    assert "habitation-vide" in taxonomy.LEASE_TYPE_IDS and "commercial" in taxonomy.LEASE_TYPE_IDS
+    assert taxonomy.SALE_OBJECT_IDS == ["bien", "parts", "indifferent"]
+    assert taxonomy.DPE_CLASS_IDS[-2:] == ["vierge", "non-soumis"]
 
 
-def test_trades_for_rge_mapping_from_spec():
-    by_label = {c["id"]: c["label"] for c in taxonomy.RGE_CATEGORIES}
-    expected = {
-        "isolation_interieur": "isolation", "isolation_exterieur": "isolation", "isolation_toiture": "isolation",
-        "isolation_combles": "isolation", "isolation_plancher": "isolation", "menuiserie": "menuiserie",
-        "chauffage_bois": "plomberie-chauffage", "chauffage_gaz": "plomberie-chauffage",
-        "pac_air_eau": "pac-clim-cvc", "pac_eau_eau": "pac-clim-cvc", "pac_air_air": "pac-clim-cvc",
-        "chauffe_eau_thermo": "pac-clim-cvc", "ventilation": "pac-clim-cvc",
-        "solaire_thermique": "photovoltaique-enr", "solaire_combine": "photovoltaique-enr",
-        "photovoltaique": "photovoltaique-enr", "borne_recharge": "electricite",
-        "audit_energetique": "renovation-generale",
-    }
-    for rge_id, trade in expected.items():
-        assert taxonomy.trade_for_rge(rge_id) == trade, rge_id
-        assert taxonomy.trade_for_rge(by_label[rge_id]) == trade, rge_id   # libellé stocké en base
-    assert taxonomy.trade_for_rge("inconnu") is None
+def test_labels_and_housing_lease():
+    assert taxonomy.property_type_label("immeuble") == "Immeuble de rapport"
+    assert taxonomy.property_type_label("immeuble", short=True) == "Immeuble"
+    assert taxonomy.lease_type_label("commercial", short=True) == "Bail commercial"
+    assert taxonomy.property_type_label("inconnu") == ""
+    assert taxonomy.is_housing_lease("habitation-meublee") is True
+    assert taxonomy.is_housing_lease("commercial") is False
+    assert taxonomy.is_housing_lease(None) is False
 
 
-def test_trades_for_rge_order_dedupe_limit():
-    assert taxonomy.trades_for_rge(["Pompes à chaleur air/eau", "Pompes à chaleur air/air",
-                                    "Panneaux photovoltaïques", "n'existe pas"]) == \
-        ["pac-clim-cvc", "photovoltaique-enr"]
-    many = ["isolation_combles", "menuiserie", "chauffage_gaz", "pac_air_eau", "photovoltaique", "borne_recharge"]
-    assert taxonomy.trades_for_rge(many) == ["isolation", "menuiserie", "plomberie-chauffage", "pac-clim-cvc"]
-    unlimited = ["isolation", "menuiserie", "plomberie-chauffage", "pac-clim-cvc", "photovoltaique-enr", "electricite"]
-    assert taxonomy.trades_for_rge(many, limit=0) == unlimited
-    assert taxonomy.trades_for_rge([]) == []
-    assert taxonomy.trades_for_rge(None) == []
+def test_dpe_rental_status_calendar():
+    assert taxonomy.dpe_rental_status("G", "habitation-vide", today="2026-10-14") == {"status": "interdit", "date": "2025-01-01"}
+    assert taxonomy.dpe_rental_status("f", "habitation-vide", today="2026-10-14") == {"status": "echeance", "date": "2028-01-01"}
+    assert taxonomy.dpe_rental_status("F", "colocation", today="2028-01-01")["status"] == "interdit"
+    assert taxonomy.dpe_rental_status("E", "habitation-vide", today="2026-10-14") == {"status": "echeance", "date": "2034-01-01"}
+    assert taxonomy.dpe_rental_status("C", "habitation-vide") == {"status": "ok", "date": None}
+    assert taxonomy.dpe_rental_status("G", "commercial") == {"status": "non-applicable", "date": None}
 
 
-def test_rge_id_tolerant_to_accents():
-    assert taxonomy.rge_id_for("Pompes a chaleur air/eau") == "pac_air_eau"
-    assert taxonomy.rge_id_for("pac_air_eau") == "pac_air_eau"
-    assert taxonomy.rge_id_for("") is None
+def test_yields():
+    assert taxonomy.gross_yield(800, 200000) == 4.8
+    assert taxonomy.net_yield(800, 200000, 900, 400) == 4.15
+    assert taxonomy.gross_yield(0, 200000) is None and taxonomy.gross_yield(800, None) is None
+    assert taxonomy.net_yield(800, 0) is None
 
 
-# ---------------------------------------------------------------------------------------------- qualifications
-def test_other_qualifications():
-    assert len(taxonomy.OTHER_QUALIFICATIONS) == 10
-    assert taxonomy.other_qualification_label("qualit-enr").startswith("Qualit'EnR")
-    assert taxonomy.other_qualification_label("cstb-etanchéité") == "Certification CSTB étanchéité"
-    assert taxonomy.other_qualification_label("rien") == ""
-    assert taxonomy.validate_other_qualifications(["qualibat", "QUALIBAT", "inconnu", "cstb-etanchéité"]) == \
-        ["qualibat", "cstb-etancheite"]
+def test_property_title():
+    assert taxonomy.property_title("appartement", "Lyon", "69", 42, 2) == "Appartement T2 loué · 42 m² · Lyon (69)"
+    assert taxonomy.property_title("immeuble", "Saint-Étienne", "42", 310.5, units_count=5) == \
+        "Immeuble de rapport loué · 5 lots · 310,5 m² · Saint-Étienne (42)"
+    assert taxonomy.property_title("parking", "Paris", "75", 12) == "Parking loué · Paris (75)"
+    assert taxonomy.property_title("maison", department="44") == "Maison louée · Loire-Atlantique (44)"
+    assert taxonomy.property_title("bureaux") == "Bureaux loués"
 
 
 # ---------------------------------------------------------------------------------------------- départements
@@ -191,54 +175,9 @@ def test_departement_from_postal_code():
 # ---------------------------------------------------------------------------------------------- slug
 def test_slugify_identical_to_front_rules():
     assert taxonomy.slugify("Provence-Alpes-Côte d'Azur") == "provence-alpes-cote-d-azur"
-    assert taxonomy.slugify("Isolation par l'intérieur (murs, rampants, plafonds)") == \
-        "isolation-par-l-interieur-murs-rampants-plafonds"
-    assert taxonomy.slugify("Maçonnerie, gros œuvre") == "maconnerie-gros-oeuvre"
+    assert taxonomy.slugify("Lot en résidence gérée (étudiants, seniors)") == "lot-en-residence-geree-etudiants-seniors"
+    assert taxonomy.slugify("Cœur de ville") == "coeur-de-ville"
     assert taxonomy.slugify("  Île-de-France ") == "ile-de-france"
-    assert taxonomy.slugify("L’Étanchéité") == "l-etancheite"
+    assert taxonomy.slugify("L’Étage") == "l-etage"
     assert taxonomy.slugify("") == ""
     assert taxonomy.slugify(None) == ""
-
-
-# ---------------------------------------------------------------------------------------------- NAF
-def test_naf_in_building():
-    assert taxonomy.naf_in_building("43.22A") is True
-    assert taxonomy.naf_in_building("4322a") is True
-    assert taxonomy.naf_in_building("41.20A") is True
-    assert taxonomy.naf_in_building("42.11Z") is True
-    assert taxonomy.naf_status("43.22A") == "batiment"
-    # Codes connexes : tolérés (vrai) mais signalés
-    for code in ("16.23Z", "23.61Z", "23.69Z", "25.11Z", "25.12Z", "71.12B", "81.30Z"):
-        assert taxonomy.naf_in_building(code) is True, code
-        assert taxonomy.naf_status(code) == "connexe", code
-    assert taxonomy.naf_in_building("62.01Z") is False
-    assert taxonomy.naf_status("62.01Z") == "hors-batiment"
-    assert taxonomy.naf_in_building("") is False
-    assert taxonomy.naf_status(None) == "inconnu"
-    assert taxonomy.naf_label("43.22A") == "Travaux d'installation d'eau et de gaz en tous locaux"
-    assert taxonomy.naf_label("62.01Z") == ""
-    assert taxonomy.format_naf("4322A") == "43.22A"
-    assert taxonomy.format_naf("43.22A") == "43.22A"
-
-
-def test_trade_for_naf():
-    assert taxonomy.trade_for_naf("43.22A") == "plomberie-chauffage"
-    assert taxonomy.trade_for_naf("43.22B") == "pac-clim-cvc"
-    assert taxonomy.trade_for_naf("43.21A") == "electricite"
-    assert taxonomy.trade_for_naf("43.91B") == "couverture-charpente"
-    assert taxonomy.trade_for_naf("43.99C") == "maconnerie-gros-oeuvre"
-    assert taxonomy.trade_for_naf("81.30Z") == "piscine-paysage"
-    assert taxonomy.trade_for_naf("62.01Z") is None
-    for naf, trade in taxonomy._NAF_TO_TRADE.items():
-        assert trade in taxonomy.TRADES_BY_ID, naf
-
-
-# ---------------------------------------------------------------------------------------------- titre
-def test_listing_title():
-    assert taxonomy.listing_title(["plomberie-chauffage", "isolation"], "Bretagne", 10) == \
-        "Entreprise de plomberie-chauffage · Bretagne · 10 salariés"
-    assert taxonomy.listing_title(["pac-clim-cvc"], "Occitanie", 1) == \
-        "Entreprise de PAC, climatisation · Occitanie · 1 salarié"
-    assert taxonomy.listing_title(["electricite"], None, None) == "Entreprise d’électricité"
-    assert taxonomy.listing_title(["isolation"], "Bretagne", 0) == "Entreprise d’isolation · Bretagne · 0 salarié"
-    assert taxonomy.listing_title([], "Corse", "abc") == "Entreprise du bâtiment · Corse"

@@ -181,7 +181,6 @@ services:
       # Origines autorisées à afficher /embed/annonces dans une iframe (site WordPress), séparées par des espaces ;
       # vide = l'application seule ('self'). Lue au démarrage du conteneur : pas besoin de reconstruire l'image.
       - EMBED_ALLOWED_ORIGINS=${EMBED_ALLOWED_ORIGINS:-}
-      - SELLER_LANDING_URL=${SELLER_LANDING_URL:-}
     logging: *logging
     depends_on:
       - backend

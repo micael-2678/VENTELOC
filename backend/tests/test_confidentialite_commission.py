@@ -59,14 +59,15 @@ def test_contacts_masked_before_nda_visible_to_admin(api, client):
 
 def test_commission_scale_ht_ttc():
     mid = calculate_commission(600000)
-    assert mid["final_commission_ht"] == 36000 and mid["final_commission_ttc"] == 43200 and mid["payer"] == "cedant"
-    assert calculate_commission(800000)["final_commission_ttc"] == 57600
+    assert mid["final_commission_ht"] == 18000 and mid["final_commission_ttc"] == 21600 and mid["payer"] == "vendeur"
+    assert calculate_commission(800000)["final_commission_ttc"] == 28800
 
 
 def test_no_buyer_payment_route_and_public_config(api, client):
     cfg = client.get("/api/config").json()
-    assert cfg["seller_commission"] is True and cfg["commission_payer"] == "cedant"
-    assert cfg["commission_scale"]["rate_percent"] == 6 and cfg["commission_scale"]["minimum_ht"] == 4000
+    assert cfg["seller_commission"] is True and cfg["commission_payer"] == "vendeur"
+    assert cfg["commission_scale"]["rate_percent"] == 3 and cfg["commission_scale"]["minimum_ht"] == 3000
+    assert cfg["commission"]["rate_percent_ttc"] == 3.6
     assert "buyer_credits" not in cfg
     buyer = api.register(uid("a"), "buyer")
     for path in ("/api/payments/create-checkout", "/api/credits/balance", "/api/credits/packs"):

@@ -57,11 +57,18 @@ describe('pied de page légal', () => {
 describe('CGU et mentions légales : portée des offres, modération, DSA', () => {
   const text = (sections) => JSON.stringify(sections);
 
-  test('l\'offre indicative n\'engage pas sur la vente (cohérent avec l\'article 6 du gabarit d\'offre)', () => {
+  test('l\'offre d\'achat n\'emporte pas vente ; rétractation de 10 jours de l\'acquéreur et de 14 jours du mandant', () => {
     const cgu = text(content.legal.cgu.sections);
-    expect(cgu).not.toContain('engagent leur auteur');
-    expect(cgu).toContain('sans constituer une promesse d\'achat');
-    expect(cgu).toContain('ne constitue pas une promesse de vente');
+    expect(cgu).toContain('n\'emporte pas vente');
+    expect(cgu).toContain('L271-1');
+    expect(cgu).toContain('délai de rétractation de 14 jours');
+    expect(cgu).toContain('justificatif de propriété');
+    expect(cgu).toContain('engagement de confidentialité et de non-contournement');
+  });
+
+  test('vocabulaire VenteLoc : aucun terme hérité de la cession d\'entreprises', () => {
+    const all = JSON.stringify(content);
+    expect(all).not.toMatch(/repreneur|cédant|bâtiment|\bRGE\b|ADEME|BODACC|offre indicative/i);
   });
 
   test('aucune promesse de relecture « dans les 48 heures » ; retrait contestable', () => {

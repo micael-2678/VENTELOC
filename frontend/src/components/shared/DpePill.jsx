@@ -54,12 +54,12 @@ export const DpeScale = ({ value, caption }) => {
                   WHITE_TEXT.includes(l) ? 'text-white' : 'text-brand-navy',
                   active ? 'ring-2 ring-brand-navy ring-offset-1' : 'opacity-60',
                 )}
-                style={{ width: `${34 + i * 9}%` }}
+                style={{ width: `${28 + i * 8}%` }}
                 aria-hidden={!active}
               >
                 {l}
               </span>
-              {active && <span className="text-sm font-semibold text-brand-navy">Classe {l}</span>}
+              {active && <span className="text-sm font-semibold text-brand-navy whitespace-nowrap">Classe {l}</span>}
             </li>
           );
         })}

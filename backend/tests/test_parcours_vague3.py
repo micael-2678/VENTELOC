@@ -1,15 +1,14 @@
 """Vague 3 — correctifs du parcours (revue parcours-jobs, juridique, ux) :
 demande de dossier renouvelée après expiration (relances et expiration rejouées), demandes closes quand l'annonce
 n'est plus en ligne, relances transactionnelles malgré notifications_opt_out, récapitulatif quotidien des messages
-sans réponse, relances héritées avec lien de désinscription, relance humaine depuis « À faire », doublon SIREN d'une
-annonce en pause, purge RGPD (durées de la politique de confidentialité), diagnostic de transmissibilité sans doublon."""
+sans réponse, relances héritées avec lien de désinscription, relance humaine depuis « À faire », doublon d'adresse
+d'une annonce en pause, purge RGPD (durées de la politique de confidentialité)."""
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import server
-import transmissibility
 from conftest import listing
-from test_parcours_v2 import ago, db_call, mails_to, published_listing, run_jobs, uid, unique_siret
+from test_parcours_v2 import ago, db_call, mails_to, published_listing, run_jobs, uid
 
 
 def _request(api, client, property_id, buyer):
@@ -37,7 +36,7 @@ def test_renewed_dataroom_request_is_reminded_and_expires_again(api, client, ema
     run_jobs(api, client, emails, reset_gate=True)
     assert mails_to(emails, buyer["email"], "n'a pas répondu")
     assert _stored_request(client, c["id"], buyer["id"])["status"] == "expired"
-    # Le repreneur renouvelle sa demande (comme le promet l'e-mail d'expiration) : même identifiant, nouveau cycle
+    # L'acquéreur renouvelle sa demande (comme le promet l'e-mail d'expiration) : même identifiant, nouveau cycle
     second = _request(api, client, c["id"], buyer)
     assert second["status"] == "pending" and second["request_id"] == first["request_id"]
     _antedate_request(client, c["id"], buyer["id"], 3, 7)
@@ -92,14 +91,14 @@ def test_transactional_reminders_reach_opted_out_seller(api, client, emails):
     lazy = api.register(uid("cedant"), "seller")
     api.verify_kyc(lazy)
     client.put("/api/auth/profile", headers=api.h(lazy), json={"notifications_opt_out": True})
-    m = client.post("/api/properties", headers=api.h(lazy), json=listing(siret=unique_siret())).json()
+    m = client.post("/api/properties", headers=api.h(lazy), json=listing()).json()
     assert m["status"] == "mandat_en_attente"
     db_call(client, server.db.properties.update_one, {"id": m["id"]}, {"$set": {"mandate_pending_since": ago(2)}})
     run_jobs(api, client, emails, reset_gate=True)
     assert len(mails_to(emails, lazy["email"], "Signez votre mandat")) == 1
 
 
-# ---------- parcours-jobs-04 : messages sans réponse, un récapitulatif par cédant ----------
+# ---------- parcours-jobs-04 : messages sans réponse, un récapitulatif par vendeur ----------
 
 def test_seller_reminder_single_recap_only_for_listings_online(api, client, emails):
     seller, c = published_listing(api, client)
@@ -121,7 +120,7 @@ def test_seller_reminder_single_recap_only_for_listings_online(api, client, emai
 # ---------- parcours-jobs-05 / juridique-04 : relances héritées ----------
 
 def test_legacy_reminders_carry_unsubscribe_and_respect_opt_out(api, client, emails):
-    seller, c = published_listing(api, client, trades=["isolation"])
+    seller, c = published_listing(api, client)
     buyer = api.register(uid("rep"), "buyer")
     opted = api.register(uid("rep"), "buyer")
     client.put("/api/auth/profile", headers=api.h(opted), json={"notifications_opt_out": True})
@@ -135,15 +134,15 @@ def test_legacy_reminders_carry_unsubscribe_and_respect_opt_out(api, client, ema
     run_jobs(api, client, emails, reset_gate=True)
     followup = mails_to(emails, buyer["email"], "Où en êtes-vous")
     assert len(followup) == 1 and "Ne plus recevoir" in followup[0]["html"]
-    assert "entreprise du bâtiment" in followup[0]["html"] and "RGE (" not in followup[0]["html"]
+    assert "bien loué" in followup[0]["html"] and "Lyon" in followup[0]["html"]
     assert not mails_to(emails, opted["email"], "Où en êtes-vous")
-    relaunch = mails_to(emails, lazy["email"], "Votre annonce de cession")
+    relaunch = mails_to(emails, lazy["email"], "Votre annonce de bien loué")
     assert len(relaunch) == 1 and "Ne plus recevoir" in relaunch[0]["html"] and "gratuit" not in relaunch[0]["html"]
     assert "sans frais" in relaunch[0]["html"]
-    assert not mails_to(emails, lazy_opted["email"], "Votre annonce de cession")
+    assert not mails_to(emails, lazy_opted["email"], "Votre annonce de bien loué")
 
 
-# ---------- parcours-jobs-07 : « Relancer le cédant » depuis « À faire » ----------
+# ---------- parcours-jobs-07 : « Relancer le vendeur » depuis « À faire » ----------
 
 def test_admin_reminds_seller_from_todo(api, client, emails):
     seller, c = published_listing(api, client)
@@ -153,7 +152,7 @@ def test_admin_reminds_seller_from_todo(api, client, emails):
     run_jobs(api, client, emails, reset_gate=True)
     todo = client.get("/api/admin/todo", headers=api.h(api.admin())).json()
     row = next(r for s in todo["sections"] if s["key"] == "dataroom_unanswered" for r in s["rows"] if r["id"] == req_id)
-    action = next(a for a in row["actions"] if a["label"] == "Relancer le cédant")
+    action = next(a for a in row["actions"] if a["label"] == "Relancer le vendeur")
     assert action["url"] == f"/api/admin/dataroom/{req_id}/remind"
     emails.clear()
     assert client.post(action["url"], headers=api.h(buyer)).status_code == 403
@@ -165,26 +164,31 @@ def test_admin_reminds_seller_from_todo(api, client, emails):
     assert any(x.get("day") == "admin" for x in _stored_request(client, c["id"], buyer["id"])["reminders_sent"])
 
 
-# ---------- parcours-jobs-08 : doublon SIREN d'une annonce en pause ----------
+# ---------- parcours-jobs-08 : doublon d'adresse d'une annonce en pause ----------
 
-def test_duplicate_siren_blocked_while_first_listing_paused(api, client, emails):
-    siret = unique_siret()
-    seller1, c1 = published_listing(api, client, siret=siret)
+def test_duplicate_address_flagged_while_first_listing_paused(api, client, emails):
+    seller1, c1 = published_listing(api, client, address="12 rue des Doublons")
     assert client.put(f"/api/properties/{c1['id']}/status", params={"status": "paused"}, headers=api.h(seller1)).status_code == 200
     seller2 = api.register(uid("dupont"), "seller", first="Paul", last="Dupont")
     api.verify_kyc(seller2)
-    c2 = client.post("/api/properties", headers=api.h(seller2), json=listing(siret=siret)).json()
+    # Même adresse, casse et ponctuation différentes : même clé normalisée
+    c2 = client.post("/api/properties", headers=api.h(seller2), json=listing(address="12, Rue des DOUBLONS")).json()
+    assert any(f["code"] == "duplicate_address" for f in c2["flags"]), c2["flags"]
+    # Drapeau non bloquant : publication automatique, puis relecture admin (48 h) avec le drapeau
+    api.ownership(seller2, c2["id"])
     m = api.mandate(seller2, c2["id"])
-    assert api.sign_mandate(seller2, m["contract_id"]).json()["listing_status"] == "draft"
+    assert api.sign_mandate(seller2, m["contract_id"]).json()["listing_status"] == "published"
     doc = client.get(f"/api/properties/{c2['id']}", headers=api.h(seller2)).json()
-    assert "doublon_siren" in doc["blocking"] and doc["property_checks"]["duplicate_siren"] is True
-    # Si l'admin met la seconde annonce en ligne, la première ne peut plus être remise en ligne
-    assert client.put(f"/api/properties/{c2['id']}/status", params={"status": "published"}, headers=api.h(api.admin())).status_code == 200
-    r = client.put(f"/api/properties/{c1['id']}/status", params={"status": "published"}, headers=api.h(seller1))
-    assert r.status_code == 400 and r.json()["detail"]["code"] == "validation"
+    assert doc["status"] == "published" and doc["property_checks"]["duplicate_address"] is True
+    todo = client.get("/api/admin/todo", headers=api.h(api.admin())).json()
+    row = next(r for s in todo["sections"] if s["key"] == "listings_review" for r in s["rows"] if r["ref"]["property_id"] == c2["id"])
+    assert "duplicate_address" in row["ref"]["flags"] and "même adresse" in row["detail"]
+    # Une annonce du même vendeur à la même adresse n'est pas un doublon (republication après retrait)
+    c3 = client.post("/api/properties", headers=api.h(seller1), json=listing(address="12 rue des Doublons")).json()
+    assert not any(f["code"] == "duplicate_address" for f in c3["flags"])
 
 
-# ---------- parcours-jobs-06 : annonce « pending » héritée → retrait possible par le cédant ----------
+# ---------- parcours-jobs-06 : annonce « pending » héritée → retrait possible par le vendeur ----------
 
 def test_seller_can_withdraw_legacy_pending_listing(api, client):
     seller, c = published_listing(api, client)
@@ -237,15 +241,5 @@ def test_rgpd_purge_applies_privacy_policy_retention(api, client):
 
 def test_legal_contact_email_defaults_to_site_address():
     assert server.LEGAL_ENTITY["email"] == server.sender_email()
-    assert "cessionrge" not in server.LEGAL_ENTITY["email"]
+    assert server.LEGAL_ENTITY["email"] == "contact@venteloc.fr"
 
-
-# ---------- ux : diagnostic de transmissibilité sans doublon ----------
-
-def test_transfer_steps_do_not_repeat_referent_step():
-    organismes = transmissibility._organismes_block([{"organisme": "autre", "name": "Qualification X"}])
-    steps = transmissibility._transfer_block(organismes, "titres")["titres"]["steps"]
-    assert sum("référent technique" in s for s in steps) == 1, steps
-    checklist = transmissibility._checklist({}, [{"organisme": "autre", "name": "Q"}], [{"status": "valide"}])
-    detail = next(i for i in checklist if i["key"] == "qualifications")["detail"]
-    assert "en cours de validité" not in detail

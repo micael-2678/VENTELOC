@@ -1933,6 +1933,27 @@ async def get_properties(
         hide_test_listings(query)
     return await _list_properties(response, query, owner_view, sort, limit, page)
 
+def photo_ref(photo: dict) -> dict:
+    """Référence d'une photo dans une annonce : {id, visibility, url} ; le contenu se lit par GET /properties/{id}/photos/{photo_id}"""
+    return {"id": photo["id"], "visibility": photo.get("visibility") or "public",
+            "url": f"/api/properties/{photo['property_id']}/photos/{photo['id']}"}
+
+async def attach_photos(properties: list, include_private: bool = False) -> list:
+    """`photos` de chaque annonce (une seule requête) : photos publiques, plus les privées pour le vendeur, l'admin ou
+    l'acquéreur qui a signé l'engagement de confidentialité"""
+    ids = [p["id"] for p in properties if p.get("id")]
+    if not ids:
+        return properties
+    query = {"property_id": {"$in": ids}}
+    if not include_private:
+        query["visibility"] = "public"
+    by_property = {}
+    async for photo in db.property_photos.find(query, {"_id": 0, "id": 1, "property_id": 1, "visibility": 1, "uploaded_at": 1}).sort("uploaded_at", 1):
+        by_property.setdefault(photo["property_id"], []).append(photo_ref(photo))
+    for p in properties:
+        p["photos"] = by_property.get(p.get("id"), [])
+    return properties
+
 async def _list_properties(response: Response, query: dict, owner_view: bool, sort: Optional[str], limit: Optional[int],
                            page: Optional[int]) -> list:
     limit = max(1, min(limit or 100, 100))
@@ -1942,6 +1963,7 @@ async def _list_properties(response: Response, query: dict, owner_view: bool, so
     projection = {"_id": 0} if owner_view else PUBLIC_PROPERTY_PROJECTION
     cursor = db.properties.find(query, projection).sort(property_sort_criteria(sort)).skip(skip).limit(limit)
     properties = await cursor.to_list(limit)
+    await attach_photos(properties, include_private=owner_view)
     if owner_view:
         return [owner_listing(c) for c in properties]
     return [public_listing(c) for c in properties]
@@ -1980,6 +2002,9 @@ async def get_property(property_id: str, authorization: Optional[str] = Header(N
         await db.properties.update_one({"id": property_id}, {"$inc": {"views": 1}})
         property["views"] = property.get("views", 0) + 1
     
+    can_see_private = bool(current_user) and (current_user.get("role") == "admin" or is_property_owner(property, current_user)
+                                              or await has_signed_nda(property_id, current_user.get("id")))
+    await attach_photos([property], include_private=can_see_private)
     return await sanitize_property(property, current_user)
 
 @api_router.post("/properties/search")
@@ -2470,13 +2495,20 @@ DATAROOM_CATEGORIES = [
     {"id": "autres", "label": "Autres documents", "hint": "Tout autre document utile à l'acquéreur."},
 ]
 DATAROOM_CATEGORY_IDS = [c["id"] for c in DATAROOM_CATEGORIES]
+DATAROOM_CATEGORY_LABELS = {c["id"]: c["label"] for c in DATAROOM_CATEGORIES}
+
+def with_category_labels(docs: list) -> list:
+    for d in docs:
+        d["category_label"] = DATAROOM_CATEGORY_LABELS.get(d.get("category"), d.get("custom_category") or "Autres documents")
+    return docs
 DATAROOM_TENANT_WARNING = ("Masquez le nom, les coordonnées et les pièces d'identité du locataire : l'acquéreur n'en a pas besoin "
                            "avant l'acte.")
 
 @api_router.get("/dataroom/categories")
 async def get_dataroom_categories():
-    """Catégories du dossier du bien [{id, label, hint}] et avertissement sur les données du locataire"""
-    return {"categories": DATAROOM_CATEGORIES, "warning": DATAROOM_TENANT_WARNING}
+    """Catégories du dossier du bien [{id, label, hint}] (API.md §5) ; l'avertissement sur les données du locataire est
+    renvoyé avec chaque dépôt de document (`warning`)"""
+    return [dict(c) for c in DATAROOM_CATEGORIES]
 
 @api_router.post("/dataroom/{property_id}/documents")
 async def upload_dataroom_document(
@@ -2526,6 +2558,7 @@ async def upload_dataroom_document(
     doc.pop("_id", None)
     doc.pop("content", None)
     doc["warning"] = DATAROOM_TENANT_WARNING
+    doc["category_label"] = DATAROOM_CATEGORY_LABELS.get(category)
     return doc
 
 @api_router.get("/dataroom/{property_id}/documents")
@@ -2542,7 +2575,7 @@ async def list_dataroom_documents(property_id: str, current_user: dict = Depends
     # Seller can always see
     if current_user["id"] == property.get("seller_id"):
         docs = await db.dataroom.find({"property_id": property_id}, {"_id": 0, "content": 0}).to_list(100)
-        return {"documents": docs, "access_granted": True}
+        return {"documents": with_category_labels(docs), "access_granted": True, "warning": DATAROOM_TENANT_WARNING}
     
     # Accès de l'acquéreur : demande acceptée, identité vérifiée, NDA signé, origine des fonds déclarée
     access = await db.dataroom_access.find_one({
@@ -2564,7 +2597,7 @@ async def list_dataroom_documents(property_id: str, current_user: dict = Depends
         "accessed_at": datetime.now(timezone.utc).isoformat()
     })
     
-    return {"documents": docs, "access_granted": True}
+    return {"documents": with_category_labels(docs), "access_granted": True}
 
 @api_router.post("/dataroom/{property_id}/documents/{doc_id}/view")
 async def view_dataroom_document(property_id: str, doc_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
@@ -4806,6 +4839,7 @@ async def get_admin_stats(current_user: dict = Depends(get_current_user)):
     
     total_properties = await db.properties.count_documents({})
     published_properties = await db.properties.count_documents({"status": "published"})
+    ownership_pending = await db.properties.count_documents({"ownership.status": "pending", "status": {"$nin": ["removed", "archived"]}})
     total_users = await db.users.count_documents({"deleted_at": {"$exists": False}})
     
     # Revenu : factures d'honoraires émises et encaissées (montants HT)
@@ -4816,6 +4850,7 @@ async def get_admin_stats(current_user: dict = Depends(get_current_user)):
     return {
         "total_properties": total_properties,
         "published_properties": published_properties,
+        "ownership_pending": ownership_pending,
         "total_users": total_users,
         "invoices_count": len(invoices),
         "total_revenue": invoiced,
@@ -4871,12 +4906,13 @@ async def build_admin_todo(now: Optional[datetime] = None) -> dict:
     # 1 bis. Justificatifs de propriété à contrôler (SPEC §9) : aperçu du fichier, valider ou refuser avec motif
     rows = []
     for c in await db.properties.find({"ownership.status": "pending", "status": {"$nin": ["removed", "archived"]}},
-                                     {"_id": 0, "id": 1, "title": 1, "ownership": 1, "status": 1, "seller_id": 1}).sort("ownership.uploaded_at", 1).to_list(200):
+                                     {"_id": 0, "id": 1, "title": 1, "ownership": 1, "status": 1, "seller_id": 1, "owner_type": 1}).sort("ownership.uploaded_at", 1).to_list(200):
         o = c.get("ownership") or {}
         rows.append(_todo_row("ownership_proof", c["id"], f"Justificatif de propriété à contrôler — {c.get('title') or 'annonce'}",
                               detail=f"{OWNERSHIP_DOC_TYPES.get(o.get('doc_type'), o.get('doc_type') or '')} · {o.get('filename') or ''} · annonce {c.get('status')}",
                               since=o.get("uploaded_at") or "",
-                              ref={"property_id": c["id"], "doc_type": o.get("doc_type"), "filename": o.get("filename"),
+                              ref={"property_id": c["id"], "doc_type": o.get("doc_type"), "uploaded_at": o.get("uploaded_at"),
+                                   "owner_type": c.get("owner_type"), "filename": o.get("filename"),
                                    "file_url": f"/api/properties/{c['id']}/ownership-proof/file"},
                               actions=[{"label": "Voir le justificatif", "method": "GET", "url": f"/api/properties/{c['id']}/ownership-proof/file"},
                                        {"label": "Valider", "method": "PUT", "url": f"/api/admin/properties/{c['id']}/ownership",

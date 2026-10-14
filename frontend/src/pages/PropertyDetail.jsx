@@ -379,7 +379,7 @@ const PropertyDetail = ({ user }) => {
 
               <div className="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <KeyFigure label="Prix" value={formatPrice(c.asking_price)} note="honoraires inclus" testId="asking-price" />
-                <KeyFigure label="Loyer HC" value={positive(c.rent_monthly) ? formatMonthly(c.rent_monthly) : '—'} note={positive(c.charges_monthly) ? `+ ${formatPrice(c.charges_monthly)} de charges` : 'hors charges'} testId="rent-monthly" />
+                <KeyFigure label="Loyer HC" value={positive(c.rent_monthly) ? <>{formatPrice(c.rent_monthly)}<span className="text-sm font-semibold text-gray-600">/mois</span></> : '—'} note={positive(c.charges_monthly) ? `+ ${formatPrice(c.charges_monthly)} de charges` : 'hors charges'} testId="rent-monthly" />
                 <KeyFigure label="Rendement brut" value={formatYield(yields.gross) || '—'} tone="teal" note="loyers HC ÷ prix" testId="gross-yield" />
                 <KeyFigure label="Rendement net" value={formatYield(yields.net) || '—'} note={yields.net ? 'après taxe foncière et charges' : 'charges non renseignées'} testId="net-yield" />
               </div>

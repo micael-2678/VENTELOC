@@ -4,13 +4,18 @@ import '../jestEnv';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
-import { COMMISSION, OFFER, computeCommission, commissionRows, formatEuros, rateLabel, fillOffer } from '@/lib/offer';
+import {
+  COMMISSION, OFFER, computeCommission, commissionRows, commissionConfig, commissionLabel, commissionSentenceFor, listingCommission, formatEuros,
+  formatPercent, rateLabel, minimumLabel, fillOffer,
+} from '@/lib/offer';
 import { sanitizeProps, trackEvent, trackPageView, EVENT_NAMES } from '@/lib/analytics';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import {
-  ListingCard, listingTitle, qualificationBadge, listingLocation, priceToEbitda, BuyerCard, AlertForm, Checklist, formatPrice, formatMagnitude, formatCompactEuros,
-  relativeDateFr, deActivity,
+  ListingCard, listingTitle, listingLocation, listingYields, ownershipVerified, tenantSinceYear, dpeAlert, longDateFr, BuyerCard, AlertForm,
+  Checklist, DpePill, DpeScale, formatPrice, formatMagnitude, formatCompactEuros, formatYield, formatMonthly, formatSurface, relativeDateFr,
 } from '@/components/shared';
+import { PROJECT_TYPES, FINANCING } from '@/components/shared/BuyerCard';
+import { BUYER_PROJECT_TYPES, FINANCING_TYPES } from '@/lib/referentiels';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -44,26 +49,43 @@ afterEach(() => {
 });
 
 // ------------------------------------------------------------------------------------------------
-describe('lib/offer.js — barème 6 % / 3 % > 1 M€ / minimum 4 000 € HT', () => {
-  test('montants identiques à business_model.calculate_commission', () => {
-    expect(computeCommission(180000)).toMatchObject({ ht: 10800, vat: 2160, ttc: 12960, appliedMinimum: false, ratePercent: 6, payer: 'cedant' });
-    expect(computeCommission(2000000)).toMatchObject({ ht: 90000, ttc: 108000, ratePercent: 4.5, ratePercentLabel: '4,5 %' });
-    expect(computeCommission(50000)).toMatchObject({ ht: 4000, ttc: 4800, appliedMinimum: true, ratePercent: 8 });
-    expect(computeCommission(123456.78).ht).toBe(7407.41);
+describe('lib/offer.js — honoraires : 3 % HT (3,6 % TTC), minimum 3 000 € HT, à la charge du vendeur', () => {
+  test('montants identiques à business_model.calculate_commission (un seul taux, minimum, TVA 20 %)', () => {
+    expect(COMMISSION).toMatchObject({ ratePercentHT: 3, minimumHT: 3000, vatRate: 0.2, payer: 'vendeur' });
+    expect(computeCommission(200000)).toMatchObject({ ht: 6000, vat: 1200, ttc: 7200, appliedMinimum: false, ratePercentHT: 3, ratePercentTTC: 3.6, netSeller: 192800, payer: 'vendeur' });
+    expect(computeCommission(50000)).toMatchObject({ ht: 3000, ttc: 3600, appliedMinimum: true, minimumTTC: 3600, effectivePercentTTC: 7.2 });
+    expect(computeCommission(123456.78).ht).toBe(3703.7);
     expect(computeCommission('abc').ht).toBe(COMMISSION.minimumHT);
-    expect(computeCommission(1500000).breakdown).toHaveLength(2);
   });
 
-  test('affichage HT d\'abord, textes sans jargon ni ancien barème', () => {
-    expect(formatEuros(10800)).toBe('10 800 €');
-    expect(rateLabel(0.06)).toBe('6 % HT (7,2 % TTC)');
-    expect(commissionRows().map((r) => r.rateHT)).toEqual(['6 % HT', '3 % HT']);
+  test('barème de GET /config (commission {rate_percent_ht, minimum_ht, vat_rate}) avec repli 3 / 3 000', () => {
+    const cfg = commissionConfig({ rate_percent_ht: 4, rate_percent_ttc: 4.8, minimum_ht: 5000, minimum_ttc: 6000, vat_rate: 0.2 });
+    expect(computeCommission(200000, cfg)).toMatchObject({ ht: 8000, ttc: 9600 });
+    expect(computeCommission(100000, cfg)).toMatchObject({ ht: 5000, ttc: 6000, appliedMinimum: true });
+    expect(commissionConfig({ vat_rate: 20 }).vatRate).toBe(0.2);
+    expect(commissionConfig(null)).toMatchObject({ ratePercentHT: 3, minimumHT: 3000, vatRate: 0.2 });
+    expect(commissionConfig({ rate_percent_ht: -1, minimum_ht: 'x' })).toMatchObject({ ratePercentHT: 3, minimumHT: 3000 });
+  });
+
+  test('affichage TTC d\'abord, HT entre parenthèses ; phrase de référence (SPEC §7.1)', () => {
+    expect(formatEuros(7200)).toBe('7\u202f200\u00a0€');
+    expect(formatPercent(3.6)).toBe('3,6\u00a0%');
+    expect(rateLabel()).toBe('3,6\u00a0% TTC (3\u00a0% HT)');
+    expect(minimumLabel()).toBe('3\u202f600\u00a0€ TTC (3\u202f000\u00a0€ HT)');
+    expect(commissionLabel(200000)).toBe('7\u202f200\u00a0€ TTC (6\u202f000\u00a0€ HT)');
+    expect(commissionSentenceFor()).toBe('3,6\u00a0% TTC du prix de vente (3\u00a0% HT), minimum 3\u202f600\u00a0€ TTC (3\u202f000\u00a0€ HT), à la charge du vendeur, dus uniquement à la signature de l\'acte authentique et réglés par le notaire sur le prix. Rien avant. Rien pour l\'acquéreur.');
+    expect(OFFER.commissionSentence).toBe(commissionSentenceFor());
+    expect(commissionRows().map((r) => r.label)).toEqual(['Honoraires', 'Minimum', 'À la charge de', 'Pour l\'acquéreur']);
     const all = JSON.stringify(OFFER);
-    ['Lehman', 'tranches successives', '12 % TTC', '10 % HT', 'acquéreur', 'CessionRGE', 'à compléter'].forEach((bad) => {
+    ['cédant', 'repreneur', 'cession', 'CessionRGE', 'à compléter', '6 % HT'].forEach((bad) => {
       expect(all).not.toContain(bad);
     });
-    expect(OFFER.commissionSentence).toMatch(/^6 % HT du prix de cession \(3 % HT sur la part au-delà d'un million d'euros\), minimum 4 000 € HT/);
     expect(fillOffer('{{trustTitle}} / {{inconnu}}')).toBe(`${OFFER.trustTitle} / {{inconnu}}`);
+  });
+
+  test('honoraires d\'une annonce : commission_info de l\'API sinon calcul local', () => {
+    expect(listingCommission({ asking_price: 145000 })).toMatchObject({ ht: 4350, ttc: 5220 });
+    expect(listingCommission({ asking_price: 145000, commission_info: { payer: 'vendeur', estimate_ht: 4400, estimate_ttc: 5280, rate_percent_ttc: 3.6 } })).toMatchObject({ ht: 4400, ttc: 5280 });
   });
 });
 
@@ -97,8 +119,8 @@ describe('lib/analytics.js — événements maison sans cookie', () => {
   });
 
   test('trackPageView : dédoublonnage du même chemin', () => {
-    expect(trackPageView('/vendre-mon-entreprise-batiment')).toBe(true);
-    expect(trackPageView('/vendre-mon-entreprise-batiment')).toBe(false);
+    expect(trackPageView('/vendre')).toBe(true);
+    expect(trackPageView('/vendre')).toBe(false);
     expect(trackPageView('/estimer')).toBe(true);
     expect(bodyOf(global.fetch.mock.calls[1])).toMatchObject({ name: 'page_view', path: '/estimer' });
   });
@@ -122,74 +144,129 @@ describe('ErrorBoundary', () => {
 // ------------------------------------------------------------------------------------------------
 const property = {
   id: 'abc123',
-  trades: ['pac-clim-cvc', 'plomberie-chauffage', 'electricite'],
-  rge_types: ['Pompes à chaleur air/eau'],
-  region: 'Bretagne',
-  department: '29',
-  staff_count: 9,
-  ca_n: 1148000,
-  asking_price: 420000,
+  property_type: 'appartement',
+  lease_type: 'habitation-meublee',
+  city: 'Lyon',
+  district: 'Jean Macé',
+  department: '69',
+  region: 'Auvergne-Rhône-Alpes',
+  surface: 24.5,
+  rooms: 1,
+  rent_monthly: 620,
+  asking_price: 145000,
+  property_tax: 650,
+  non_recoverable_charges: 400,
+  dpe_class: 'E',
+  tenant_since: '2021-09-01',
+  lease_start: '2024-09-01',
+  ownership: { status: 'verified' },
   created_at: '2026-10-03T10:00:00Z',
-  is_rge: true,
-  property_checks: { in_ademe_list: true },
 };
 
-describe('ListingCard', () => {
-  test('titre généré, badge vert, prix fr-FR, lien et événement', () => {
-    expect(listingTitle(property)).toBe('Entreprise de PAC, climatisation · Bretagne · 9 salariés');
+describe('données d\'affichage d\'un bien (propertyDisplay)', () => {
+  test('titre généré (taxonomy.property_title), localisation, rendements calculés, locataire en place', () => {
+    expect(listingTitle(property)).toBe('Appartement T1 loué · 24,5 m² · Lyon (69)');
     expect(listingTitle({ title: 'Titre serveur' })).toBe('Titre serveur');
-    expect(qualificationBadge(property)).toEqual({ kind: 'verified', label: 'RGE vérifié ADEME' });
-    // Trois libellés distincts : RGE vérifié (vert), RGE déclaré (gris), autres qualifications nommées (gris)
-    expect(qualificationBadge({ rge_types: ['x'], property_checks: { in_ademe_list: false } })).toEqual({ kind: 'declared', label: 'RGE déclaré' });
-    expect(qualificationBadge({ is_rge: true })).toEqual({ kind: 'declared', label: 'RGE déclaré' });
-    expect(qualificationBadge({ other_qualifications: ['qualibat'] })).toEqual({ kind: 'declared', label: 'Qualibat déclaré' });
-    expect(qualificationBadge({ other_qualifications: ['qualifelec', 'irve'] }).label).toBe('Qualifelec, IRVE déclarés');
-    expect(qualificationBadge({ other_qualifications: ['qualibat', 'qualifelec', 'irve'] }).label).toBe('Qualibat, Qualifelec +1 déclarés');
-    expect(qualificationBadge({})).toBeNull();
+    expect(listingTitle({ property_type: 'immeuble', units_count: 5, city: 'Saint-Étienne', department: '42', surface: 320 })).toBe('Immeuble de rapport loué · 5 lots · 320 m² · Saint-Étienne (42)');
+    expect(listingLocation(property)).toBe('Lyon · Rhône (69)');
+    expect(listingLocation(property, { district: true })).toBe('Lyon, Jean Macé · Rhône (69)');
+    expect(listingYields(property)).toEqual({ gross: 5.13, net: 4.41 });
+    // Valeurs du serveur prioritaires ; pas de net sans taxe foncière ni charges
+    expect(listingYields({ gross_yield: 6.1, net_yield: 4.9 })).toEqual({ gross: 6.1, net: 4.9 });
+    expect(listingYields({ rent_monthly: 500, asking_price: 100000 })).toEqual({ gross: 6, net: null });
+    expect(tenantSinceYear(property)).toBe(2021);
+    expect(tenantSinceYear({ lease_start: '2018-01-01' })).toBe(2018);
+    expect(ownershipVerified(property)).toBe(true);
+    expect(ownershipVerified({ ownership: { status: 'pending' } })).toBe(false);
+  });
 
+  test('décence énergétique : alerte G interdit (texte de la spécification), F échéance, rien hors logement', () => {
+    expect(longDateFr('2025-01-01')).toBe('1ᵉʳ janvier 2025');
+    const g = dpeAlert({ dpe_class: 'G', lease_type: 'habitation-vide' }, '2026-10-14');
+    expect(g.status).toBe('interdit');
+    expect(g.text).toBe('Logement classé G : depuis le 1ᵉʳ janvier 2025 il ne peut plus faire l\'objet d\'un nouveau bail ni d\'un renouvellement. Le bail en cours continue jusqu\'à son terme.');
+    const f = dpeAlert({ dpe_class: 'F', lease_type: 'habitation-meublee' }, '2026-10-14');
+    expect(f.status).toBe('echeance');
+    expect(f.text).toContain('à partir du 1ᵉʳ janvier 2028');
+    expect(dpeAlert({ dpe_class: 'G', lease_type: 'commercial' }, '2026-10-14')).toBeNull();
+    expect(dpeAlert({ dpe_class: 'C', lease_type: 'habitation-vide' }, '2026-10-14')).toBeNull();
+    // Statut calculé par le serveur prioritaire
+    expect(dpeAlert({ dpe_class: 'E', lease_type: 'habitation-vide', dpe_rental: { status: 'echeance', date: '2034-01-01' } }).text).toContain('1ᵉʳ janvier 2034');
+  });
+
+  test('formats : rendement à une décimale (jamais « 0 % »), loyer mensuel, surface', () => {
+    expect(formatYield(5.134)).toBe('5,1\u00a0%');
+    expect(formatYield(0)).toBe('');
+    expect(formatYield(null)).toBe('');
+    expect(formatMonthly(620)).toBe('620\u00a0€/mois');
+    expect(formatSurface(24.5)).toBe('24,5\u00a0m²');
+    expect(formatSurface(0)).toBe('');
+  });
+});
+
+describe('DpePill et DpeScale', () => {
+  test('pastille aux couleurs réglementaires, libellé accessible, DPE vierge en toutes lettres', () => {
+    const c = render(<><DpePill value="g" /><DpePill value="B" /><DpePill value="vierge" /><DpePill value="" /></>);
+    const pills = c.querySelectorAll('[data-testid="dpe-pill"]');
+    expect(pills).toHaveLength(3);
+    expect(pills[0].getAttribute('data-dpe')).toBe('G');
+    expect(pills[0].querySelector('[role="img"]').getAttribute('aria-label')).toBe('DPE classe G');
+    expect(pills[0].querySelector('[role="img"]').className).toContain('bg-dpe-G');
+    expect(pills[0].querySelector('[role="img"]').className).toContain('text-white');
+    expect(pills[1].querySelector('[role="img"]').className).toContain('text-brand-navy');
+    expect(pills[2].textContent).toBe('DPE vierge');
+  });
+
+  test('échelle A à G avec la classe du bien', () => {
+    const c = render(<DpeScale value="D" caption="DPE du 3 mars 2024" />);
+    expect(c.querySelectorAll('li')).toHaveLength(7);
+    expect(c.querySelector('ol').getAttribute('aria-label')).toBe('Échelle énergie, classe D');
+    expect(c.textContent).toContain('Classe D');
+    expect(render(<DpeScale value="non-soumis" />).textContent).toBe('');
+  });
+});
+
+describe('ListingCard', () => {
+  test('photo ou pictogramme, titre, rendement brut et net, loyer, prix honoraires inclus, badges, lien /annonce/:id et événement', () => {
     const c = withRouter(<ListingCard property={property} source="test" now={new Date('2026-10-10T12:00:00')} />);
     const card = c.querySelector('[data-testid="listing-card"]');
     expect(card.tagName).toBe('ARTICLE');
     expect(card.className).toContain('min-w-0');
+    expect(c.querySelector('[data-testid="property-picto"]')).not.toBeNull();
     const link = c.querySelector('a[data-testid="listing-card-link"]');
-    expect(link.getAttribute('href')).toBe('/property/abc123');
-    expect(link.textContent).toBe('Entreprise de PAC, climatisation · Bretagne · 9 salariés');
-    expect(c.querySelector('[data-testid="listing-card-badge"]').className).toContain('badge-verified');
-    expect(c.textContent).toContain('Finistère (29)');
-    expect(c.textContent).toContain('9 salariés');
-    expect(c.querySelector('[data-testid="listing-card-price"]').textContent).toBe(formatPrice(420000));
-    expect(c.textContent).toContain(formatCompactEuros(1148000));
+    expect(link.getAttribute('href')).toBe('/annonce/abc123');
+    expect(link.textContent).toBe('Appartement T1 loué · 24,5 m² · Lyon (69)');
+    expect(c.textContent).toContain('Lyon · Rhône (69)');
+    expect(c.querySelector('[data-testid="listing-card-yield"]').textContent).toBe('5,1\u00a0%');
+    expect(c.querySelector('[data-testid="listing-card-net-yield"]').textContent).toBe('net 4,4\u00a0%');
+    expect(c.querySelector('[data-testid="listing-card-rent"]').textContent).toBe('620\u00a0€/mois');
+    expect(c.querySelector('[data-testid="listing-card-price"]').textContent).toBe(formatPrice(145000));
+    expect(c.textContent).toContain('Honoraires inclus, à la charge du vendeur');
+    expect(c.textContent).toContain('Location meublée');
+    expect(c.querySelector('[data-testid="dpe-pill"]').getAttribute('data-dpe')).toBe('E');
+    expect(c.querySelector('[data-testid="listing-card-verified"]').className).toContain('badge-verified');
+    expect(c.querySelector('[data-testid="listing-card-tenant"]').textContent).toBe('Locataire en place depuis 2021');
     expect(c.querySelector('time').getAttribute('dateTime')).toBe(property.created_at);
     expect(c.querySelector('time').textContent).toBe('il y a 1 semaine');
-    expect(c.querySelectorAll('ul[aria-label="Métiers"] li')).toHaveLength(3);
-    // Sans gestionnaire de favori : pas de cœur (aperçu du cédant, favoris du tableau de bord)
+    // Jamais l'adresse ni la société, même si elles sont présentes (vendeur connecté)
+    const withSecret = withRouter(<ListingCard property={{ ...property, address: '12 rue Secrète', company_name: 'SCI Secrète' }} />);
+    expect(withSecret.textContent).not.toMatch(/Secrète/);
+    // Sans gestionnaire de favori : pas de cœur (aperçu du vendeur)
     expect(c.querySelector('[data-testid="favorite-toggle"]')).toBeNull();
     act(() => link.click());
     expect(bodyOf(global.fetch.mock.calls[0])).toMatchObject({ name: 'listing_card_click', props: { listing: 'abc123', source: 'test' } });
   });
 
-  test('lisibilité : séparateur de milliers visible, département sans région répétée, multiple prix/EBE', () => {
-    // Espace insécable normale (U+00A0), jamais l'espace fine (U+202F) presque invisible en gras
+  test('badge vert seulement si le justificatif de propriété est validé ; séparateur de milliers lisible', () => {
+    const pending = withRouter(<ListingCard property={{ ...property, ownership: { status: 'pending' } }} />);
+    expect(pending.querySelector('[data-testid="listing-card-verified"]')).toBeNull();
     expect(formatPrice(520000)).toBe('520\u00a0000\u00a0€');
-    expect(formatPrice(1400000)).toBe('1\u00a0400\u00a0000\u00a0€');
     expect(formatPrice(520000)).not.toContain('\u202f');
-    expect(listingLocation(property)).toBe('Finistère (29)');
-    expect(listingLocation({ region: 'Bretagne', title: 'Entreprise de plomberie · Bretagne' })).toBe('');
-    expect(listingLocation({ region: 'Bretagne', title: 'Entreprise de plomberie' })).toBe('Bretagne');
-    expect(priceToEbitda({ asking_price: 520000, ebitda: 185000 })).toBe('2,8\u00a0×');
-    expect(priceToEbitda({ asking_price: 520000, ebitda: 0 })).toBe('');
-    const withEbitda = withRouter(<ListingCard property={{ ...property, ebitda: 150000 }} />);
-    expect(withEbitda.textContent).toContain('Prix/EBE');
-    expect(withEbitda.textContent).toContain('2,8\u00a0×');
-    expect(withEbitda.textContent).not.toContain('Bretagne · Finistère');
-    const noEbitda = withRouter(<ListingCard property={property} />);
-    expect(noEbitda.textContent).toContain('Effectif');
-    expect(noEbitda.textContent).not.toContain('Prix/EBE');
   });
 
   test('liens marqués (module WordPress) : linkQuery ajouté à l\'adresse de la fiche', () => {
     const c = withRouter(<ListingCard property={property} linkQuery="utm_source=wordpress&utm_medium=embed" />);
-    expect(c.querySelector('a[data-testid="listing-card-link"]').getAttribute('href')).toBe('/property/abc123?utm_source=wordpress&utm_medium=embed');
+    expect(c.querySelector('a[data-testid="listing-card-link"]').getAttribute('href')).toBe('/annonce/abc123?utm_source=wordpress&utm_medium=embed');
   });
 
   test('mode test : badge « Annonce de test » seulement pour une annonce is_test', () => {
@@ -199,9 +276,9 @@ describe('ListingCard', () => {
     expect(fake.querySelector('[data-testid="listing-card-test"]').textContent).toBe('Annonce de test');
   });
 
-  test('favori : bouton distinct du lien, état pressé, EBE affiché s\'il est renseigné', () => {
+  test('favori : bouton distinct du lien, état pressé', () => {
     const onToggle = jest.fn();
-    const c = withRouter(<ListingCard property={{ ...property, ebitda: 140000 }} favorite onToggleFavorite={onToggle} />);
+    const c = withRouter(<ListingCard property={property} favorite onToggleFavorite={onToggle} />);
     const heart = c.querySelector('[data-testid="favorite-toggle"]');
     expect(heart.tagName).toBe('BUTTON');
     expect(heart.closest('a')).toBeNull();
@@ -209,8 +286,6 @@ describe('ListingCard', () => {
     expect(heart.getAttribute('aria-label')).toContain('Retirer des favoris');
     act(() => heart.click());
     expect(onToggle).toHaveBeenCalledWith(expect.objectContaining({ id: 'abc123' }));
-    expect(c.textContent).toContain('EBE');
-    expect(c.textContent).toContain(formatCompactEuros(140000));
   });
 
   test('formats courts et dates relatives', () => {
@@ -218,21 +293,14 @@ describe('ListingCard', () => {
     expect(formatCompactEuros(1148000)).toBe('1,15\u00a0M€');
     expect(formatCompactEuros(780000)).toBe('780\u00a0k€');
     expect(formatCompactEuros(null)).toBe('—');
+    expect(formatMagnitude(87500)).toBe(`≈ ${formatPrice(88000)}`);
     expect(relativeDateFr('2026-10-10T08:00:00', now)).toBe('aujourd\'hui');
     expect(relativeDateFr('2026-10-09T08:00:00', now)).toBe('hier');
     expect(relativeDateFr('2026-10-07T08:00:00', now)).toBe('il y a 3 jours');
     expect(relativeDateFr('2026-09-24T08:00:00', now)).toBe('il y a 2 semaines');
     expect(relativeDateFr('2026-08-01T08:00:00', now)).toBe('1 août 2026');
     expect(relativeDateFr('pas une date', now)).toBe('');
-  });
-
-  test('ancienne annonce (commission acquéreur) et formats', () => {
-    const c = withRouter(<ListingCard property={{ ...property, trades: [], commission_payer: 'repreneur' }} />);
-    expect(c.textContent).toContain('Commission à la charge de l\'acquéreur');
-    expect(deActivity('isolation')).toBe('d\'isolation');
-    expect(deActivity('Plomberie-chauffage')).toBe('de plomberie-chauffage');
     expect(formatPrice(null)).toBe('—');
-    expect(formatMagnitude(87500)).toBe(`≈ ${formatPrice(88000)}`);
   });
 });
 
@@ -240,7 +308,7 @@ describe('ListingCard', () => {
 describe('AlertForm — alerte sans compte', () => {
   test('e-mail invalide refusé, puis POST /alerts/public et état « vérifiez votre boîte mail »', async () => {
     const onCreated = jest.fn();
-    const c = render(<AlertForm source="test" defaultTrades={['isolation']} onCreated={onCreated} />);
+    const c = render(<AlertForm source="test" defaultTypes={['appartement']} defaultMinYield="5.5" onCreated={onCreated} />);
     const form = c.querySelector('form');
     const email = c.querySelector('input[type="email"]');
     act(() => setInput(email, 'pas-un-email'));
@@ -256,11 +324,11 @@ describe('AlertForm — alerte sans compte', () => {
 
     const post = global.fetch.mock.calls.find(([url]) => url.endsWith('/api/alerts/public'));
     expect(post[1].method).toBe('POST');
-    expect(bodyOf(post)).toEqual({ email: 'jean@exemple.fr', trades: ['isolation'], regions: ['Bretagne'], max_price: 300000 });
+    expect(bodyOf(post)).toEqual({ email: 'jean@exemple.fr', property_types: ['appartement'], regions: ['Bretagne'], max_price: 300000, min_yield: 5 });
     expect(c.querySelector('[data-testid="alert-form-success"]').textContent).toContain('Vérifiez votre boîte mail');
     expect(onCreated).toHaveBeenCalledTimes(1);
     const created = global.fetch.mock.calls.map(bodyOf).find((b) => b.name === 'alert_created');
-    expect(created.props).toMatchObject({ source: 'test', trades: 1, regions: 1, max_price: 300000 });
+    expect(created.props).toMatchObject({ source: 'test', types: 1, regions: 1, max_price: 300000, min_yield: 5 });
   });
 
   test('erreur serveur affichée (429)', async () => {
@@ -278,27 +346,35 @@ describe('Checklist et BuyerCard', () => {
   test('Checklist : étape courante marquée aria-current', () => {
     const c = render(<Checklist title="Avant les documents" items={[
       { id: 'id', label: 'Identité vérifiée', state: 'done' },
-      { id: 'nda', label: 'Accord de confidentialité signé', state: 'current', action: <button type="button">Signer</button> },
+      { id: 'nda', label: 'Engagement de confidentialité signé', state: 'current', action: <button type="button">Signer</button> },
       { id: 'fonds', label: 'Origine des fonds déclarée', state: 'todo' },
     ]} />);
     const current = c.querySelector('li[aria-current="step"]');
-    expect(current.textContent).toContain('Accord de confidentialité signé');
+    expect(current.textContent).toContain('Engagement de confidentialité signé');
     expect(current.querySelector('button').textContent).toBe('Signer');
     expect(c.textContent).toContain('1 / 3');
   });
 
-  test('BuyerCard : libellés français, société vérifiée, score', () => {
+  test('BuyerCard : carte acquéreur (SPEC §4), libellés du référentiel, rendement visé, identité après engagement', () => {
+    expect(Object.keys(PROJECT_TYPES)).toEqual(BUYER_PROJECT_TYPES.map((t) => t.id));
+    expect(Object.keys(FINANCING)).toEqual(FINANCING_TYPES.map((t) => t.id));
     const c = render(<BuyerCard buyer={{
-      project_type: 'croissance-externe', budget_max: 500000, apport: 150000, financing: 'mixte', zones: ['Bretagne', 'Pays de la Loire'],
-      trades: ['isolation', 'menuiserie'], horizon: '6-12', siren_verified: true, profile_score: 72,
-    }} message="Bonjour, nous reprenons des entreprises d'isolation." />);
-    expect(c.textContent).toContain('Croissance externe');
+      label: 'Acquéreur n°123456', project_type: 'sci', budget_max: 300000, apport: 60000, financing: 'mixte', zones: ['Bretagne', 'Pays de la Loire'],
+      property_types: ['appartement', 'parking'], min_yield: 6, horizon: '6-12', siren_verified: true, profile_score: 72,
+    }} message="Bonjour, nous investissons dans des T2 loués." />);
+    expect(c.querySelector('h3').textContent).toBe('Acquéreur n°123456');
+    expect(c.textContent).toContain('Carte acquéreur');
+    expect(c.textContent).toContain('Achat via une SCI');
     expect(c.textContent).toContain('Société vérifiée');
     expect(c.textContent).toContain('Apport et emprunt');
     expect(c.textContent).toContain('Dans 6 à 12 mois');
-    expect(c.textContent).toContain('Isolation, Menuiserie');
-    expect(c.textContent).toContain(formatPrice(500000));
+    expect(c.textContent).toContain('Appartement, Parking');
+    expect(c.textContent).toContain('6,0\u00a0% minimum');
+    expect(c.textContent).toContain(formatPrice(300000));
     expect(c.querySelector('[role="meter"]').getAttribute('aria-valuenow')).toBe('72');
-    expect(c.textContent).toContain('Bonjour, nous reprenons');
+    expect(c.querySelector('[data-testid="buyer-identity"]')).toBeNull();
+    const revealed = render(<BuyerCard buyer={{ label: 'Acquéreur n°1', name: 'Paul Martin', company_name: 'SCI Martin' }} />);
+    expect(revealed.querySelector('[data-testid="buyer-identity"]').textContent).toContain('Paul Martin · SCI Martin');
+    expect(revealed.textContent).not.toMatch(/repreneur|métier/i);
   });
 });

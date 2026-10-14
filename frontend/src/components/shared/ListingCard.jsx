@@ -136,7 +136,9 @@ const ListingCard = ({
           </div>
           <div className="rounded-xl bg-brand-surface border border-brand-line px-3 py-2 min-w-0">
             <dt className="text-xs font-medium text-gray-600">Loyer HC</dt>
-            <dd className="font-display text-lg font-bold text-brand-navy tabular leading-tight" data-testid="listing-card-rent">{hasRent ? formatMonthly(property.rent_monthly) : '—'}</dd>
+            <dd className="font-display text-lg font-bold text-brand-navy tabular leading-tight break-words" data-testid="listing-card-rent" aria-label={hasRent ? formatMonthly(property.rent_monthly) : undefined}>
+              {hasRent ? <>{formatPrice(property.rent_monthly)}<span className="text-xs font-semibold text-gray-600">/mois</span></> : '—'}
+            </dd>
             {surface && <dd className="text-xs text-gray-600 tabular">{surface}</dd>}
           </div>
         </dl>

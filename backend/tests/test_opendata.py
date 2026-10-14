@@ -98,17 +98,14 @@ def test_lookup_by_siren(api):
     assert r["siret_siege"] == SIRET_SIEGE and r["siret"] == SIRET_SIEGE
     assert r["nom_complet"] == "SECRET ENERGIE"
     assert r["nature_juridique"] == "5710" and r["forme_juridique"] == "SAS" and r["legal_structure"] == "SAS"
-    assert r["naf"] == "43.22A"
-    assert r["naf_libelle"] == "Travaux d'installation d'eau et de gaz en tous locaux"
-    assert r["naf_in_building"] is True and r["naf_status"] == "batiment"
-    assert r["trade_suggestion"] == "plomberie-chauffage"
+    # Plus aucune donnée « bâtiment » (NAF, RGE) dans la fiche
+    assert not any(k in r for k in ("naf", "naf_libelle", "naf_status", "naf_in_building", "trade_suggestion", "est_rge"))
     assert r["date_creation"] == "2010-03-15"
     assert r["tranche_effectif"] == "11" and r["tranche_effectif_libelle"] == "10 à 19 salariés"
     assert r["effectif_estime"] == 14
     assert r["departement"] == "29" and r["departement_libelle"] == "Finistère (29)" and r["region"] == "Bretagne"
     assert r["commune"] == "BREST" and r["code_postal"] == "29200"
     assert r["etat"] == "actif" and r["siren_active"] is True
-    assert r["est_rge"] is True
     assert [d["nom"] for d in r["dirigeants"]] == ["DUPONT", "DA SILVA RIBEIRO", "MARTIN (DURAND)"]
     president = {"type": "personne physique", "nom": "DUPONT", "prenoms": "Paul Jean",
                  "qualite": "Président", "annee_de_naissance": "1968"}
@@ -121,7 +118,6 @@ def test_lookup_by_siren(api):
 def test_lookup_by_siret_uses_matching_establishment(api):
     r = run(opendata.lookup_siren("552 032 534 00066"))
     assert r["found"] and r["siret"] == SIRET_AGENCE and r["siret_siege"] == SIRET_SIEGE
-    assert r["naf"] == "43.22B" and r["trade_suggestion"] == "pac-clim-cvc"
     # Département déduit du code postal de l'établissement (le champ `departement` n'y figure pas)
     assert r["departement"] == "56" and r["region"] == "Bretagne" and r["commune"] == "LORIENT"
 
@@ -280,37 +276,13 @@ def test_match_in_list_reusable_for_inpi_fallback():
     assert opendata.match_in_list(None, "Paul", "Dupont") == ("no_match", None)
 
 
-# ---------------------------------------------------------------------------------------------- département, NAF
-def test_department_from_siret(api):
-    assert run(opendata.department_from_siret(SIRET_SIEGE)) == "29"
-    assert run(opendata.department_from_siret(SIRET_AGENCE)) == "56"
-    assert run(opendata.department_from_siret(SIREN)) == "29"
-    assert run(opendata.department_from_siret("abc")) is None
-    api["response"] = {"results": []}
-    opendata.clear_cache()
-    assert run(opendata.department_from_siret(SIRET_SIEGE)) is None
-
-
-def test_naf_in_building_reexported():
-    assert opendata.naf_in_building("43.22A") is True
-    assert opendata.naf_in_building("16.23Z") is True and opendata.naf_status("16.23Z") == "connexe"
-    assert opendata.naf_in_building("62.01Z") is False
-
-
-def test_property_checks_from(api):
-    property = run(opendata.lookup_siren(SIREN))
-    dirigeant = run(opendata.match_dirigeant(SIREN, "Paul", "Dupont"))
-    checks = opendata.property_checks_from(property, dirigeant, in_ademe_list=True, duplicate_siren=False)
-    assert checks["opendata_available"] is True and checks["siren_active"] is True
-    assert checks["naf_code"] == "43.22A" and checks["naf_in_building"] is True and checks["naf_status"] == "batiment"
-    assert checks["in_ademe_list"] is True and checks["dirigeant_match"] == "match_exact"
-    assert checks["duplicate_siren"] is False and checks["checked_at"]
-    api["error"] = ConnectionError("panne")
-    opendata.clear_cache()
-    property = run(opendata.lookup_siren(SIREN))
-    checks = opendata.property_checks_from(property, None)
-    assert checks["opendata_available"] is False and checks["siren_active"] is None
-    assert checks["naf_in_building"] is None and checks["dirigeant_match"] == "unavailable"
+# ---------------------------------------------------------------------------------------------- périmètre du module
+def test_module_keeps_only_company_checks():
+    """SPEC §6.4 : opendata ne garde que lookup_siren, match_dirigeant et l'utilitaire de requête"""
+    for name in ("lookup_siren", "match_dirigeant", "fetch_json", "fetch_json_cached"):
+        assert callable(getattr(opendata, name))
+    for name in ("naf_in_building", "naf_status", "department_from_siret", "property_checks_from"):
+        assert not hasattr(opendata, name), name
 
 
 # ---------------------------------------------------------------------------------------------- identifiants, noms

@@ -42,17 +42,14 @@ FROM nginx:alpine
 COPY --from=build /app/build /usr/share/nginx/html
 
 # Configuration nginx en gabarit : au démarrage, l'entrypoint officiel (20-envsubst-on-templates.sh) y substitue
-# EMBED_ALLOWED_ORIGINS et SELLER_LANDING_URL puis écrit /etc/nginx/conf.d/default.conf. Le filtre (expression
-# régulière sur le nom) limite la substitution à ces deux variables.
+# EMBED_ALLOWED_ORIGINS puis écrit /etc/nginx/conf.d/default.conf. Le filtre (expression régulière sur le nom)
+# limite la substitution à cette variable.
 COPY nginx.conf /etc/nginx/templates/default.conf.template
-ENV NGINX_ENVSUBST_FILTER="EMBED_ALLOWED_ORIGINS|SELLER_LANDING_URL"
+ENV NGINX_ENVSUBST_FILTER="EMBED_ALLOWED_ORIGINS"
 # Origines autorisées à afficher /embed/annonces dans une iframe (site WordPress), séparées par des espaces, ex.
 # « https://www.venteloc.fr https://venteloc.fr ». Vide (défaut) = même origine seulement ('self').
 # Variable d'exécution du conteneur : modifiable sans reconstruire l'image.
 ENV EMBED_ALLOWED_ORIGINS=""
-# Page « vendre mon entreprise » du site WordPress, cible des anciennes adresses /vendre-mon-entreprise-… (301).
-# Vide (défaut) = /estimer, l'estimateur de l'application. Variable d'exécution du conteneur.
-ENV SELLER_LANDING_URL=""
 
 # Exposer le port
 EXPOSE 80

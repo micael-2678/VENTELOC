@@ -1,11 +1,12 @@
-// Outils communs des parcours Playwright (NODE_PATH=/opt/node22/lib/node_modules node scripts/journeys/<script>.js).
+// Outils communs des parcours Playwright VenteLoc (NODE_PATH=/opt/node22/lib/node_modules node scripts/journeys/<script>.js).
 // Prérequis : backend de test sur API (mongomock, e-mails écrits dans EMAILS_FILE, route /test/set-user) et front
 // statique sur FRONT (build fait avec REACT_APP_BACKEND_URL pointant sur le backend de test).
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { chromium } = require('playwright');
 
-const SCRATCH = process.env.SCRATCHPAD || '/tmp/claude-0/-home-user-Cession-rge/ce38f6ec-42e9-581c-a8b8-72299bf0cff5/scratchpad';
+const SCRATCH = process.env.SCRATCHPAD || path.join(os.tmpdir(), 'venteloc-journeys');
 const FRONT = process.env.FRONT || 'http://127.0.0.1:3000';
 const API = process.env.API || 'http://127.0.0.1:8001/api';
 const TEST_API = API.replace(/\/api$/, '') + '/test';
@@ -122,8 +123,8 @@ const noOverflow = async (page, width) => {
   return { ok: w <= width, width: w };
 };
 const toasts = (page) => page.$$eval('[data-sonner-toast]', (els) => els.map((e) => e.innerText).join(' | ')).catch(() => '');
-// Compteur à zéro visible (« 0 vues », « 0 annonce », « 0 repreneur »…) : interdit par SPEC §5.1
-const zeroCounters = (t) => (t.match(/\b0\s+(vues?|annonces?|repreneurs?|contacts?|favoris|offres?|messages?|résultats?|entreprises?)\b/gi) || []);
+// Compteur à zéro visible (« 0 vues », « 0 bien », « 0 acquéreur »…) : interdit (SPEC §5.1)
+const zeroCounters = (t) => (t.match(/\b0\s+(vues?|annonces?|biens?|acquéreurs?|contacts?|favoris|offres?|messages?|résultats?)\b/gi) || []);
 
 // Signature par code dans OtpSignatureDialog : lecture du texte intégral (défilement), case, envoi, saisie, signature.
 const otpSign = async (page, email) => {
@@ -156,38 +157,57 @@ const otpSign = async (page, email) => {
   if (err) throw new Error('signature refusée : ' + err);
 };
 
-// Annonce publiée par l'API pour un cédant (identité vérifiée, e-mail confirmé) : brouillon complet, mandat v2 signé
-// par code, publication automatique. `overrides` complète ou remplace les champs de l'annonce.
-const DEFAULT_LISTING = {
-  rge_types: [], rge_validity: '', ca_n: 500000, ca_n1: 450000, ca_n2: 400000, margin: 25, ebitda: 70000, creation_date: '2011-03-01',
-  staff_count: 6, legal_structure: 'SARL', pipeline: 80000, fixed_charges: { salaries: 200000, rent: 15000 }, debt: 20000,
-  asking_price: 260000, sale_type: 'Cession totale', region: 'Bretagne', department: '29', trades: ['electricite'], sale_object: 'titres',
-  sale_reason: 'retraite', handover_months: 3, has_maintenance_contracts: true, technical_referent_stays: true, key_staff_stays: true,
-  decennale_ok: true, auto_accept_dataroom: false,
-  description: 'Entreprise d\'électricité générale implantée depuis quinze ans, clientèle de particuliers et de syndics de copropriété, '
-    + 'équipe de six personnes dont deux chefs d\'équipe autonomes, carnet de commandes signé sur quatre mois, véhicules et outillage '
-    + 'récents, dépôt en location avec bail transférable. Le dirigeant accompagne le repreneur pendant trois mois.',
+// Bien loué publié par l'API pour un vendeur (docs/venteloc/SPEC.md §5.2 et §5.4) : brouillon complet, justificatif de
+// propriété déposé (multipart), e-mail et identité marqués vérifiés par /test/set-user (mode test), mandat signé par
+// code, publication automatique. `overrides` complète ou remplace les champs du bien ; `docType` : type du justificatif.
+const DEFAULT_PROPERTY = {
+  property_type: 'appartement', owner_type: 'personne-physique', address: '8 rue des Essais', postal_code: '35000', city: 'Rennes',
+  surface: 38, rooms: 2, floor: 2, elevator: false, construction_year: 1975, is_copro: true, copro_lots: 24, copro_charges_annual: 960, copro_procedure: false,
+  dpe_class: 'D', ges_class: 'D', energy_cost_min: 700, energy_cost_max: 980,
+  lease_type: 'habitation-vide', rent_monthly: 590, charges_monthly: 60, lease_start: '2022-09-01', deposit: 590, indexation: 'irl',
+  tenant_payment_status: 'a-jour', has_gli: false, has_guarantor: true, property_tax: 720, non_recoverable_charges: 480, management: 'direct',
+  asking_price: 128000, sale_object: 'bien', sale_reason: 'arbitrage', auto_accept_dataroom: false,
+  description: 'Appartement de deux pièces au deuxième étage d\'une copropriété bien tenue, proche des commerces et du métro. '
+    + 'Locataire en place depuis septembre 2022, loyers payés à l\'échéance, caution solidaire. Séjour lumineux, chambre sur cour, '
+    + 'cuisine séparée, salle d\'eau refaite en 2021. Charges de copropriété maîtrisées, aucuns travaux votés.',
 };
-const publishListing = async (sellerUser, siret, overrides = {}) => {
+const uploadOwnershipProof = async (token, id, docType = 'titre-propriete') => {
+  const form = new FormData();
+  form.append('doc_type', docType);
+  form.append('file', new Blob(['%PDF-1.4\n% justificatif de test\n'], { type: 'application/pdf' }), 'justificatif.pdf');
+  const res = await fetch(`${API}/properties/${id}/ownership-proof`, { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: form });
+  if (!res.ok) throw new Error(`ownership-proof ${res.status}`);
+  return res.json().catch(() => ({}));
+};
+const publishProperty = async (sellerUser, overrides = {}, docType = 'titre-propriete') => {
   const token = sellerUser.token;
-  const body = { ...DEFAULT_LISTING, siret, company_name: overrides.company_name || `SOCIETE ${siret.slice(-5)}`, ...overrides };
+  const email = sellerUser.user.email;
+  const body = { ...DEFAULT_PROPERTY, ...overrides };
+  // Mode test : e-mail confirmé et identité vérifiée (simulation de Stripe Identity)
+  await setUser(email, 'email_verified', true).catch(() => {});
+  await setUser(email, 'identity_verified', true).catch(() => {});
   const created = await api('POST', '/properties', { token, body });
   if (created.status !== 200) throw new Error(`POST /properties ${created.status} ${JSON.stringify(created.data)}`);
   const id = created.data.id;
-  await api('PUT', `/properties/${id}`, { token, body: { mandant_address: { line1: '4 rue du Port', postal_code: '29200', city: 'Brest' }, mandant_capacity: 'dirigeant', sale_object: body.sale_object } });
+  await uploadOwnershipProof(token, id, docType);
+  const company = ['sci', 'societe'].includes(body.owner_type);
+  await api('PUT', `/properties/${id}`, { token, body: { mandant_address: { line1: '4 rue du Port', postal_code: '35000', city: 'Rennes' }, mandant_capacity: company ? 'gerant' : 'proprietaire', sale_object: body.sale_object } });
   const gen = await api('POST', '/seller/mandat/generate', { token, params: { property_id: id } });
   if (!gen.data || !gen.data.contract_id) throw new Error(`generate ${gen.status} ${JSON.stringify(gen.data)}`);
   const since = emailCount();
   await api('POST', '/signatures/request-code', { token, body: { contract_id: gen.data.contract_id } });
-  const code = await waitEmailCode(sellerUser.user.email, /code de signature/i, since);
+  const code = await waitEmailCode(email, /code de signature/i, since);
   const signed = await api('POST', `/seller/mandat/${gen.data.contract_id}/sign`, { token, body: { otp_code: code } });
   if (signed.status !== 200) throw new Error(`sign ${signed.status} ${JSON.stringify(signed.data)}`);
-  return { id, listing_status: signed.data.listing_status, registry_number: signed.data.registry_number };
+  return { id, address: body.address, listing_status: signed.data.listing_status, registry_number: signed.data.registry_number };
 };
+// Ancien nom conservé pour les scripts qui l'appellent encore
+const publishListing = publishProperty;
+// SIRET unique (bien détenu par une SCI)
 const uniqueSiret = (prefix = '777') => (prefix + String(Date.now()).slice(-9) + String(Math.floor(Math.random() * 90) + 10)).slice(0, 14);
 
 module.exports = {
-  publishListing, uniqueSiret,
+  DEFAULT_PROPERTY, publishProperty, publishListing, uploadOwnershipProof, uniqueSiret,
   FRONT, API, EMAILS_FILE, SEED_FILE, SHOTS_DIR, check, summary, sleep, seed, api, setUser, login,
   readEmails, emailCount, findEmail, waitEmail, waitEmailCode, codeIn, linkIn,
   launch, makePage, text, shot, noOverflow, toasts, zeroCounters, otpSign,

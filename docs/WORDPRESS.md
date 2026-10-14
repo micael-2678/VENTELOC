@@ -1,30 +1,31 @@
 # Site WordPress et application : liens, module d'annonces, boutons
 
-Depuis octobre 2026, la présentation commerciale (accueil, pages « vendre » / « reprendre », guides) est faite sous
-WordPress. L'application ne garde que ses parcours (cédant, repreneur, administration) et une page publique des
-annonces. Ce document explique comment relier les deux : liens filtrés vers les annonces, module d'annonces intégré
-dans une page WordPress, boutons d'appel à l'action.
+L'application VenteLoc contient ses parcours (vendeur, acquéreur, administration), la page publique des annonces (`/`),
+la page « Vendre mon bien loué » (`/vendre`) et l'estimateur (`/estimer`). Un site vitrine WordPress est facultatif ;
+s'il existe, ce document explique comment le relier à l'application : liens filtrés vers les annonces, module
+d'annonces intégré dans une page WordPress, boutons d'appel à l'action.
 
 Dans les exemples :
 
-- l'application est servie sur `https://app.cessionbatiment.fr` (remplacez par votre domaine : c'est `SITE_URL` côté
+- l'application est servie sur `https://app.venteloc.fr` (remplacez par votre domaine : c'est `SITE_URL` côté
   backend et `REACT_APP_SITE_URL` au build du frontend) ;
-- le site WordPress est servi sur `https://www.cessionbatiment.fr`.
+- le site WordPress est servi sur `https://www.venteloc.fr`.
 
 ## 1. Pages de l'application à relier depuis WordPress
 
 | Besoin | Adresse |
 | --- | --- |
-| Toutes les annonces | `https://app.cessionbatiment.fr/` |
-| Annonces filtrées | `https://app.cessionbatiment.fr/?metier=…&region=…` (voir § 2) |
-| Déposer une annonce (cédant) | `https://app.cessionbatiment.fr/register?role=seller` |
-| Estimer son entreprise (entrée du parcours cédant) | `https://app.cessionbatiment.fr/estimer` |
-| Créer un compte repreneur | `https://app.cessionbatiment.fr/register?role=buyer` |
-| Se connecter | `https://app.cessionbatiment.fr/login` |
+| Toutes les annonces | `https://app.venteloc.fr/` |
+| Annonces filtrées | `https://app.venteloc.fr/?type=…&region=…` (voir § 2) |
+| Vendre un bien loué (présentation) | `https://app.venteloc.fr/vendre` |
+| Déposer une annonce (vendeur) | `https://app.venteloc.fr/register?role=seller` |
+| Estimer son bien loué (entrée du parcours vendeur) | `https://app.venteloc.fr/estimer` |
+| Créer un compte acquéreur | `https://app.venteloc.fr/register?role=buyer` |
+| Se connecter | `https://app.venteloc.fr/login` |
 | Mentions légales, confidentialité, CGU, signalement | `/mentions-legales`, `/confidentialite`, `/cgu`, `/signaler` |
 
 Le pied de page de l'application affiche un lien « Site » vers WordPress quand la variable de build
-`REACT_APP_MARKETING_URL` est renseignée (par exemple `https://www.cessionbatiment.fr`). Les e-mails envoyés par
+`REACT_APP_MARKETING_URL` est renseignée (par exemple `https://www.venteloc.fr`). Les e-mails envoyés par
 l'application continuent de pointer vers l'application (`SITE_URL`).
 
 ## 2. Liens filtrés vers la page des annonces
@@ -33,14 +34,14 @@ La page des annonces (`/`) lit ses filtres dans l'adresse. Tous les paramètres 
 
 | Paramètre | Valeurs | Exemple |
 | --- | --- | --- |
-| `metier` | un ou plusieurs identifiants de métier séparés par des virgules (tableau ci-dessous) | `metier=pac-clim-cvc,isolation` |
+| `type` | un ou plusieurs types de biens séparés par des virgules (tableau ci-dessous) | `type=appartement,maison` |
+| `bail` | un ou plusieurs types de baux séparés par des virgules (tableau ci-dessous) | `bail=habitation-vide` |
 | `region` | identifiant de région (tableau ci-dessous) | `region=bretagne` |
-| `departement` | code du département (`29`, `2A`, `974`…) ; doit appartenir à la région si elle est indiquée | `departement=29` |
-| `rge` | `1` : entreprises RGE seulement ; `0` : sans RGE | `rge=1` |
-| `prix_max` | prix demandé maximum, en euros | `prix_max=500000` |
-| `ca_min` | chiffre d'affaires minimum, en euros | `ca_min=300000` |
-| `effectif_min` | nombre minimum de salariés | `effectif_min=5` |
-| `tri` | `recent` (défaut), `prix_asc`, `prix_desc` | `tri=prix_asc` |
+| `departement` | code du département (`29`, `2A`, `974`…) ; doit appartenir à la région si elle est indiquée | `departement=35` |
+| `prix_max` | prix de vente maximum, en euros | `prix_max=200000` |
+| `rendement_min` | rendement brut minimum, en % | `rendement_min=6` |
+| `surface_min` | surface minimum, en m² | `surface_min=30` |
+| `tri` | `recent` (défaut), `prix_asc`, `prix_desc`, `rendement_desc` | `tri=rendement_desc` |
 | `page` | numéro de page (24 annonces par page) | `page=2` |
 
 Les autres paramètres (par exemple `utm_source`, `utm_campaign`) sont conservés tels quels et n'ont pas d'effet sur
@@ -48,35 +49,42 @@ la recherche.
 
 Exemples prêts à coller :
 
-- Entreprises de PAC et climatisation en Bretagne :
-  `https://app.cessionbatiment.fr/?metier=pac-clim-cvc&region=bretagne`
-- Entreprises RGE d'isolation dans le Finistère, moins de 500 000 € :
-  `https://app.cessionbatiment.fr/?metier=isolation&region=bretagne&departement=29&rge=1&prix_max=500000`
-- Entreprises d'électricité d'au moins 5 salariés, les moins chères d'abord :
-  `https://app.cessionbatiment.fr/?metier=electricite&effectif_min=5&tri=prix_asc`
-- Entreprises de couverture en Auvergne-Rhône-Alpes, depuis une campagne :
-  `https://app.cessionbatiment.fr/?metier=couverture-charpente&region=auvergne-rhone-alpes&utm_source=wordpress`
+- Appartements loués en Bretagne :
+  `https://app.venteloc.fr/?type=appartement&region=bretagne`
+- Biens à plus de 6 % de rendement brut, moins de 150 000 €, meilleurs rendements d'abord :
+  `https://app.venteloc.fr/?rendement_min=6&prix_max=150000&tri=rendement_desc`
+- Locaux commerciaux et bureaux en Île-de-France :
+  `https://app.venteloc.fr/?type=local-commercial,bureaux&region=ile-de-france`
+- Location meublée dans le Rhône, depuis une campagne :
+  `https://app.venteloc.fr/?bail=habitation-meublee&departement=69&utm_source=wordpress`
 
-Métiers (`metier`) :
+Types de biens (`type`) :
 
-| Identifiant | Métier |
+| Identifiant | Type de bien |
 | --- | --- |
-| `plomberie-chauffage` | Plomberie, chauffage, sanitaire |
-| `pac-clim-cvc` | Pompes à chaleur, climatisation, CVC |
-| `electricite` | Électricité générale |
-| `isolation` | Isolation (ITE, ITI, combles) |
-| `couverture-charpente` | Couverture, charpente, zinguerie |
-| `menuiserie` | Menuiserie, fermetures, stores |
-| `maconnerie-gros-oeuvre` | Maçonnerie, gros œuvre |
-| `platrerie-peinture` | Plâtrerie, peinture, finitions |
-| `carrelage-sols` | Carrelage, sols, parquets |
-| `photovoltaique-enr` | Photovoltaïque, énergies renouvelables |
-| `renovation-generale` | Rénovation générale, tous corps d'état |
-| `terrassement-vrd` | Terrassement, VRD, réseaux |
-| `etancheite` | Étanchéité, bardage |
-| `serrurerie-metallerie` | Serrurerie, métallerie |
-| `agencement` | Agencement, cuisines, salles de bains |
-| `piscine-paysage` | Piscines, paysage, clôtures |
+| `appartement` | Appartement |
+| `maison` | Maison |
+| `immeuble` | Immeuble de rapport |
+| `residence-geree` | Lot en résidence gérée (étudiants, seniors, tourisme, EHPAD) |
+| `local-commercial` | Local commercial |
+| `bureaux` | Bureaux |
+| `parking` | Parking, box, garage |
+| `autre` | Autre bien loué |
+
+Types de baux (`bail`) :
+
+| Identifiant | Bail |
+| --- | --- |
+| `habitation-vide` | Bail d'habitation vide (loi du 6 juillet 1989) |
+| `habitation-meublee` | Bail d'habitation meublé (résidence principale) |
+| `colocation` | Colocation |
+| `bail-mobilite` | Bail mobilité |
+| `mixte` | Bail mixte (habitation et professionnel) |
+| `commercial` | Bail commercial (3-6-9) |
+| `residence-geree` | Bail commercial avec un exploitant de résidence |
+| `professionnel` | Bail professionnel |
+| `parking` | Location de parking ou de box |
+| `plusieurs-baux` | Plusieurs baux (immeuble ou plusieurs lots) |
 
 Régions (`region`) :
 
@@ -101,7 +109,7 @@ Ces identifiants sont ceux de `frontend/src/lib/referentiels.js` (identiques à 
 
 ## 3. Module d'annonces dans une page WordPress
 
-L'adresse `https://app.cessionbatiment.fr/embed/annonces` affiche une grille compacte des dernières annonces, sans
+L'adresse `https://app.venteloc.fr/embed/annonces` affiche une grille compacte des dernières annonces, sans
 en-tête ni pied de page, suivie d'un lien « Voir toutes les annonces ». Elle accepte les mêmes paramètres que la page
 des annonces (§ 2) et, en plus, `limit` : nombre d'annonces affichées, de 1 à 24 (6 par défaut). Les clics sur une
 annonce ou sur « Voir toutes les annonces » ouvrent l'application dans l'onglet (pas dans l'iframe). La page n'est
@@ -113,7 +121,7 @@ Par défaut, aucune page de l'application ne peut être affichée dans une ifram
 seulement, renseignez la variable d'environnement du conteneur frontend (nginx) :
 
 ```
-EMBED_ALLOWED_ORIGINS=https://www.cessionbatiment.fr https://cessionbatiment.fr
+EMBED_ALLOWED_ORIGINS=https://www.venteloc.fr https://venteloc.fr
 ```
 
 - Une ou plusieurs origines (schéma + domaine, sans chemin), séparées par des espaces ; vide = aucune autre origine.
@@ -127,24 +135,24 @@ EMBED_ALLOWED_ORIGINS=https://www.cessionbatiment.fr https://cessionbatiment.fr
 Dans l'éditeur de page, ajoutez un bloc « HTML personnalisé » et collez :
 
 ```html
-<div class="cession-annonces">
+<div class="venteloc-annonces">
   <iframe
-    src="https://app.cessionbatiment.fr/embed/annonces?metier=pac-clim-cvc&region=bretagne&limit=6"
-    title="Entreprises du bâtiment à vendre"
+    src="https://app.venteloc.fr/embed/annonces?type=appartement&region=bretagne&limit=6"
+    title="Biens loués à vendre"
     loading="lazy"
     style="width: 100%; height: 640px; border: 0; display: block;"
-    data-cession-embed></iframe>
+    data-venteloc-embed></iframe>
 </div>
 <script>
   // Hauteur automatique : le module envoie sa hauteur à chaque rendu
-  // ({ type: 'cession-embed-height', height }). Seuls les messages de l'application sont pris en compte.
+  // ({ type: 'venteloc-embed-height', height }). Seuls les messages de l'application sont pris en compte.
   (function () {
-    var APP_ORIGIN = 'https://app.cessionbatiment.fr';
+    var APP_ORIGIN = 'https://app.venteloc.fr';
     window.addEventListener('message', function (event) {
       if (event.origin !== APP_ORIGIN) return;
       var data = event.data || {};
-      if (data.type !== 'cession-embed-height' || typeof data.height !== 'number') return;
-      var frames = document.querySelectorAll('iframe[data-cession-embed]');
+      if (data.type !== 'venteloc-embed-height' || typeof data.height !== 'number') return;
+      var frames = document.querySelectorAll('iframe[data-venteloc-embed]');
       for (var i = 0; i < frames.length; i++) {
         if (frames[i].contentWindow === event.source) {
           frames[i].style.height = Math.max(200, Math.ceil(data.height)) + 'px';
@@ -155,7 +163,7 @@ Dans l'éditeur de page, ajoutez un bloc « HTML personnalisé » et collez :
 </script>
 ```
 
-- Plusieurs modules sur la même page : répétez seulement l'`<iframe … data-cession-embed>` ; un seul `<script>`
+- Plusieurs modules sur la même page : répétez seulement l'`<iframe … data-venteloc-embed>` ; un seul `<script>`
   suffit (il retrouve l'iframe qui a envoyé le message).
 - La hauteur de 640 px n'est utilisée qu'avant le premier message (affichage immédiat sans saut).
 - Si l'extension de sécurité du site (ou le thème) filtre les balises `<script>` dans les blocs, placez le script dans
@@ -164,8 +172,8 @@ Dans l'éditeur de page, ajoutez un bloc « HTML personnalisé » et collez :
 Exemples de modules :
 
 - 3 dernières annonces, toutes catégories : `/embed/annonces?limit=3`
-- 6 annonces RGE, les plus récentes : `/embed/annonces?rge=1&limit=6`
-- 9 annonces d'électricité en Île-de-France : `/embed/annonces?metier=electricite&region=ile-de-france&limit=9`
+- 6 biens à plus de 6 % de rendement brut : `/embed/annonces?rendement_min=6&tri=rendement_desc&limit=6`
+- 9 appartements en Île-de-France : `/embed/annonces?type=appartement&region=ile-de-france&limit=9`
 
 ## 4. Boutons d'appel à l'action
 
@@ -173,15 +181,15 @@ Bloc « HTML personnalisé » (ou bloc « Boutons » de WordPress avec la même 
 
 ```html
 <p>
-  <a href="https://app.cessionbatiment.fr/register?role=seller"
-     style="display: inline-block; padding: 14px 22px; border-radius: 12px; background: #0b1220; color: #fff;
+  <a href="https://app.venteloc.fr/register?role=seller"
+     style="display: inline-block; padding: 14px 22px; border-radius: 12px; background: #0f766e; color: #fff;
             font-weight: 600; text-decoration: none;">
     Déposer une annonce
   </a>
-  <a href="https://app.cessionbatiment.fr/estimer"
+  <a href="https://app.venteloc.fr/estimer"
      style="display: inline-block; margin-left: 12px; padding: 13px 21px; border-radius: 12px; border: 1px solid #0b1220;
             color: #0b1220; font-weight: 600; text-decoration: none;">
-    Estimer mon entreprise
+    Estimer mon bien loué
   </a>
 </p>
 ```
@@ -190,36 +198,8 @@ Libellés et adresses conseillés :
 
 | Bouton | Adresse |
 | --- | --- |
-| Déposer une annonce | `/register?role=seller` (le cédant crée son compte puis son annonce anonyme) |
-| Estimer mon entreprise | `/estimer` (sans compte ; propose ensuite de déposer l'annonce) |
+| Vendre mon bien loué | `/vendre` (présentation, honoraires, sécurité, questions fréquentes) |
+| Déposer une annonce | `/register?role=seller` (le vendeur crée son compte puis son annonce) |
+| Estimer mon bien loué | `/estimer` (sans compte ; propose ensuite de déposer l'annonce) |
 | Voir les annonces | `/` ou un lien filtré (§ 2) |
 | Recevoir les nouvelles annonces | `/#alerte` (alerte e-mail sans compte, en bas de la liste) |
-
-## 5. Anciennes adresses
-
-Les anciennes pages de l'application redirigent (301) vers la page des annonces, en conservant les filtres :
-
-| Ancienne adresse | Nouvelle adresse |
-| --- | --- |
-| `/entreprises-a-vendre`, `/search`, `/buyer/search` | `/` (paramètres conservés et traduits : `metiers` → `metier`, `max_price` → `prix_max`…) |
-| `/entreprises-batiment-a-vendre` | `/` |
-| `/entreprises-batiment-a-vendre/metier/<métier>` | `/?metier=<métier>` |
-| `/entreprises-batiment-a-vendre/region/<région>` | `/?region=<région>` |
-| `/entreprises-rge-a-vendre` | `/?rge=1` |
-| `/entreprises-rge-a-vendre/activite/<domaine RGE>` | `/?rge=1&metier=<métier correspondant>` |
-| `/entreprises-rge-a-vendre/region/<région>` | `/?rge=1&region=<région>` |
-| `/vendre-mon-entreprise-…` | page « vendre » du site WordPress si `SELLER_LANDING_URL` est renseignée (variable du conteneur frontend, ex. `https://www.cessionbatiment.fr/vendre-mon-entreprise/`), sinon `/estimer` (entrée du parcours cédant) |
-| `/reprendre-une-entreprise-…`, `/guides`, `/guides/…`, `/verifier-entreprise-rge` | `/` |
-
-Si ces contenus sont repris sous WordPress, mettez à jour les liens externes (fiches Google, réseaux, signatures)
-vers les nouvelles adresses WordPress ; les redirections de l'application restent en place pour les anciens liens.
-
-## 6. Vérifications après mise en place
-
-1. `https://app.cessionbatiment.fr/?metier=isolation&region=bretagne` : le filtre « Isolation » est coché et la
-   région « Bretagne » sélectionnée.
-2. La page WordPress qui contient le module affiche les cartes sans barre de défilement interne ; un clic sur une
-   annonce ouvre la fiche dans l'onglet, hors de l'iframe.
-3. En-têtes : `curl -sI https://app.cessionbatiment.fr/embed/annonces` montre `frame-ancestors 'self' https://www…`
-   et aucun `X-Frame-Options` ; `curl -sI https://app.cessionbatiment.fr/` montre `X-Frame-Options: DENY`.
-4. Une page WordPress d'un autre domaine (non listé) ne peut pas afficher le module (le navigateur le bloque).
