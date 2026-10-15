@@ -191,10 +191,13 @@ Onglets inchangés (« À faire », Annonces, Utilisateurs, Mandats, Factures, V
 Voir `docs/venteloc/MODE-TEST.md`, avec : personas `vendeur`, `acquereur`, `admin` (comptes `vendeur.demo@test.local`, `acquereur.demo@test.local`, `admin.demo@test.local`) ; `POST /test/seed` crée **8 annonces publiées réalistes** appartenant au vendeur démo, justificatif `verified`, mandats de test signés, photos absentes (pictogrammes) : studio meublé Lyon 7ᵉ (≈ 145 k€, 620 €/mois), T2 vide Lille (≈ 128 k€, 640 €), T3 vide Bordeaux (≈ 265 k€, 1 050 €, DPE D), maison T4 Nantes (≈ 310 k€, 1 250 €), immeuble de 5 lots Saint-Étienne (≈ 390 k€, 2 950 €), local commercial Rennes (≈ 240 k€, 1 600 €, bail commercial), parking Paris 15ᵉ (≈ 32 k€, 140 €), lot en résidence étudiante Toulouse (≈ 98 k€, 430 €) ; un logement DPE F avec l'alerte d'échéance ; descriptions crédibles sans nom de locataire.
 
 ## 11. Marque et design
-- `frontend/src/lib/brand.js` : `BRAND = {name: 'VenteLoc', legalName: 'AlterEgo SAS', siteUrl: 'https://venteloc.fr', tagline: 'Biens loués à vendre, de propriétaire à investisseur', contactEmail}` (plus de `verticalName`). Back : `site_name()` défaut `VenteLoc`, `sender_email()` défaut `contact@venteloc.fr`.
-- Logo : pictogramme maison + clé (SVG inline), « Vente**Loc** » (partie finale colorée par `splitBrandName`). Favicons et `og-image` régénérés (SVG → PNG au build ou fichiers simples) : maison stylisée, couleurs de la marque.
-- Palette : navy `#0b1220` (texte), surface `#f5f7fa`, bordures `#e3e7ee`, **action `#0f766e`** (teal 700 ; survol `#115e59`), **vert `#15803d` réservé aux badges de vérification**, ambre `#b45309` pour les alertes (DPE, impayés), pastilles DPE aux couleurs réglementaires (A `#009c6d`, B `#52b153`, C `#a5cc74`, D `#f4e70f`, E `#f0b40f`, F `#eb8235`, G `#d7221f`). Typographie, accessibilité, mobile : règles CessionRGE inchangées (Manrope/Inter auto-hébergées, rien d'engageant sous 13 px, chiffres tabulaires, focus visible, pas de débordement mobile).
-- SEO : titres et descriptions « biens loués à vendre », « investissement locatif », « vente d'appartement loué » ; JSON-LD `Organization` (carte T) et `ItemList` ; sitemap : routes statiques + `/annonce/{id}`.
+
+VenteLoc est un service d'AlterEgo : l'interface suit la **charte graphique AlterEgo** et une ergonomie inspirée de
+SeLoger, décrites dans **`docs/venteloc/CHARTE.md`** (couleurs, typographie, composants, en-tête, accueil, cartes,
+aide). Ce document prévaut pour tout ce qui est visuel.
+
+- `frontend/src/lib/brand.js` : `BRAND = {name: 'VenteLoc', legalName: 'AlterEgo SAS', siteUrl: 'https://venteloc.fr', tagline, contactEmail}`. Back : `site_name()` défaut `VenteLoc`, `sender_email()` défaut `contact@venteloc.fr`.
+- SEO : titres et descriptions « biens loués à vendre », « investissement locatif », « vente d'appartement loué » ; JSON-LD `Organization` (carte T) et `ItemList` ; sitemap : routes statiques (dont `/annonces`) + `/annonce/{id}`.
 
 ## 12. Technique
 - Base Mongo : `DB_NAME` défaut `venteloc_prod` ; alias réseau du backend `venteloc-api` (nginx) ; réseau compose `venteloc-network`.

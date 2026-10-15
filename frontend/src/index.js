@@ -1,14 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-// Polices auto-hébergées (aucune requête vers Google Fonts, pas de transfert d'adresse IP à un tiers) :
-// Inter 400-700 pour le texte, Manrope 700/800 pour les titres. Sous-ensemble latin (couvre le français : é, œ, €).
-// Les fichiers @fontsource déclarent font-display: swap.
-import "@fontsource/inter/latin-400.css";
-import "@fontsource/inter/latin-500.css";
-import "@fontsource/inter/latin-600.css";
-import "@fontsource/inter/latin-700.css";
-import "@fontsource/manrope/latin-700.css";
-import "@fontsource/manrope/latin-800.css";
+// Polices de la charte AlterEgo (Bricolage Grotesque, Instrument Sans) : fichiers auto-hébergés dans src/fonts,
+// déclarés par @font-face dans index.css (font-display: swap ; aucune requête vers Google Fonts).
 import "@/index.css";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import App from "@/App";

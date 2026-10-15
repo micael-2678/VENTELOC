@@ -3,40 +3,96 @@
 @tailwind utilities;
 
 /* ------------------------------------------------------------------------------------------------
-   Jetons de design (docs/venteloc/SPEC.md §11)
-   Fond clair, texte navy, action teal (#0f766e, survol #115e59). Les mêmes couleurs sont déclarées dans
-   tailwind.config.js (brand.*, dpe.*). Le vert est réservé aux badges de vérification, l'ambre aux alertes
-   (décence énergétique, impayés), les pastilles DPE gardent leurs couleurs réglementaires.
-   Polices auto-hébergées (@fontsource, importées dans src/index.js) : Manrope 700/800 pour les titres,
-   Inter 400-600 pour le texte. Aucun texte engageant sous 13 px (.text-xs = 13 px / 1,4).
+   Charte AlterEgo (design system « AlterEgo », thème WordPress 2.2.6 ; docs/venteloc/SPEC.md §11)
+   Sobre, presque monochrome : du papier (fond de page), de l'encre (texte, boutons pleins, bandes sombres), une seule
+   couleur, la brique, rare (survols, surtitres, filets des chiffres clés, soulignement des liens fléchés, focus).
+   Sable pour les sections de respiration, sauge pour une zone d'accent (et les badges de vérification).
+   Titres en Bricolage Grotesque 800, texte en Instrument Sans (fichiers auto-hébergés, src/fonts). Boutons en pilule.
+   Les mêmes couleurs sont déclarées dans tailwind.config.js (brand.*, gray.*, dpe.*).
    ------------------------------------------------------------------------------------------------ */
-:root {
-    --navy: #0b1220;
-    --navy-light: #1a2436;
-    --ink: #070c16;
-    --surface: #f5f7fa;
-    --surface-hover: #eceff4;
-    --line: #e3e7ee;
-    --action: #0f766e;
-    --action-hover: #115e59;
-    --action-soft: #f0fdfa;
-    --verified: #15803d;
-    --verified-soft: #dcfce7;
-    --amber: #b45309;
-    --amber-soft: #fef3c7;
-    --danger: #b91c1c;
-    --danger-soft: #fee2e2;
-    --text: var(--navy);
-    --text-muted: #4b5563;
-    --font-display: "Manrope", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    --font-body: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+@font-face {
+    font-family: "Bricolage Grotesque";
+    src: url("./fonts/bricolage-grotesque-latin-wght-normal.woff2") format("woff2");
+    font-weight: 200 800;
+    font-style: normal;
+    font-display: swap;
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+    font-family: "Bricolage Grotesque";
+    src: url("./fonts/bricolage-grotesque-latin-ext-wght-normal.woff2") format("woff2");
+    font-weight: 200 800;
+    font-style: normal;
+    font-display: swap;
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+    font-family: "Instrument Sans";
+    src: url("./fonts/instrument-sans-latin-wght-normal.woff2") format("woff2");
+    font-weight: 400 700;
+    font-style: normal;
+    font-display: swap;
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+    font-family: "Instrument Sans";
+    src: url("./fonts/instrument-sans-latin-ext-wght-normal.woff2") format("woff2");
+    font-weight: 400 700;
+    font-style: normal;
+    font-display: swap;
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+    font-family: "Instrument Sans";
+    src: url("./fonts/instrument-sans-latin-wght-italic.woff2") format("woff2");
+    font-weight: 400 700;
+    font-style: italic;
+    font-display: swap;
+}
 
-    /* Noms historiques (pages existantes) */
+:root {
+    /* Charte */
+    --ink: #141413;
+    --ink-2: #4a4740;
+    --ink-3: #5b5b5b;
+    --ink-4: #6c675e;
+    --paper: #fbf8f3;
+    --white: #ffffff;
+    --sand: #efe9df;
+    --sauge: #dce3d5;
+    --line: #ddd6ca;
+    --bronze: #b94e33;
+    --bronze-dark: #9c3f27;
+    --bronze-light: #e0a08a;
+    --on-ink-2: #c9c5bd;
+    --on-ink-3: #a8a49c;
+    --error: #a32d2d;
+    --ease: cubic-bezier(.4, 0, .2, 1);
+    --font-display: "Bricolage Grotesque", "Instrument Sans", "Helvetica Neue", Arial, sans-serif;
+    --font-sans: "Instrument Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    --font-body: var(--font-sans);
+
+    /* Noms historiques (pages existantes), rattachés à la charte */
+    --navy: var(--ink);
+    --navy-light: #2b2a27;
+    --surface: var(--paper);
+    --surface-hover: var(--sand);
+    --action: var(--ink);
+    --action-hover: var(--bronze);
+    --action-soft: #f6ece6;
+    --verified: #3f5e3b;
+    --verified-soft: var(--sauge);
+    --amber: #8a4510;
+    --amber-soft: #f5ead8;
+    --danger: var(--error);
+    --danger-soft: #f7e4e1;
+    --text: var(--ink);
+    --text-muted: var(--ink-2);
     --primary-light: var(--navy-light);
-    --primary-hover: var(--navy-light);
+    --primary-hover: var(--bronze);
     --primary-dark: var(--ink);
-    --btn-light: var(--surface);
-    --btn-light-hover: var(--surface-hover);
+    --btn-light: var(--paper);
+    --btn-light-hover: var(--sand);
     --success: var(--verified);
     --warning: var(--amber);
 }
@@ -56,31 +112,31 @@ code {
 @layer base {
     :root {
         /* Variables HSL des composants ui (bg-primary, border-border…), alignées sur la palette ci-dessus */
-        --background: 0 0% 100%;
-        --foreground: 220 49% 8%;
+        --background: 37 60% 97%;
+        --foreground: 60 3% 8%;
         --card: 0 0% 100%;
-        --card-foreground: 220 49% 8%;
+        --card-foreground: 60 3% 8%;
         --popover: 0 0% 100%;
-        --popover-foreground: 220 49% 8%;
-        --primary: 220 49% 8%;
+        --popover-foreground: 60 3% 8%;
+        --primary: 60 3% 8%;
         --primary-foreground: 0 0% 98%;
-        --secondary: 216 33% 97%;
-        --secondary-foreground: 220 49% 8%;
-        --muted: 216 33% 97%;
-        --muted-foreground: 220 10% 40%;
-        --accent: 216 33% 95%;
-        --accent-foreground: 220 49% 8%;
-        --destructive: 0 74% 42%;
+        --secondary: 37 33% 91%;
+        --secondary-foreground: 60 3% 8%;
+        --muted: 37 33% 91%;
+        --muted-foreground: 43 7% 27%;
+        --accent: 37 33% 91%;
+        --accent-foreground: 60 3% 8%;
+        --destructive: 0 57% 41%;
         --destructive-foreground: 0 0% 98%;
-        --border: 218 24% 91%;
-        --input: 218 24% 91%;
-        --ring: 175 77% 26%;
-        --chart-1: 175 77% 26%;
-        --chart-2: 142 72% 29%;
-        --chart-3: 220 49% 8%;
+        --border: 38 23% 83%;
+        --input: 38 23% 83%;
+        --ring: 12 57% 46%;
+        --chart-1: 12 57% 46%;
+        --chart-2: 112 23% 30%;
+        --chart-3: 60 3% 8%;
         --chart-4: 26 90% 37%;
         --chart-5: 0 74% 42%;
-        --radius: 0.75rem;
+        --radius: 0.875rem;
     }
     .dark {
         --background: 220 60% 4%;
@@ -125,21 +181,40 @@ code {
         font-size: 1rem;
         line-height: 1.6;
     }
+    /* Titres : Bricolage Grotesque 800, interlignage serré, approche -0,025em, casse de phrase */
     h1, h2, h3, h4 {
         font-family: var(--font-display);
-        font-weight: 700;
-        letter-spacing: -0.01em;
+        font-weight: 800;
+        letter-spacing: -0.025em;
+        line-height: 1.12;
         overflow-wrap: anywhere;
     }
     /* Focus visible sur tous les liens, liens-cartes, onglets et résumés (les boutons ui ont leur propre anneau) */
     :where(a, [role="tab"], [role="button"], summary, [tabindex="0"]):focus-visible {
-        outline: 2px solid var(--action);
+        outline: 2px solid var(--bronze);
         outline-offset: 2px;
         border-radius: 0.375rem;
     }
     /* Chiffres tabulaires (prix, chiffre d'affaires, compteurs) */
     .tabular {
         font-variant-numeric: tabular-nums;
+    }
+    /* Pictogrammes au trait de la charte : 1,5 px, extrémités arrondies (icônes lucide comprises) */
+    svg.lucide {
+        stroke-width: 1.5;
+    }
+    ::selection {
+        background: var(--bronze-light);
+        color: var(--ink);
+    }
+}
+
+/* Mouvement discret : tout s'arrête si le visiteur a demandé à réduire les animations */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
     }
 }
 
@@ -179,61 +254,84 @@ code {
    Classes utilitaires partagées (pages existantes + composants partagés src/components/shared)
    ------------------------------------------------------------------------------------------------ */
 @layer components {
-    /* Boutons : primaire teal plein (action), secondaire blanc bordé navy, lien teal avec flèche */
+    /* Boutons en pilule (charte AlterEgo) : plein encre qui passe en brique au survol, contour encre de 1,5 px qui se
+       remplit au survol, accent brique (rare). Un seul bouton plein par bloc ; une troisième action = lien fléché. */
     .btn-primary {
-        @apply inline-flex items-center justify-center gap-2 bg-brand-teal hover:bg-brand-teal-dark text-white font-semibold rounded-xl px-5 py-3 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2 disabled:opacity-60 disabled:pointer-events-none;
+        @apply inline-flex items-center justify-center gap-2 rounded-full border-[1.5px] border-brand-ink bg-brand-ink px-6 py-3 font-bold leading-tight text-white transition-colors duration-200 hover:border-brand-bronze hover:bg-brand-bronze disabled:pointer-events-none disabled:opacity-60;
     }
 
-    .btn-secondary {
-        @apply inline-flex items-center justify-center gap-2 bg-white hover:bg-brand-surface text-brand-navy font-semibold border border-brand-navy rounded-xl px-5 py-3 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2 disabled:opacity-60 disabled:pointer-events-none;
-    }
-
+    .btn-secondary,
     .btn-outline {
-        @apply inline-flex items-center justify-center gap-2 bg-white hover:bg-brand-surface text-brand-navy font-semibold border-2 border-brand-navy rounded-xl px-5 py-3 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2;
+        @apply inline-flex items-center justify-center gap-2 rounded-full border-[1.5px] border-brand-ink bg-transparent px-6 py-3 font-bold leading-tight text-brand-ink transition-colors duration-200 hover:bg-brand-ink hover:text-white disabled:pointer-events-none disabled:opacity-60;
     }
 
+    .btn-accent {
+        @apply inline-flex items-center justify-center gap-2 rounded-full border-[1.5px] border-brand-bronze bg-brand-bronze px-6 py-3 font-bold leading-tight text-white transition-colors duration-200 hover:border-brand-ink hover:bg-brand-ink disabled:pointer-events-none disabled:opacity-60;
+    }
+
+    .btn-small {
+        @apply px-4 py-2 text-[0.9375rem];
+    }
+
+    /* Lien d'action tertiaire : texte encre, filet brique dessous (le lien fléché ajoute la flèche) */
     .btn-link {
-        @apply inline-flex items-center gap-1 text-brand-blue font-semibold hover:underline underline-offset-4;
+        @apply inline-flex items-center gap-1 font-bold text-brand-ink underline decoration-brand-bronze decoration-[1.5px] underline-offset-4 transition-colors duration-200 hover:text-brand-bronze;
     }
 
-    /* Cartes : toujours min-w-0 pour qu'aucune grille ne déborde sur mobile */
+    .lien-fleche {
+        @apply inline-flex items-center gap-2 border-b-[1.5px] border-brand-bronze pb-0.5 font-display font-bold text-brand-ink transition-colors duration-200 hover:text-brand-bronze;
+    }
+    .lien-fleche::after {
+        content: "→";
+        transition: transform .3s cubic-bezier(.22, .8, .24, 1);
+    }
+    .lien-fleche:hover::after {
+        transform: translateX(4px);
+    }
+
+    /* Cartes : fond blanc posé sur le papier, filet, rayon 20 px, sans ombre ; toujours min-w-0 (pas de débordement) */
     .card {
-        @apply bg-white rounded-2xl shadow-sm border border-brand-line min-w-0;
+        @apply min-w-0 rounded-card border border-brand-line bg-white;
     }
 
     .card-hover {
-        @apply hover:shadow-md hover:border-brand-navy/30 transition-all duration-200;
+        @apply transition-colors duration-200 hover:border-brand-ink/40;
     }
 
     /* Lien-carte (toute la carte est cliquable) : focus visible distinct du survol */
     .card-link {
-        @apply block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2;
+        @apply block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-bronze focus-visible:ring-offset-2;
     }
 
+    /* Surtitre : 12 px, capitales espacées, brique (sur papier et blanc ; brique-clair sur encre) */
     .eyebrow {
-        @apply text-xs font-semibold uppercase tracking-wider text-brand-navy/70;
+        @apply text-xs font-semibold uppercase tracking-[0.16em] text-brand-bronze;
+        font-size: 0.75rem;
+    }
+    .on-ink .eyebrow {
+        @apply text-brand-bronze-light;
     }
 
     .section-title {
-        @apply font-display text-2xl sm:text-3xl font-bold text-brand-navy tracking-tight;
+        @apply font-display text-[1.75rem] font-extrabold leading-[1.06] tracking-[-0.025em] text-brand-ink sm:text-4xl;
     }
 
     .badge {
-        @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium max-w-full;
+        @apply inline-flex max-w-full items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold;
     }
 
-    /* Vert : uniquement les vérifications (propriétaire vérifié, société vérifiée, identité vérifiée) */
+    /* Vérifications (propriétaire vérifié, société vérifiée, identité vérifiée) : encre sur sauge */
     .badge-verified {
-        @apply bg-brand-green-soft text-brand-green-dark;
+        @apply bg-brand-sauge text-brand-ink;
     }
 
     /* Informations déclarées par le vendeur, non vérifiées */
     .badge-declared {
-        @apply bg-gray-100 text-gray-700;
+        @apply bg-brand-sand text-brand-ink-2;
     }
 
     .badge-success {
-        @apply bg-teal-50 text-teal-800;
+        @apply bg-brand-sauge text-brand-ink;
     }
 
     .badge-warning {
@@ -241,40 +339,40 @@ code {
     }
 
     .badge-info {
-        @apply bg-gray-100 text-gray-800;
+        @apply bg-brand-sand text-brand-ink;
     }
 
     .badge-danger {
-        @apply bg-red-100 text-red-800;
+        @apply bg-[#f7e4e1] text-brand-error;
     }
 
     .badge-locked {
-        @apply bg-brand-surface text-brand-navy border border-brand-line;
+        @apply border border-brand-line bg-brand-paper text-brand-ink;
     }
 
     .stat-card {
-        @apply bg-gradient-to-br from-brand-navy to-brand-navy-light text-white rounded-2xl p-6 shadow-lg min-w-0;
+        @apply min-w-0 rounded-card bg-brand-ink p-6 text-white;
     }
 
     .nav-bar {
-        @apply bg-white/95 backdrop-blur-sm border-b border-brand-line sticky top-0 z-50;
+        @apply sticky top-0 z-50 border-b border-brand-line bg-brand-paper/95 backdrop-blur-sm;
     }
 
     .input-field {
-        @apply rounded-xl border-brand-line focus:border-brand-blue focus:ring-1 focus:ring-brand-blue;
+        @apply rounded-lg border-brand-line focus:border-brand-ink focus:ring-1 focus:ring-brand-ink;
     }
 
     .spinner {
-        @apply w-8 h-8 border-4 border-brand-navy/20 border-t-brand-navy rounded-full animate-spin;
+        @apply h-8 w-8 animate-spin rounded-full border-4 border-brand-ink/15 border-t-brand-bronze;
     }
 
     .filter-sidebar {
-        @apply bg-white rounded-2xl shadow-sm border border-brand-line p-4 sm:p-6 min-w-0;
+        @apply min-w-0 rounded-card border border-brand-line bg-white p-4 sm:p-6;
     }
 
-    /* Encart d'alerte (ambre) : prix hors fourchette, action attendue… */
+    /* Encart d'alerte : prix hors fourchette, décence énergétique, action attendue… */
     .notice-amber {
-        @apply rounded-xl border border-amber-200 bg-brand-amber-soft text-brand-amber px-4 py-3 text-sm;
+        @apply rounded-xl border border-[#e8d3b4] bg-brand-amber-soft px-4 py-3 text-sm text-brand-amber;
     }
 
     /* Pastille DPE (classe énergie A à G) : couleur réglementaire, texte foncé ou blanc selon le contraste */
@@ -282,9 +380,20 @@ code {
         @apply inline-flex items-center justify-center rounded-md font-bold leading-none tabular;
     }
 
-    /* Seul bloc sombre autorisé : le CTA final */
-    .section-dark {
-        @apply bg-brand-navy text-white;
+    /* Bandes fortes (engagement, pied de page) : encre, titres blancs, texte on-ink-2, surtitres brique clair */
+    .section-dark,
+    .on-ink {
+        @apply bg-brand-ink text-white;
+    }
+
+    /* Sections de respiration */
+    .section-sand {
+        @apply bg-brand-sand;
+    }
+
+    /* Chiffres clés : filet vertical brique de 2 px */
+    .stat-filet {
+        @apply border-l-2 border-brand-bronze pl-4;
     }
 }
 

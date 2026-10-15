@@ -1,8 +1,8 @@
 import { Link } from 'react-router-dom';
-import { logoMarkSvg } from '@/seo/brand';
-import { BRAND, splitBrandName } from '@/lib/brand';
+import { logoMarkSvg, LOGO_SRC, LOGO_RATIO } from '@/seo/brand';
+import { BRAND } from '@/lib/brand';
 
-// Pictogramme seul (maison + clé)
+// Pictogramme compact (favicons, emplacements trop petits pour le logo)
 export const LogoMark = ({ size = 32, className = '' }) => (
   <span
     className={`inline-flex shrink-0 ${className}`}
@@ -12,33 +12,38 @@ export const LogoMark = ({ size = 32, className = '' }) => (
   />
 );
 
-// Nom de marque en texte : la partie après la majuscule interne est colorée (« Vente » + « Loc » en teal).
-// Le vert reste réservé aux badges de vérification. tone : "dark" (sur fond clair) | "light" (sur fond sombre)
-export const BrandName = ({ name = BRAND.name, tone = 'dark', className = '' }) => {
-  const { head, tail } = splitBrandName(name);
-  return (
-    <span className={className}>
-      {head}
-      {tail && <span className={tone === 'light' ? 'text-teal-300' : 'text-brand-teal'}>{tail}</span>}
-    </span>
-  );
-};
+// Nom du service en texte (BRAND.name), dans la police des titres de la charte, en encre (ou blanc sur encre)
+export const BrandName = ({ name = BRAND.name, className = '' }) => <span className={className}>{name}</span>;
 
-// Wordmark (BRAND.name) + pictogramme. tone : "dark" (sur fond clair) | "light" (sur fond sombre)
-const Logo = ({ to = '/', tone = 'dark', size = 'md', className = '' }) => {
-  const mark = size === 'sm' ? 26 : size === 'lg' ? 40 : 32;
-  const text = size === 'sm' ? 'text-lg' : size === 'lg' ? 'text-3xl' : 'text-xl sm:text-2xl';
+// Logo AlterEgo (fichier fourni, jamais recoloré ni déformé) + filet + nom du service.
+// tone : "dark" (logo noir, sur papier, blanc, sable) | "light" (logo blanc, sur encre uniquement)
+const SIZES = { sm: 22, md: 28, lg: 36 };
+const Logo = ({ to = '/', tone = 'dark', size = 'md', className = '', withName = true }) => {
+  const h = SIZES[size] || SIZES.md;
   const content = (
     <>
-      <LogoMark size={mark} />
-      <span className={`font-display font-extrabold tracking-tight leading-none ${text} ${tone === 'light' ? 'text-white' : 'text-brand-navy'}`}>
-        <BrandName tone={tone} />
-      </span>
+      <img
+        src={tone === 'light' ? LOGO_SRC.light : LOGO_SRC.dark}
+        alt="AlterEgo"
+        width={Math.round(h * LOGO_RATIO)}
+        height={h}
+        style={{ height: h, width: 'auto' }}
+        className="shrink-0"
+        data-testid="logo-alterego"
+      />
+      {withName && (
+        <>
+          <span aria-hidden="true" className={`self-stretch w-px my-0.5 ${tone === 'light' ? 'bg-white/30' : 'bg-brand-line'}`} />
+          <span className={`font-display font-extrabold tracking-[-0.025em] leading-none ${size === 'lg' ? 'text-2xl' : 'text-lg'} ${tone === 'light' ? 'text-white' : 'text-brand-ink'}`}>
+            <BrandName />
+          </span>
+        </>
+      )}
     </>
   );
-  if (!to) return <span className={`inline-flex items-center gap-2 min-w-0 ${className}`}>{content}</span>;
+  if (!to) return <span className={`inline-flex items-center gap-3 min-w-0 ${className}`}>{content}</span>;
   return (
-    <Link to={to} className={`inline-flex items-center gap-2 min-w-0 ${className}`} aria-label={`${BRAND.name} – accueil`}>
+    <Link to={to} className={`inline-flex items-center gap-3 min-w-0 rounded-md ${className}`} aria-label={`${BRAND.name} par AlterEgo – accueil`}>
       {content}
     </Link>
   );
