@@ -172,7 +172,7 @@ PARCOURS_EMAIL_TEMPLATES = {
         <h2>Premier contact d'un acquéreur</h2>
         <p>Bonjour {name},</p>
         <p>{buyer_label} vous a écrit au sujet de votre annonce « {property_title} » :</p>
-        <blockquote style="border-left:3px solid #e3e7ee;margin:0;padding:8px 12px;color:#374151">{extract}</blockquote>
+        <blockquote style="border-left:3px solid #ddd6ca;margin:0;padding:8px 12px;color:#4a4740">{extract}</blockquote>
         <p>Sa carte acquéreur :</p>
         <ul>{card_rows}</ul>
         <p>Son identité est vérifiée et il signe un engagement de confidentialité et de non-contournement avant toute

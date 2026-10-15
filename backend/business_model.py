@@ -201,19 +201,26 @@ def legal_email_footer() -> str:
             "effets ou valeurs que ceux représentatifs de sa rémunération.")
 
 def wrap_email_html(html_content: str, unsubscribe_url: str = "") -> str:
-    """Mise en page commune : contenu + un seul bouton d'action + pied de page légal.
+    """Mise en page commune (charte AlterEgo : papier, encre, une seule couleur, la brique) : logo AlterEgo et nom du
+    service, contenu, un seul bouton d'action en pilule, pied de page légal.
     `unsubscribe_url` : lien de désinscription pour les e-mails non transactionnels."""
-    unsubscribe = (f'<br><a href="{unsubscribe_url}" style="color:#6b7280">Ne plus recevoir ces e-mails</a>'
+    unsubscribe = (f'<br><a href="{unsubscribe_url}" style="color:#5b5b5b">Ne plus recevoir ces e-mails</a>'
                    if unsubscribe_url else "")
+    logo = site_url("/brand/logo-alterego-noir.png")
     return f"""
-    <div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;color:#0b1220;line-height:1.5">
-      <div style="padding:16px 0;border-bottom:2px solid #0b1220;font-size:20px;font-weight:bold">{site_name()}</div>
-      <div style="padding:16px 0">{html_content}</div>
-      <p style="padding:8px 0 24px"><a href="{site_url('/login')}" style="display:inline-block;padding:12px 24px;background:#0b1220;color:#ffffff;text-decoration:none;border-radius:8px">Accéder à mon espace</a></p>
-      <div style="border-top:1px solid #e3e7ee;padding-top:12px;font-size:12px;color:#6b7280">
+    <div style="background:#fbf8f3;padding:24px 12px">
+    <div style="font-family:'Instrument Sans',Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;color:#141413;line-height:1.6;font-size:16px">
+      <div style="padding:8px 0 16px;border-bottom:1px solid #ddd6ca">
+        <img src="{logo}" alt="AlterEgo" width="94" height="26" style="display:inline-block;vertical-align:middle;border:0;height:26px;width:auto">
+        <span style="display:inline-block;vertical-align:middle;margin-left:10px;padding-left:10px;border-left:1px solid #ddd6ca;font-size:18px;font-weight:800;letter-spacing:-0.02em">{site_name()}</span>
+      </div>
+      <div style="padding:20px 0 8px">{html_content}</div>
+      <p style="padding:8px 0 28px;margin:0"><a href="{site_url('/login')}" style="display:inline-block;padding:13px 26px;background:#141413;color:#ffffff;text-decoration:none;border-radius:999px;font-weight:700">Accéder à mon espace</a></p>
+      <div style="border-top:1px solid #ddd6ca;padding-top:14px;font-size:12px;line-height:1.5;color:#5b5b5b">
         {legal_email_footer()}<br>
         Cet e-mail vous est envoyé automatiquement à la suite d'une action sur votre compte.{unsubscribe}
       </div>
+    </div>
     </div>"""
 
 def _send_brevo_email_sync(to_email: str, to_name: str, subject: str, html_content: str, unsubscribe_url: str = ""):
@@ -332,6 +339,27 @@ def render_email(template: str, **values) -> tuple:
     safe["site_name"] = site_name()
     return tpl["subject"].format_map(_Defaults(raw)), tpl["html"].format_map(_Defaults(safe))
 
+LOGO_PDF_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo-alterego-noir.png")
+
+
+def pdf_brand_header(height_cm: float = 0.75) -> list:
+    """En-tête des PDF (charte AlterEgo) : logo AlterEgo noir (proportions du fichier : 463 × 128 px), puis un filet.
+    Liste vide si le fichier est absent (le PDF reste valide)."""
+    try:
+        from reportlab.lib import colors as _colors
+        from reportlab.lib.units import cm as _cm
+        from reportlab.platypus import HRFlowable, Image, Spacer
+        if not os.path.exists(LOGO_PDF_PATH):
+            return []
+        h = height_cm * _cm
+        logo = Image(LOGO_PDF_PATH, width=h * 463 / 128, height=h)
+        logo.hAlign = "LEFT"
+        return [logo, Spacer(1, 6), HRFlowable(width="100%", thickness=0.6, color=_colors.HexColor("#ddd6ca"), spaceAfter=10)]
+    except Exception as e:  # jamais bloquant
+        logging.warning(f"Logo PDF indisponible : {e}")
+        return []
+
+
 def text_to_pdf(title: str, text: str, footer: str = "") -> bytes:
     """PDF simple (mandat, facture…) : titre, paragraphes, pied de page"""
     from xml.sax.saxutils import escape as xml_escape
@@ -339,7 +367,7 @@ def text_to_pdf(title: str, text: str, footer: str = "") -> bytes:
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
     styles = getSampleStyleSheet()
     body = ParagraphStyle('Body', parent=styles['Normal'], fontSize=10, leading=14, spaceAfter=6)
-    elements = [Paragraph(xml_escape(title), ParagraphStyle('T', parent=styles['Title'], fontSize=15, spaceAfter=16)), Spacer(1, 6)]
+    elements = pdf_brand_header() + [Paragraph(xml_escape(title), ParagraphStyle('T', parent=styles['Title'], fontSize=15, spaceAfter=16)), Spacer(1, 6)]
     for block in (text or "").split("\n\n"):
         if block.strip():
             elements.append(Paragraph(xml_escape(block.strip()).replace("\n", "<br/>"), body))

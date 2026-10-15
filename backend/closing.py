@@ -839,10 +839,11 @@ def _html_page(title: str, text: str, cta_label: str = "Accéder à mon espace",
               if form_action else f'<a class="btn" href="{escape(cta_url)}">{escape(cta_label)}</a>')
     return f"""<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex"><title>{escape(title)} — {escape(site_name())}</title>
-<style>body{{font-family:Inter,Arial,sans-serif;background:#f5f7fa;color:#0b1220;margin:0;padding:24px}}
-.card{{max-width:560px;margin:40px auto;background:#fff;border:1px solid #e3e7ee;border-radius:12px;padding:32px}}
-h1{{font-size:22px;margin:0 0 12px}}p{{line-height:1.5}}.btn{{display:inline-block;margin-top:16px;padding:12px 20px;background:#0b1220;color:#fff;border:0;border-radius:8px;text-decoration:none;font:inherit;font-weight:600;cursor:pointer}}
-.btn:focus{{outline:3px solid #1d4ed8;outline-offset:2px}}.brand{{font-weight:700;margin-bottom:16px}}</style></head><body><div class="card"><div class="brand">{escape(site_name())}</div>
+<style>body{{font-family:'Instrument Sans',Arial,Helvetica,sans-serif;background:#fbf8f3;color:#141413;margin:0;padding:24px}}
+.card{{max-width:560px;margin:40px auto;background:#fff;border:1px solid #ddd6ca;border-radius:20px;padding:32px}}
+h1{{font-size:22px;margin:0 0 12px}}p{{line-height:1.5}}.btn{{display:inline-block;margin-top:16px;padding:12px 20px;background:#141413;color:#fff;border:0;border-radius:999px;text-decoration:none;font:inherit;font-weight:700;cursor:pointer}}
+.btn:hover{{background:#b94e33}}
+.btn:focus{{outline:3px solid #b94e33;outline-offset:2px}}.brand{{font-weight:700;margin-bottom:16px}}</style></head><body><div class="card"><div class="brand"><img src="/brand/logo-alterego-noir.png" alt="AlterEgo" height="24" style="height:24px;width:auto;vertical-align:middle"> <span style="margin-left:8px;padding-left:8px;border-left:1px solid #ddd6ca">{escape(site_name())}</span></div>
 <h1>{escape(title)}</h1><p>{escape(text)}</p>{action}</div></body></html>"""
 
 
@@ -1221,9 +1222,9 @@ async def send_payment_order(closing: dict, invoice: dict) -> bool:
 # ----------------------------------------------------------------------------------------------
 # PDF (reportlab)
 
-_NAVY = colors.HexColor("#0b1220")
-_BORDER = colors.HexColor("#e3e7ee")
-_SURFACE = colors.HexColor("#f5f7fa")
+_NAVY = colors.HexColor("#141413")
+_BORDER = colors.HexColor("#ddd6ca")
+_SURFACE = colors.HexColor("#fbf8f3")
 
 
 def _styles() -> dict:
@@ -1232,7 +1233,7 @@ def _styles() -> dict:
         "title": ParagraphStyle("CTitle", parent=base["Title"], fontSize=18, leading=22, alignment=0, spaceAfter=4, textColor=_NAVY),
         "h": ParagraphStyle("CHead", parent=base["Heading3"], fontSize=11, leading=14, spaceBefore=10, spaceAfter=4, textColor=_NAVY),
         "p": ParagraphStyle("CBody", parent=base["Normal"], fontSize=9.5, leading=13, spaceAfter=4),
-        "small": ParagraphStyle("CSmall", parent=base["Normal"], fontSize=7.5, leading=10, textColor=colors.HexColor("#4b5563")),
+        "small": ParagraphStyle("CSmall", parent=base["Normal"], fontSize=7.5, leading=10, textColor=colors.HexColor("#4a4740")),
         "cell": ParagraphStyle("CCell", parent=base["Normal"], fontSize=9, leading=12),
         "cellb": ParagraphStyle("CCellB", parent=base["Normal"], fontSize=9, leading=12, fontName="Helvetica-Bold"),
         "right": ParagraphStyle("CRight", parent=base["Normal"], fontSize=9, leading=12, alignment=2),
@@ -1266,8 +1267,9 @@ def _build(elements: List, test: bool = False) -> bytes:
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.8 * cm, leftMargin=1.8 * cm, topMargin=1.6 * cm, bottomMargin=1.6 * cm,
                             title=(f"{TEST_DOCUMENT_BANNER} — {site_name()}" if test else site_name()),
                             author=f"{LEGAL_ENTITY.get('denomination', 'AlterEgo')} SAS")
+    elements = business_model.pdf_brand_header() + list(elements)
     if test:
-        doc.build(pdf_test_banner(doc.width) + list(elements), onFirstPage=draw_test_watermark, onLaterPages=draw_test_watermark)
+        doc.build(pdf_test_banner(doc.width) + elements, onFirstPage=draw_test_watermark, onLaterPages=draw_test_watermark)
     else:
         doc.build(elements)
     return buffer.getvalue()

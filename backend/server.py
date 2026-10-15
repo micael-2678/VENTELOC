@@ -3422,9 +3422,9 @@ def _pdf_styles() -> dict:
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     ss = getSampleStyleSheet()
     return {
-        "title": ParagraphStyle("CTitle", parent=ss["Title"], fontSize=15, leading=19, spaceAfter=6, textColor=colors.HexColor("#0b1220")),
-        "sub": ParagraphStyle("CSub", parent=ss["Normal"], fontSize=9, leading=12, textColor=colors.HexColor("#6b7280"), spaceAfter=12),
-        "h": ParagraphStyle("CH", parent=ss["Heading2"], fontSize=12, leading=15, spaceBefore=10, spaceAfter=6, textColor=colors.HexColor("#0b1220")),
+        "title": ParagraphStyle("CTitle", parent=ss["Title"], fontSize=15, leading=19, spaceAfter=6, textColor=colors.HexColor("#141413")),
+        "sub": ParagraphStyle("CSub", parent=ss["Normal"], fontSize=9, leading=12, textColor=colors.HexColor("#5b5b5b"), spaceAfter=12),
+        "h": ParagraphStyle("CH", parent=ss["Heading2"], fontSize=12, leading=15, spaceBefore=10, spaceAfter=6, textColor=colors.HexColor("#141413")),
         "body": ParagraphStyle("CBody", parent=ss["Normal"], fontSize=9.5, leading=13.5, spaceAfter=6),
         "cell": ParagraphStyle("CCell", parent=ss["Normal"], fontSize=8.5, leading=11),
         "mono": ParagraphStyle("CMono", parent=ss["Normal"], fontName="Courier", fontSize=7.5, leading=10),
@@ -3499,7 +3499,7 @@ def signed_document_pdf(title: str, subtitle: str, content: str, proofs: list, a
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=2 * cm, leftMargin=2 * cm, topMargin=2 * cm, bottomMargin=2 * cm,
                             title=(f"{TEST_DOCUMENT_BANNER} — {title}" if test else title), author=f"{LEGAL_ENTITY['denomination']} SAS")
-    elements = pdf_test_banner(doc.width) if test else []
+    elements = (pdf_test_banner(doc.width) if test else []) + business_model.pdf_brand_header()
     if test and (content or "").startswith(TEST_DOCUMENT_BANNER):
         content = content[len(TEST_DOCUMENT_BANNER):].lstrip("\n")  # la mention figure déjà dans le bandeau
     elements += [Paragraph(_xml_escape(title), st["title"]), Paragraph(_xml_escape(subtitle), st["sub"])]
@@ -3520,8 +3520,8 @@ def signed_document_pdf(title: str, subtitle: str, content: str, proofs: list, a
     for i, proof in enumerate(proofs, 1):
         elements.append(Paragraph(_xml_escape(f"Signature {i} — {proof.get('label', '')}"), st["h"]))
         table = Table(_proof_rows(proof, st), colWidths=[5.2 * cm, 11.8 * cm])
-        table.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#e3e7ee")),
-                                   ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f5f7fa")),
+        table.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#ddd6ca")),
+                                   ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#fbf8f3")),
                                    ("VALIGN", (0, 0), (-1, -1), "TOP"), ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
         elements.append(table)
         elements.append(Spacer(1, 6))
@@ -5737,10 +5737,11 @@ def _alert_page(title: str, text: str, cta_label: str = "Voir les annonces", cta
         action_html = f'<a class="btn" href="{site_url(cta_path)}">{html_escape(cta_label)}</a>'
     html = f"""<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex"><title>{html_escape(title)} — {html_escape(site_name())}</title>
-<style>body{{font-family:Inter,Arial,sans-serif;background:#f5f7fa;color:#0b1220;margin:0;padding:24px 16px}}
-main{{max-width:560px;margin:40px auto;background:#fff;border:1px solid #e3e7ee;border-radius:12px;padding:32px 24px}}
-h1{{font-size:22px;margin:0 0 12px}}p{{font-size:16px;line-height:1.5}}.btn{{display:inline-block;margin-top:16px;padding:12px 20px;background:#0b1220;color:#fff;border:0;border-radius:8px;text-decoration:none;font:inherit;font-weight:600;cursor:pointer}}
-.btn:focus{{outline:3px solid #1d4ed8;outline-offset:2px}}small{{display:block;margin-top:24px;color:#6b7280;font-size:13px}}</style></head>
+<style>body{{font-family:'Instrument Sans',Arial,Helvetica,sans-serif;background:#fbf8f3;color:#141413;margin:0;padding:24px 16px}}
+main{{max-width:560px;margin:40px auto;background:#fff;border:1px solid #ddd6ca;border-radius:20px;padding:32px 24px}}
+h1{{font-size:22px;margin:0 0 12px}}p{{font-size:16px;line-height:1.5}}.btn{{display:inline-block;margin-top:16px;padding:12px 20px;background:#141413;color:#fff;border:0;border-radius:999px;text-decoration:none;font:inherit;font-weight:700;cursor:pointer}}
+.btn:hover{{background:#b94e33}}
+.btn:focus{{outline:3px solid #b94e33;outline-offset:2px}}small{{display:block;margin-top:24px;color:#5b5b5b;font-size:13px}}</style></head>
 <body><main><h1>{html_escape(title)}</h1><p>{html_escape(text)}</p>{action_html}
 <small>{html_escape(site_name())} est opéré par AlterEgo SAS, carte professionnelle T. Aucune somme n'est due avant la signature de l'acte authentique.</small></main></body></html>"""
     return Response(content=html, media_type="text/html; charset=utf-8")
@@ -7274,7 +7275,7 @@ async def job_nps(now: datetime) -> int:
                 continue
             token = alert_token({"action": "nps", "closing": cl["id"], "user": user_id, "role": role})
             scores = " ".join(f'<a href="{site_url(f"/api/nps/{token}?score={n}")}" style="display:inline-block;margin:2px;padding:8px 10px;'
-                              f'border:1px solid #e3e7ee;border-radius:6px;text-decoration:none;color:#0b1220">{n}</a>' for n in range(11))
+                              f'border:1px solid #ddd6ca;border-radius:6px;text-decoration:none;color:#141413">{n}</a>' for n in range(11))
             if await send_reminder(user_id, "nps_after_sale", f"{cl['id']}:{role}", now, "nps_after_sale",
                                    property_label=cl.get("property_label") or "votre bien", scores=scores):
                 sent += 1

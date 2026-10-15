@@ -95,7 +95,7 @@ EMAIL_TEMPLATES.setdefault("estimate_result", {
     <h2>Votre estimation indicative</h2>
     <p>Bonjour,</p>
     <p>D'après le loyer et les charges saisis, la valeur de votre bien loué se situe entre <strong>{low}</strong> et <strong>{high}</strong> (valeur centrale : {mid}, soit un rendement brut de {gross_at_mid}).</p>
-    <p style="font-size:13px;color:#6b7280">{method}</p>
+    <p style="font-size:13px;color:#5b5b5b">{method}</p>
     <h3>Ce qui fait monter le prix</h3>
     <p>• {pedagogy_1}</p>
     <p>• {pedagogy_2}</p>
