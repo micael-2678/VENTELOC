@@ -1,4 +1,4 @@
-// Parcours du mode test VenteLoc (SPEC §10, MODE-TEST-ET-APP.md §B) avec un backend lancé en TEST_MODE=true, sans
+// Parcours du mode test VenteLoc (SPEC §10, MODE-TEST.md) avec un backend lancé en TEST_MODE=true, sans
 // jeu de données :
 //   TEST_MODE=true JOBS_ENABLED=false NOSEED=1 restart.sh
 // bandeau → /test (personas vendeur, acquéreur, admin) → données de démonstration → 8 biens loués sur / (justificatifs
@@ -132,7 +132,7 @@ const restartBackend = (env) => {
   await p.goto(L.FRONT + '/', { waitUntil: 'networkidle' });
   await p.waitForSelector('[data-testid=listing-card]');
   L.check('/ : 8 annonces de démonstration visibles', (await p.getByTestId('listing-card').count()) === 8, String(await p.getByTestId('listing-card').count()));
-  L.check('/ : « 8 annonces en ligne »', /8 annonces en ligne/.test(await p.getByTestId('listings-total').innerText()));
+  L.check('/ : « 8 biens en ligne »', /8 biens en ligne/.test(await p.getByTestId('listings-total').innerText()));
   const cards = await p.getByTestId('listing-card').allInnerTexts();
   L.check('/ : 8 biens démo « Propriétaire vérifié » (justificatifs validés)', cards.filter((c) => /Propriétaire vérifié/.test(c)).length === 8, cards.map((c) => c.slice(0, 60)).join(' | '));
   L.check('/ : biens variés (studio, maison, immeuble, local commercial, parking, résidence)', ['Appartement', 'Maison', 'Immeuble', 'Local commercial', 'Parking', 'résidence'].every((w) => cards.some((c) => c.includes(w))), cards.map((c) => c.slice(0, 40)).join(' | '));
@@ -148,7 +148,7 @@ const restartBackend = (env) => {
   await p.getByTestId('app-header').waitFor();
   await p.waitForSelector('[data-testid^=status-]', { timeout: 15000 }).catch(() => {});
   t = await L.text(p);
-  L.check('connexion rapide vendeur → espace vendeur (annonces de démonstration)', /Espace vendeur/.test(t) && (await p.locator('[data-testid^=status-]').count()) > 0, t.slice(0, 200));
+  L.check('connexion rapide vendeur → espace vendeur (annonces de démonstration)', /Espace vendeur/i.test(t) && (await p.locator('[data-testid^=status-]').count()) > 0, t.slice(0, 200));
   const sellerDemo = { token: await p.evaluate(() => localStorage.getItem('token')), user: JSON.parse(await p.evaluate(() => localStorage.getItem('user'))) };
   await p.context().close();
 
@@ -263,7 +263,8 @@ const restartBackend = (env) => {
   await p.goto(L.FRONT + PANEL, { waitUntil: 'networkidle' });
   await p.getByTestId('test-login-acquereur').click();
   await p.waitForURL(/\/buyer\/dashboard/, { timeout: 15000 });
-  L.check('connexion rapide acquéreur → espace acquéreur', /Espace acquéreur/.test(await L.text(p)));
+  await p.getByText(/Espace acquéreur/i).first().waitFor({ timeout: 15000 }).catch(() => {});
+  L.check('connexion rapide acquéreur → espace acquéreur', /Espace acquéreur/i.test(await L.text(p)));
   const buyerToken = await p.evaluate(() => localStorage.getItem('token'));
   await p.goto(L.FRONT + `/annonce/${cid}`, { waitUntil: 'networkidle' });
   await p.waitForSelector('[data-testid=property-header]');
@@ -343,8 +344,8 @@ const restartBackend = (env) => {
   await p.goto(L.FRONT + '/', { waitUntil: 'networkidle' });
   await p.getByTestId('listings-empty').waitFor({ timeout: 10000 });
   t = await L.text(p);
-  L.check('/ vide après la purge (« Aucune annonce… », sans « 0 »)', /Aucune annonce/.test(t) && L.zeroCounters(t).length === 0, t.slice(0, 200));
-  L.check('compte admin réel conservé', (await L.api('POST', '/auth/login', { body: { email: 'admin@test.fr', password: 'AdminTest123!' } })).status === 200);
+  L.check('/ vide après la purge (« Aucun bien… », sans « 0 »)', /Aucun bien/.test(t) && L.zeroCounters(t).length === 0, t.slice(0, 200));
+  L.check('compte admin réel conservé', (await L.api('POST', '/auth/login', { body: { email: process.env.ADMIN_EMAIL || 'admin@exemple.fr', password: process.env.ADMIN_PASSWORD || 'AdminTest123!' } })).status === 200);
   await p.context().close();
 
   // ---- Relance SANS TEST_MODE : panneau désactivé, bandeau absent, routes /test/* → 404

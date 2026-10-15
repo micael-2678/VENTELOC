@@ -137,7 +137,8 @@ const DESCRIPTION = 'Appartement de deux pièces au troisième étage avec ascen
   await p.getByTestId('ownership-doc-taxe-fonciere').check();
   await p.getByTestId('ownership-file').setInputFiles(pdf);
   await p.getByTestId('ownership-submit').click();
-  await p.getByTestId('ownership-pending').waitFor({ timeout: 10000 });
+  // Dépôt réussi : l'étape passe à « fait » dans la liste (le panneau de dépôt se replie)
+  await p.getByTestId('ownership-panel').waitFor({ state: 'detached', timeout: 10000 });
   comp = (await L.api('GET', `/properties/${propertyId}`, { token: sellerToken })).data;
   L.check('justificatif : déposé, en cours de contrôle', comp.ownership && comp.ownership.status === 'pending', JSON.stringify(comp.ownership));
 

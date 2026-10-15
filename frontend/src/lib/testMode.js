@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-// Mode test (docs/refonte-2026-10/MODE-TEST-ET-APP.md §B.1) : le front lit `test_mode` dans GET /api/config, sans
+// Mode test (docs/venteloc/MODE-TEST.md §1) : le front lit `test_mode` dans GET /api/config, sans
 // variable de build. Le résultat est gardé en mémoire (une requête par chargement de l'application, partagée entre
 // tous les composants) et dans sessionStorage : un rechargement de page affiche tout de suite le dernier état connu,
 // puis la réponse de /config le confirme ou le corrige (mode test désactivé entre-temps, par exemple).

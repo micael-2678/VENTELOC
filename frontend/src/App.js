@@ -11,7 +11,7 @@ import EmbedListingsPage from "@/pages/EmbedListingsPage";
 import { MentionsLegalesPage, PrivacyPage, CguPage, ReportPage } from "@/pages/LegalPages";
 import NotFound from "@/pages/NotFound";
 import EmailVerificationBanner from "@/components/EmailVerificationBanner";
-// Bandeau du mode test : ne s'affiche que si GET /config renvoie test_mode (MODE-TEST-ET-APP.md §B.3)
+// Bandeau du mode test : ne s'affiche que si GET /config renvoie test_mode (MODE-TEST.md §3)
 import TestModeBanner from "@/components/test/TestModeBanner";
 import { SessionContext } from "@/components/layout/session";
 import { initAnalytics } from "@/lib/analytics";
@@ -40,7 +40,7 @@ const ClosingPage = lazy(() => import("@/pages/ClosingPage"));
 const ProfilePage = lazy(() => import("@/pages/ProfilePage"));
 const FollowupPage = lazy(() => import("@/pages/FollowupPage"));
 const KYCCallbackPage = lazy(() => import("@/components/KYCVerification").then((m) => ({ default: m.KYCCallbackPage })));
-// Mode test (MODE-TEST-ET-APP.md §B) : panneau /test chargé à la demande
+// Mode test (MODE-TEST.md) : panneau /test chargé à la demande
 const TestModePage = lazy(() => import("@/pages/TestModePage"));
 
 // Toasts en bas au centre : en haut à droite, ils recouvraient les actions des barres collantes (Déconnexion, Lancer les

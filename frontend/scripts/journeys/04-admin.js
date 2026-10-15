@@ -17,26 +17,8 @@ const PROPERTY = {
     + 'Locataire en place depuis septembre 2022, loyers payés à l\'échéance, caution solidaire. Séjour lumineux, chambre sur cour, '
     + 'cuisine séparée, salle d\'eau refaite en 2021. Charges de copropriété maîtrisées, aucun travaux votés.',
 };
-const publishProperty = async (sellerUser, overrides = {}, docType = 'titre-propriete') => {
-  const token = sellerUser.token;
-  const created = await L.api('POST', '/properties', { token, body: { ...PROPERTY, ...overrides } });
-  if (created.status !== 200) throw new Error(`POST /properties ${created.status} ${JSON.stringify(created.data)}`);
-  const id = created.data.id;
-  const form = new FormData();
-  form.append('doc_type', docType);
-  form.append('file', new Blob(['%PDF-1.4\n% justificatif de test\n'], { type: 'application/pdf' }), 'justificatif.pdf');
-  const proof = await fetch(`${L.API}/properties/${id}/ownership-proof`, { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: form });
-  if (!proof.ok) throw new Error(`ownership-proof ${proof.status}`);
-  await L.api('PUT', `/properties/${id}`, { token, body: { mandant_address: { line1: '4 rue du Port', postal_code: '35000', city: 'Rennes' }, mandant_capacity: 'proprietaire', sale_object: 'bien' } });
-  const gen = await L.api('POST', '/seller/mandat/generate', { token, params: { property_id: id } });
-  if (!gen.data || !gen.data.contract_id) throw new Error(`generate ${gen.status} ${JSON.stringify(gen.data)}`);
-  const since = L.emailCount();
-  await L.api('POST', '/signatures/request-code', { token, body: { contract_id: gen.data.contract_id } });
-  const code = await L.waitEmailCode(sellerUser.user.email, /code de signature/i, since);
-  const signed = await L.api('POST', `/seller/mandat/${gen.data.contract_id}/sign`, { token, body: { otp_code: code } });
-  if (signed.status !== 200) throw new Error(`sign ${signed.status} ${JSON.stringify(signed.data)}`);
-  return { id, listing_status: signed.data.listing_status, registry_number: signed.data.registry_number };
-};
+// Bien publié par l'API (lib.js : e-mail et identité marqués vérifiés, justificatif, mandat signé par code)
+const publishProperty = (sellerUser, overrides = {}, docType = 'titre-propriete') => L.publishProperty(sellerUser, { ...PROPERTY, ...overrides }, docType);
 
 (async () => {
   const browser = await L.launch();
@@ -93,7 +75,8 @@ const publishProperty = async (sellerUser, overrides = {}, docType = 'titre-prop
   L.check('admin : une ligne par justificatif déposé', !!okRow && !!koRow, JSON.stringify(proofRows));
   if (okRow) {
     const popup = p.context().waitForEvent('page', { timeout: 8000 }).catch(() => null);
-    await p.getByTestId(`todo-proof-${okRow}`).click();
+    // Bouton « Voir le justificatif » : action renvoyée par le backend (todo-action-…-proof) ou lien de repli (todo-proof-…)
+    await p.locator(`[data-testid="todo-action-${okRow}-proof"], [data-testid="todo-proof-${okRow}"]`).first().click();
     const opened = await popup;
     L.check('admin : aperçu du justificatif ouvert (fichier authentifié)', !!opened || !(await L.toasts(p)).includes('pas pu'), await L.toasts(p));
     if (opened) await opened.close();
@@ -187,7 +170,7 @@ const publishProperty = async (sellerUser, overrides = {}, docType = 'titre-prop
   await L.sleep(1500);
   t = await p.getByTestId('admin-metrics').innerText();
   L.check('admin : tableau des KPI (semaine, précédente, cible)', (await p.getByTestId('kpi-table').count()) === 1 && /Cible/.test(t) && (await p.locator('[data-testid^=kpi-listings_published]').count()) === 1, t.slice(0, 200));
-  L.check('admin : KPI « Justificatifs de propriété à contrôler », sans BODACC', (await p.getByTestId('kpi-ownership_pending').count()) === 1 && !/BODACC|NDA|cédant/.test(t));
+  L.check('admin : KPI « Justificatifs de propriété à contrôler », sans BODACC', (await p.getByTestId('kpi-ownership_pending').count()) === 1 && !/BODACC|\bNDA\b|cédant/.test(t));
   L.check('admin : KPI 6 et 7 « suivi hors plateforme » sans valeur inventée', /hors plateforme/i.test(t));
   L.check('admin : revenu facturé / encaissé affiché', /factur|encaiss/i.test(t));
   await p.getByTestId('cost-amount').fill('165');

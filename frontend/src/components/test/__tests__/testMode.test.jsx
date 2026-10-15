@@ -1,4 +1,4 @@
-// Mode test côté front (docs/refonte-2026-10/MODE-TEST-ET-APP.md §B.1 et §B.3) : lecture de GET /config, bandeau,
+// Mode test côté front (docs/venteloc/MODE-TEST.md §1 et §3) : lecture de GET /config, bandeau,
 // panneau /test (connexion rapide), raccourcis des parcours (code de signature, second facteur, e-mail).
 // Exécution : cd frontend && CI=true npx craco test --watchAll=false src/components/test
 import '@/components/shared/jestEnv';

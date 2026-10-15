@@ -2,7 +2,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { FlaskConical } from 'lucide-react';
 import { useTestMode } from '@/lib/testMode';
 
-// Bandeau du mode test (MODE-TEST-ET-APP.md §B.3) : une ligne ambre en haut de toutes les pages, non collante.
+// Bandeau du mode test (MODE-TEST.md §3) : une ligne ambre en haut de toutes les pages, non collante.
 // Avec la clé du panneau (ou sans clé exigée) : message complet et lien vers le panneau /test. Sans la clé (visiteur
 // venu du site WordPress pendant l'essai) : « annonces fictives » seulement, sans lien. Rien hors mode test.
 const TestModeBanner = () => {

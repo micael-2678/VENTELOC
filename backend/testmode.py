@@ -1,5 +1,5 @@
 """
-Mode test (docs/refonte-2026-10/MODE-TEST-ET-APP.md, partie B) : essayer toute l'application sans vérifier réellement son
+Mode test (docs/venteloc/MODE-TEST.md) : essayer toute l'application sans vérifier réellement son
 identité, sans dépendre de l'envoi d'e-mails et sans engager de vrais contrats.
 
 Activation : TEST_MODE=true (lu à chaque appel, `test_mode_enabled()`). Hors mode test, toutes les routes /test/* répondent

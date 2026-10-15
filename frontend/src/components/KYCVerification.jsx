@@ -19,7 +19,7 @@ import {
 // l'engagement de confidentialité et de non-contournement, et au vendeur avant de signer le mandat de vente. Elle
 // n'est pas exigée pour contacter un vendeur ni pour créer une annonce. Seul le résultat (nom, date de naissance, type de document) est
 // conservé, jamais les images.
-// Mode test (MODE-TEST-ET-APP.md §B.3) : bouton « Simuler la vérification (mode test) » à côté du bouton Stripe
+// Mode test (MODE-TEST.md §3) : bouton « Simuler la vérification (mode test) » à côté du bouton Stripe
 // → POST /test/identity/simulate, puis profil relu et page rechargée, comme au retour de Stripe (/kyc/callback).
 
 // Délai avant rechargement après une vérification simulée (le message de réussite reste lisible)

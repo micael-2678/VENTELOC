@@ -1,6 +1,6 @@
 import { axiosInstance } from '@/App';
 
-// Appels du mode test partagés par le panneau /test et les raccourcis des parcours (MODE-TEST-ET-APP.md §B.2-B.3).
+// Appels du mode test partagés par le panneau /test et les raccourcis des parcours (MODE-TEST.md §2-3).
 // Après une action qui change le compte, l'utilisateur est relu et rangé comme après une connexion (localStorage
 // « user » + setUser), pour que l'en-tête, les bandeaux et les gardes voient tout de suite le nouvel état.
 

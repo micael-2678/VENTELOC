@@ -16,7 +16,7 @@ import {
   DEFAULT_DEMO_PASSWORD, DEMO_PERSONAS, confirmEmailNow, simulateIdentity, storeSession,
 } from '@/components/test/testActions';
 
-// Panneau du mode test (/test, MODE-TEST-ET-APP.md §B.3) : connexion rapide aux comptes de démonstration, création des
+// Panneau du mode test (/test, MODE-TEST.md §3) : connexion rapide aux comptes de démonstration, création des
 // données de démonstration, confirmation d'e-mail et identité simulées, boîte mail de test, outils admin.
 // Hors mode test : message explicite (pas de 404) ; un administrateur garde la purge des données de test.
 

@@ -13,7 +13,7 @@
   l'autre (`POST /closing/{id}/confirm`) ou contestation (`POST /closing/{id}/dispute`) ; confirmation automatique après
   7 jours sans contestation (tâche quotidienne) pour une déclaration du vendeur ou de l'admin seulement ; une déclaration
   de l'acquéreur attend l'accord du vendeur ou l'arbitrage admin (ligne « À faire » à l'échéance).
-- Mode test (MODE-TEST-ET-APP.md §B.2.6) : étape de vente rattachée à une donnée de test → `is_test`, facture
+- Mode test (MODE-TEST.md §2.6) : étape de vente rattachée à une donnée de test → `is_test`, facture
   TEST-FAC-AAAA-NNNNN (compteur `invoice_test`, avoir TEST-AV-… sur `credit_note_test`), mention « DOCUMENT DE TEST —
   SANS VALEUR JURIDIQUE » sur la facture, l'avoir, l'ordre de paiement et la mise en demeure ; le compteur réel n'avance pas.
 - À la confirmation : facture FAC-AAAA-NNNNN (compteur continu `next_sequence("invoice")`), débiteur = vendeur,

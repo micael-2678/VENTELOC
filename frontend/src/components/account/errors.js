@@ -1,4 +1,4 @@
-// Lecture uniforme des erreurs de l'API (docs/refonte-2026-10/API.md) : les routes nouvelles renvoient
+// Lecture uniforme des erreurs de l'API (docs/venteloc/API.md) : les routes nouvelles renvoient
 // `detail` sous la forme {code, message}, les anciennes une chaîne, la validation FastAPI un tableau.
 
 export const apiErrorCode = (error) => {

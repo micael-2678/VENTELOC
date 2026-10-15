@@ -169,7 +169,7 @@ export const footerLegalLines = (raw) => {
   ];
 };
 
-// Ligne légale du pied de page de l'application (MODE-TEST-ET-APP.md §A.4), partagée par AppFooter et
+// Ligne légale du pied de page de l'application (SPEC.md §11), partagée par AppFooter et
 // scripts/prerender.mjs : exploitant, RCS et carte professionnelle T sur une seule ligne.
 export const footerShortLine = (raw) => {
   const i = mergeLegal(raw || {});

@@ -39,7 +39,8 @@ const L = require('./lib');
   await p.goto(L.FRONT + '/mentions-legales', { waitUntil: 'networkidle' });
   await p.goto(L.FRONT + '/', { waitUntil: 'networkidle' });
   await p.waitForSelector('[data-testid=listing-card]');
-  await p.locator('#filtres-type-appartement').check();
+  // Case contrôlée par l'URL : cochée une fois la navigation faite (pas de .check(), qui relit l'état trop tôt)
+  await p.locator('#filtres-type-appartement').click();
   await p.waitForURL(/type=appartement/);
   await L.sleep(600);
   L.check('filtres : type dans l\'URL', /type=appartement/.test(p.url()), p.url());
@@ -142,7 +143,7 @@ const L = require('./lib');
   await p.getByTestId('mobile-filters').waitFor();
   o = await L.noOverflow(p, 390);
   L.check('mobile : panneau de filtres plein écran sans débordement', o.ok, `scrollWidth=${o.width}`);
-  await p.locator('#mobile-type-appartement').check();
+  await p.locator('#mobile-type-appartement').click();
   await p.waitForFunction(() => /^Afficher \d+ biens?$|Aucun bien/.test(((document.querySelector('[data-testid=mobile-filters-apply]') || {}).innerText || '').trim()), null, { timeout: 5000 }).catch(() => {});
   L.check('mobile : le bouton du panneau annonce le nombre de biens', /^Afficher \d+ biens?$/.test((await p.getByTestId('mobile-filters-apply').innerText()).trim()), await p.getByTestId('mobile-filters-apply').innerText());
   await p.getByTestId('mobile-filters-apply').click();

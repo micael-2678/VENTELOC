@@ -1,5 +1,5 @@
 """
-Purge des données de test (MODE-TEST-ET-APP.md §B.2.11). Dry-run par défaut.
+Purge des données de test (MODE-TEST.md §2.11). Dry-run par défaut.
 
 Supprime tout ce qui porte `is_test: true` ou qui est rattaché à un utilisateur `is_test` (directement ou par une annonce,
 un contrat, une offre, une étape de vente, une conversation de test) : utilisateurs, annonces, photos, justificatifs de

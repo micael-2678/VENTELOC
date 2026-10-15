@@ -47,7 +47,7 @@ def seller_commission_enabled() -> bool:
     return os.environ.get("FF_SELLER_COMMISSION", "true").strip().lower() not in ("false", "0", "no")
 
 
-# ============ MODE TEST (docs/refonte-2026-10/MODE-TEST-ET-APP.md, partie B) ============
+# ============ MODE TEST (docs/venteloc/MODE-TEST.md) ============
 # Primitives partagées par server.py, closing.py et testmode.py (ce module n'importe rien de l'application).
 TEST_DOCUMENT_BANNER = "DOCUMENT DE TEST — SANS VALEUR JURIDIQUE"
 # Domaine réservé aux comptes de démonstration (vendeur.demo@test.local…) : refusé à l'inscription, jamais envoyé à Brevo

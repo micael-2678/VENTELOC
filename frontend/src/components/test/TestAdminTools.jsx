@@ -7,7 +7,7 @@ import { clearStoredSession } from '@/components/layout/session';
 import { BTN_PRIMARY, BTN_QUIET } from '@/components/shared/buttonStyles';
 import TestPanelSection from '@/components/test/TestPanelSection';
 
-// Outils d'administration du mode test (MODE-TEST-ET-APP.md §B.2.11, §B.3) :
+// Outils d'administration du mode test (MODE-TEST.md §2.11, §B.3) :
 // - POST /admin/jobs/run : lance tout de suite les tâches planifiées (relances, expirations, digest…) ;
 // - POST /admin/test/purge?dry_run=true puis false : supprime tout ce qui est `is_test` ou rattaché à un compte de test.
 // La purge est disponible même hors mode test (nettoyage avant l'ouverture réelle).

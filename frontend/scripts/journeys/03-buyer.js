@@ -54,8 +54,9 @@ const isoPlus = (days) => new Date(Date.now() + days * 86400000).toISOString().s
   const buyerId = me.id;
   await p.getByTestId('confirm-email-continue').click();
   await p.waitForURL(/\/buyer\/dashboard/);
+  await p.getByText(/Espace acquéreur/i).first().waitFor({ timeout: 15000 }).catch(() => {});
   let t = await L.text(p);
-  L.check('espace acquéreur : vide sans compteur à zéro, sans crédit', L.zeroCounters(t).length === 0 && !/crédit/i.test(t) && /Espace acquéreur/.test(t), L.zeroCounters(t).join(', '));
+  L.check('espace acquéreur : vide sans compteur à zéro, sans crédit', L.zeroCounters(t).length === 0 && !/crédit/i.test(t) && /Espace acquéreur/i.test(t), L.zeroCounters(t).join(', '));
 
   // ---- Page des annonces → fiche → contact
   await p.goto(L.FRONT + '/', { waitUntil: 'networkidle' });

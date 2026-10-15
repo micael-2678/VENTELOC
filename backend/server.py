@@ -1418,7 +1418,7 @@ LISTING_FLAG_LABELS = {
     "tenant_unpaid": "impayés en cours déclarés par le vendeur",
     "duplicate_address": "doublon probable : même adresse publiée par un autre compte",
     "opendata_unavailable": "open data indisponible au moment de la publication",
-    # Mode test (MODE-TEST-ET-APP.md §B.2.5) : motif bloquant rétrogradé en drapeau pour les données de test
+    # Mode test (MODE-TEST.md §2.5) : motif bloquant rétrogradé en drapeau pour les données de test
     "societe_cessee": "société signalée comme cessée au registre national (mode test : non bloquant)",
 }
 MODERATION_REVIEW_HOURS = 48
@@ -3790,7 +3790,7 @@ def session_evidence(user: dict, contract: dict, request: Optional[Request], met
             "kyc_status": user.get("kyc_status"),
             "identity_verified": is_user_verified(user),
             "verification_session_id": user.get("verification_session_id"),
-            # « test » : identité simulée en mode test (MODE-TEST-ET-APP.md §B.2.3), sans valeur probante
+            # « test » : identité simulée en mode test (MODE-TEST.md §2.3), sans valeur probante
             "provider": user.get("kyc_provider"),
             "verified_name": " ".join(x for x in [user.get("verified_first_name"), user.get("verified_last_name")] if x) or None,
         },
@@ -4871,7 +4871,7 @@ async def build_admin_todo(now: Optional[datetime] = None) -> dict:
     now_iso = now.isoformat()
     sections = []
 
-    # 0. Mode test (MODE-TEST-ET-APP.md §B.2.12) : actif, ou désactivé avec des données de test restantes à purger
+    # 0. Mode test (MODE-TEST.md §2.12) : actif, ou désactivé avec des données de test restantes à purger
     rows = []
     if test_mode_enabled():
         rows.append(_todo_row("test_mode", "test_mode", "Mode test actif",

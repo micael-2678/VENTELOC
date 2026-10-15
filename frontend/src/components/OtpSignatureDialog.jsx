@@ -28,7 +28,7 @@ const DOC_TABINDEX = 0;
 // - `summary` : lignes affichées au-dessus du texte ; avec un résumé, le texte intégral est replié par défaut (dépliable) ;
 // - la case « J'ai lu » n'est activée qu'une fois le texte intégral parcouru jusqu'en bas (ou s'il tient sans défilement) ;
 // - onSign(otpCode) renvoie une promesse ; en cas d'échec, le message du serveur est affiché ici.
-// - mode test (MODE-TEST-ET-APP.md §B.2.2) : POST /signatures/request-code renvoie aussi `test_code` (jamais hors mode
+// - mode test (MODE-TEST.md §2.2) : POST /signatures/request-code renvoie aussi `test_code` (jamais hors mode
 //   test) ; il est affiché dans un encadré avec un bouton « Remplir ».
 const OtpSignatureDialog = ({
   open,

@@ -11,7 +11,7 @@ import { apiErrorMessage } from '@/components/account/errors';
 
 // Connexion : POST /auth/login → {token, user} ou {otp_required:true, email} (administrateur : second facteur,
 // code reçu par e-mail puis POST /auth/login/verify {email, code}).
-// Mode test (MODE-TEST-ET-APP.md §B.2.2) : la réponse contient aussi `test_code` (jamais hors mode test) ; il est
+// Mode test (MODE-TEST.md §2.2) : la réponse contient aussi `test_code` (jamais hors mode test) ; il est
 // affiché et prérempli pour se connecter sans boîte mail.
 
 // Code en clair renvoyé par le serveur en mode test seulement (chiffres uniquement)

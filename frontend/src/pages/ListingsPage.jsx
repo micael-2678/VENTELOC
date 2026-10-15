@@ -322,7 +322,7 @@ const ListingsPage = ({ user: userProp }) => {
 
   // Recherche ciblée (un type de bien et/ou une région) : titre, H1 et adresse canonique propres ; sinon la page générale
   const heading = searchHeading(filters);
-  // Données structurées : jamais d'annonce de test (mode test, MODE-TEST-ET-APP.md §B)
+  // Données structurées : jamais d'annonce de test (mode test, MODE-TEST.md)
   const indexable = items.filter((c) => c.is_test !== true);
   useSeo(heading ? `${heading} | ${BRAND.name}` : fillText(L.title), fillText(L.description), {
     path: heading ? listingsPath({ types: filters.types, region: filters.region }) : LISTINGS_PATH,

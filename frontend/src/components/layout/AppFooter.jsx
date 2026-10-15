@@ -5,7 +5,7 @@ import { fillText } from '@/seo';
 import { footerShortLine } from '@/seo/legal';
 import { useLegalInfo } from '@/components/seo/useLegalInfo';
 
-// Pied de page minimal de l'application (MODE-TEST-ET-APP.md §A.4) : liens légaux, contact, lien vers le site vitrine
+// Pied de page minimal de l'application (SPEC.md §11) : liens légaux, contact, lien vers le site vitrine
 // (REACT_APP_MARKETING_URL, facultatif) et, sur une ligne, l'exploitant (AlterEgo SAS, RCS) et sa carte T.
 // Le pré-rendu (scripts/prerender.mjs) reproduit le même balisage.
 

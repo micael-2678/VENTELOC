@@ -1,4 +1,4 @@
-"""Mode test (docs/refonte-2026-10/MODE-TEST-ET-APP.md, partie B) : routes /test/* fermées hors mode test, GET /config,
+"""Mode test (docs/venteloc/MODE-TEST.md) : routes /test/* fermées hors mode test, GET /config,
 capture des e-mails (et non-envoi), codes et liens renvoyés en clair seulement en mode test, identité et e-mail simulés,
 contrôles de publication assouplis, registre des mandats et factures de test séparés, mention « DOCUMENT DE TEST » dans les
 textes et les PDF, données de démonstration idempotentes, connexion rapide, boîte mail de test, sitemap sans annonce de

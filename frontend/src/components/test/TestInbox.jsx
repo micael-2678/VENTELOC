@@ -6,7 +6,7 @@ import { apiErrorMessage } from '@/components/account/errors';
 import { BTN_QUIET, BTN_SECONDARY } from '@/components/shared/buttonStyles';
 import TestPanelSection from '@/components/test/TestPanelSection';
 
-// Boîte mail de test (MODE-TEST-ET-APP.md §B.2.10, §B.3) : e-mails capturés au lieu d'être envoyés.
+// Boîte mail de test (MODE-TEST.md §2.10, §B.3) : e-mails capturés au lieu d'être envoyés.
 // GET /test/emails?limit=&to= → [{id, to, from, subject, created_at}] (X-Total-Count) ; GET /test/emails/{id} → html ;
 // DELETE /test/emails (admin). L'aperçu est affiché dans un iframe sandbox="" (ni script, ni formulaire, ni navigation
 // du parent) ; les liens de l'e-mail (confirmation, réinitialisation…) sont repris en dessous pour être ouverts.

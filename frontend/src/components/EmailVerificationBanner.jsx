@@ -10,7 +10,7 @@ import { confirmEmailNow } from '@/components/test/testActions';
 // Bandeau « Confirmez votre adresse » (SPEC §4.1) : affiché par App.js tant que user.email_verified === false,
 // et par n'importe quelle page qui reçoit un 403 {code:'email_not_verified'} (voir isEmailNotVerifiedError).
 // Renvoi de l'e-mail : POST /auth/resend-verification (1 par minute), compte à rebours local.
-// Mode test (MODE-TEST-ET-APP.md §B.3) : bouton « Confirmer maintenant (mode test) » → POST /test/confirm-email.
+// Mode test (MODE-TEST.md §3) : bouton « Confirmer maintenant (mode test) » → POST /test/confirm-email.
 
 export { isEmailNotVerifiedError };
 
